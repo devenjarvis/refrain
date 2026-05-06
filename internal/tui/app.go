@@ -375,6 +375,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.audioPlayer.Play()
 				}
 			}
+		} else if a.focusModeActive && a.focusSessionMinutes > 0 &&
+			a.dashboard.panelFocus != focusLaunch &&
+			time.Since(a.sessionStart) >= time.Duration(a.focusSessionMinutes)*time.Minute {
+			// Auto-enter break when the work block elapses. The asymmetry
+			// with break-end (which waits for explicit `b`) is intentional:
+			// end-of-block SHOULD interrupt the user — that's the whole
+			// point of the timer — whereas end-of-break should not drag
+			// them back from the keyboard. Deferred while in focusLaunch
+			// (fullscreen agent terminal); fires the moment they pop back.
+			a.focusBreakMode = true
+			a.focusBreakStart = time.Now().Round(0)
+			a.focusBreakShortWarning = false
+			a.focusBreakTimerUp = false
+			a.focusBreakAnimFrame = 0
+			// Bypass focus-mode chime suppression — same rationale as
+			// the break-end branch above.
+			if a.audioPlayer != nil {
+				a.audioPlayer.Play()
+			}
 		}
 		a.refreshAgentList()
 		// Detect Active->Idle transitions for diff-stats refresh. Chime
@@ -2627,16 +2646,7 @@ func (a App) View() tea.View {
 					hints = []keyHint{{key: "b", desc: "exit early"}}
 				}
 			} else if a.focusSessionMinutes > 0 {
-				elapsed := time.Since(a.sessionStart)
-				if elapsed >= time.Duration(a.focusSessionMinutes)*time.Minute {
-					breakHint := keyHint{
-						key:  "⌛",
-						desc: fmt.Sprintf("%dm — [b] take a break", a.focusSessionMinutes),
-					}
-					hints = append([]keyHint{breakHint}, hints...)
-				} else {
-					hints = append(hints, keyHint{key: "b", desc: "take a break"})
-				}
+				hints = append(hints, keyHint{key: "b", desc: "take a break"})
 			}
 		}
 		// Repo picker overlay: replace body with centered picker when active.
