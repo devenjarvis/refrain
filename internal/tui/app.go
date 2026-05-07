@@ -125,7 +125,7 @@ type App struct {
 	appStart               time.Time // set once at init; never reset; used for total session duration in wellness log
 	sessionStart           time.Time // per-block work timer; reset on each break completion
 	lastReviewAt           time.Time
-	newAgentPending        bool
+	agentLimitModalActive  bool
 	focusSessionMinutes    int          // cached from resolved global settings
 	focusBreakMinutes      int          // cached from resolved global settings
 	focusActiveIdx         int          // index into allInProgressSessions()
@@ -1030,10 +1030,12 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 
-		// Clear the agent-limit pending flag on any key that isn't n.
-		// Done here (before focus-mode early returns) so navigation keys clear it too.
-		if a.newAgentPending && msg.String() != "n" {
-			a.newAgentPending = false
+		// Agent-limit modal: any key other than 'n' dismisses without navigating.
+		// 'n' falls through to the normal handler, which sees the flag still set
+		// and proceeds with spawn (the existing two-press guard logic below).
+		if a.agentLimitModalActive && msg.String() != "n" {
+			a.agentLimitModalActive = false
+			return a, nil
 		}
 
 		// Clear the backlog warning flag on any key that isn't n.
@@ -1174,12 +1176,11 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// path before opening the picker.
 					resolved := a.resolvedCache[a.activeRepo]
 					if resolved.MaxConcurrentAgents > 0 && a.activeAgentCount() >= resolved.MaxConcurrentAgents {
-						if !a.newAgentPending {
-							a.newAgentPending = true
-							a.setError(fmt.Sprintf("n again to override — %d+ agents shown to reduce productivity", resolved.MaxConcurrentAgents))
+						if !a.agentLimitModalActive {
+							a.agentLimitModalActive = true
 							return a, nil
 						}
-						a.newAgentPending = false
+						a.agentLimitModalActive = false
 					}
 					counts := make(map[string]int, len(a.cfg.Repos))
 					for _, repo := range a.cfg.Repos {
@@ -1316,13 +1317,12 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.focusModeActive {
 				resolved := a.resolvedCache[repoPath]
 				if resolved.MaxConcurrentAgents > 0 && a.activeAgentCount() >= resolved.MaxConcurrentAgents {
-					if !a.newAgentPending {
-						a.newAgentPending = true
-						a.setError(fmt.Sprintf("n again to override — %d+ agents shown to reduce productivity", resolved.MaxConcurrentAgents))
+					if !a.agentLimitModalActive {
+						a.agentLimitModalActive = true
 						return a, nil
 					}
-					// Second press: proceed, clear pending flag.
-					a.newAgentPending = false
+					// Second press: proceed, clear modal flag.
+					a.agentLimitModalActive = false
 				}
 
 				// Soft review-backlog limit.
@@ -2689,6 +2689,36 @@ func (a App) View() tea.View {
 			} else if a.focusSessionMinutes > 0 {
 				hints = append(hints, keyHint{key: "b", desc: "take a break"})
 			}
+		}
+		// Agent-limit modal overlay: replace body with centered modal when active.
+		if a.agentLimitModalActive {
+			modalW := a.width / 2
+			if modalW > 60 {
+				modalW = 60
+			}
+			if modalW < 40 {
+				modalW = 40
+			}
+			activeCount := a.activeAgentCount()
+			limitLine := StyleWarning.Render(fmt.Sprintf(
+				"You're already running %d agents — beyond ~3, oversight cost exceeds output value.",
+				activeCount,
+			))
+			overlayContent := lipgloss.JoinVertical(
+				lipgloss.Left,
+				StyleTitle.Render("Focus limit reached"),
+				"",
+				limitLine,
+				"",
+				"Press [n] again to spawn anyway",
+				"Any other key to cancel",
+			)
+			overlay := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				Padding(0, 1).
+				Width(modalW).
+				Render(overlayContent)
+			body = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, overlay)
 		}
 		statusbar := renderStatusBar(hints, a.width)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, statusbar)

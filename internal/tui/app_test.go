@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1666,7 +1667,7 @@ func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 }
 
 // TestSoftAgentLimitGuard verifies the two-press 'n' guard in focus mode:
-// first press shows a warning and sets newAgentPending; second press proceeds.
+// first press shows the modal and sets agentLimitModalActive; second press proceeds.
 func TestSoftAgentLimitGuard(t *testing.T) {
 	requireClaude(t)
 	dir, err := os.MkdirTemp("", "baton-softlimit-*")
@@ -1725,7 +1726,7 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 	// Enable focus mode.
 	app.focusModeActive = true
 
-	// First 'n' press: should set newAgentPending and show error, not create agent.
+	// First 'n' press: should set agentLimitModalActive and not create agent.
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
 	if cmd != nil {
@@ -1736,30 +1737,51 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 			t.Fatal("Expected no agent creation on first 'n' press at limit")
 		}
 	}
-	if !app.newAgentPending {
-		t.Fatal("Expected newAgentPending=true after first 'n' at limit")
+	if !app.agentLimitModalActive {
+		t.Fatal("Expected agentLimitModalActive=true after first 'n' at limit")
 	}
-	if app.err == "" {
-		t.Fatal("Expected warning message after first 'n' at limit")
+	if v := app.View(); !strings.Contains(v.Content, "Focus limit reached") {
+		t.Fatalf("Expected rendered View to contain 'Focus limit reached' modal title; got:\n%s", v.Content)
 	}
 
-	// Second 'n' press: should clear pending and proceed with creation.
+	// Second 'n' press: should clear modal and proceed with creation.
 	model, cmd = app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
-	if app.newAgentPending {
-		t.Fatal("Expected newAgentPending=false after second 'n'")
+	if app.agentLimitModalActive {
+		t.Fatal("Expected agentLimitModalActive=false after second 'n'")
+	}
+	if v := app.View(); strings.Contains(v.Content, "Focus limit reached") {
+		t.Fatal("Expected rendered View to NOT contain 'Focus limit reached' after override")
 	}
 	// cmd should be non-nil (agent creation is dispatched).
 	if cmd == nil {
 		t.Fatal("Expected non-nil cmd from second 'n' press (agent creation)")
 	}
 
-	// Any other key press should clear newAgentPending.
-	app.newAgentPending = true
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	// Any other key press should dismiss the modal without spawning and without
+	// performing its normal action (e.g. 'j' must not move the focus cursor).
+	app.agentLimitModalActive = true
+	beforeIdx := app.focusActiveIdx
+	beforeQueue := app.focusQueueIndex
+	beforeSection := app.focusCursorSection
+	model, dismissCmd := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.newAgentPending {
-		t.Fatal("Expected newAgentPending cleared by non-n key press")
+	if app.agentLimitModalActive {
+		t.Fatal("Expected agentLimitModalActive cleared by non-n key press")
+	}
+	if dismissCmd != nil {
+		if msg := dismissCmd(); msg != nil {
+			if _, ok := msg.(createResultMsg); ok {
+				t.Fatal("Expected no agent creation when dismissing modal with 'j'")
+			}
+		}
+	}
+	if v := app.View(); strings.Contains(v.Content, "Focus limit reached") {
+		t.Fatal("Expected rendered View to NOT contain 'Focus limit reached' after cancel")
+	}
+	if app.focusActiveIdx != beforeIdx || app.focusQueueIndex != beforeQueue || app.focusCursorSection != beforeSection {
+		t.Fatalf("Expected focus cursor unchanged after dismiss key; before=(idx=%d,q=%d,sec=%v) after=(idx=%d,q=%d,sec=%v)",
+			beforeIdx, beforeQueue, beforeSection, app.focusActiveIdx, app.focusQueueIndex, app.focusCursorSection)
 	}
 }
 
@@ -1825,7 +1847,7 @@ func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 	// Enable focus mode.
 	app.focusModeActive = true
 
-	// First 'n' press: should warn and set newAgentPending; picker must NOT open.
+	// First 'n' press: should show modal and set agentLimitModalActive; picker must NOT open.
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
 	if cmd != nil {
@@ -1834,21 +1856,21 @@ func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 			t.Fatal("Expected no agent creation on first 'n' press at limit")
 		}
 	}
-	if !app.newAgentPending {
-		t.Fatal("Expected newAgentPending=true after first 'n' at limit")
+	if !app.agentLimitModalActive {
+		t.Fatal("Expected agentLimitModalActive=true after first 'n' at limit")
 	}
-	if app.err == "" {
-		t.Fatal("Expected warning message after first 'n' at limit")
+	if v := app.View(); !strings.Contains(v.Content, "Focus limit reached") {
+		t.Fatalf("Expected rendered View to contain 'Focus limit reached' modal title; got:\n%s", v.Content)
 	}
 	if app.view == ViewRepoPicker {
 		t.Fatal("Expected view != ViewRepoPicker on first 'n' at limit")
 	}
 
-	// Second 'n' press: should clear pending and open the picker.
+	// Second 'n' press: should clear modal and open the picker.
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
-	if app.newAgentPending {
-		t.Fatal("Expected newAgentPending=false after second 'n'")
+	if app.agentLimitModalActive {
+		t.Fatal("Expected agentLimitModalActive=false after second 'n'")
 	}
 	if app.view != ViewRepoPicker {
 		t.Fatal("Expected view == ViewRepoPicker after second 'n' override")
