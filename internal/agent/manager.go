@@ -76,18 +76,19 @@ type Manager struct {
 }
 
 // haikuNamePerAttemptTimeout bounds how long a single Haiku summarization
-// subprocess may run before it's cancelled. Cold starts of `claude -p`
-// (settings discovery, MCP probe, possible auth refresh) routinely exceed
-// 15s in real-world repos, so each attempt gets a generous budget.
+// subprocess may run before it's cancelled. With buildClaudeHaikuArgs's
+// always-on speedup flags (and --bare when ANTHROPIC_API_KEY is set) cold
+// starts typically drop well under 10s, but 45s leaves slack for the long
+// tail without truncating retry attempts inside the overall budget.
 //
 // Declared as var (not const) so tests can swap to fast values via
 // setHaikuRetryForTesting.
-var haikuNamePerAttemptTimeout = 30 * time.Second
+var haikuNamePerAttemptTimeout = 45 * time.Second
 
 // haikuNameOverallTimeout caps the total wall-clock time spent across all
-// retry attempts. On timeout the random branch persists and the next
-// actionable prompt retries.
-var haikuNameOverallTimeout = 75 * time.Second
+// retry attempts. Sized to cover 3 × per-attempt + 1s + 3s backoff. On
+// timeout the random branch persists and the next actionable prompt retries.
+var haikuNameOverallTimeout = 140 * time.Second
 
 // haikuNameAttempts is the maximum number of times callNamerWithRetry will
 // invoke the namer per UserPromptSubmit. Each attempt is bounded by
@@ -98,6 +99,19 @@ var haikuNameAttempts = 3
 // haikuNameBackoff is the wait between attempts N and N+1. Linear small
 // backoff is enough at this scale — exponential is overkill for 3 attempts.
 var haikuNameBackoff = []time.Duration{1 * time.Second, 3 * time.Second}
+
+// haikuSummaryPerAttemptTimeout / OverallTimeout / Attempts / Backoff bound the
+// task-summary retry loop. Same shape as the branch-namer budgets but a
+// shorter overall ceiling: summaries are advisory display text, so we don't
+// want to keep a retry sequence alive for as long as the rename flow does.
+//
+// Declared as vars so tests can swap to fast values via TestMain.
+var (
+	haikuSummaryPerAttemptTimeout = 45 * time.Second
+	haikuSummaryOverallTimeout    = 120 * time.Second
+	haikuSummaryAttempts          = 3
+	haikuSummaryBackoff           = []time.Duration{1 * time.Second, 3 * time.Second}
+)
 
 // NewManager creates a new agent manager for the given repo.
 //
@@ -212,10 +226,15 @@ func (m *Manager) dispatchHookEvents() {
 		}
 
 		if e.Kind == hook.KindUserPromptSubmit {
-			m.maybeRenameFromPrompt(sess, a, e.Prompt)
+			// Capture the original prompt before dispatching the rename so
+			// retries on later UserPromptSubmit events drive the namer with
+			// the user's first intent, not the most recent follow-up prompt.
+			// SetOriginalPrompt is idempotent — only the first non-empty
+			// actionable prompt sticks.
 			if IsActionablePrompt(e.Prompt) {
 				sess.SetOriginalPrompt(e.Prompt)
 			}
+			m.maybeRenameFromPrompt(sess, a, e.Prompt)
 			m.maybeStartTaskSummary(sess)
 		}
 	}
@@ -246,6 +265,14 @@ func (m *Manager) maybeRenameFromPrompt(sess *Session, a *Agent, prompt string) 
 	// aren't blocked by an in-flight gate that will never be released.
 	if !IsActionablePrompt(prompt) {
 		return
+	}
+
+	// Prefer the session's original prompt (captured by the dispatcher on the
+	// first actionable UserPromptSubmit) so retries after a failed first
+	// rename drive the namer with the user's original intent rather than
+	// whatever follow-up prompt happened to land next.
+	if original := sess.OriginalPrompt(); original != "" {
+		prompt = original
 	}
 
 	m.mu.RLock()
@@ -302,7 +329,7 @@ func (m *Manager) maybeRenameFromPrompt(sess *Session, a *Agent, prompt string) 
 		repoPath := m.repoPath
 		sessID := sess.ID
 		logAttempt := func(attempt int, s string, err error, took time.Duration) {
-			haikuLogAttempt(repoPath, sessID, attempt, s, err, took)
+			haikuLogAttempt(repoPath, sessID, haikuKindBranch, attempt, s, err, took)
 		}
 
 		start := time.Now()
@@ -312,16 +339,16 @@ func (m *Manager) maybeRenameFromPrompt(sess *Session, a *Agent, prompt string) 
 			logAttempt,
 		)
 		if err != nil || suffix == "" {
-			haikuLogOutcome(repoPath, sessID, suffix, err, time.Since(start))
+			haikuLogOutcome(repoPath, sessID, haikuKindBranch, suffix, err, time.Since(start))
 			return
 		}
 
 		newBranch := config.ExpandBranchPrefix(prefix) + suffix
 		if !m.renameSessionBranch(sess, newBranch) {
-			haikuLogOutcome(repoPath, sessID, "", fmt.Errorf("git rename failed or session closed (target=%s)", newBranch), time.Since(start))
+			haikuLogOutcome(repoPath, sessID, haikuKindBranch, "", fmt.Errorf("git rename failed or session closed (target=%s)", newBranch), time.Since(start))
 			return
 		}
-		haikuLogOutcome(repoPath, sessID, suffix, nil, time.Since(start))
+		haikuLogOutcome(repoPath, sessID, haikuKindBranch, suffix, nil, time.Since(start))
 		// The session display name updates to the Haiku-derived task name so
 		// the sidebar separator shows what the session is working on. Agents
 		// keep their stable track identities (Track 1, Track 2, ...) and are
@@ -338,6 +365,14 @@ func (m *Manager) maybeRenameFromPrompt(sess *Session, a *Agent, prompt string) 
 // slash-only and empty prompts that never stored an original prompt are
 // silently skipped. Session.TryStartTaskSummary gates double-dispatch so a
 // second prompt arriving while the summarizer is running is a no-op.
+//
+// Failures are retried by callHaikuWithRetry up to haikuSummaryAttempts times,
+// with each attempt + the final outcome written to .baton/logs/haiku.log
+// under kind=summary so a single shared file traces both the branch-namer
+// and the summarizer flows. The DefaultTaskSummarizer's silent ("", nil)
+// return contract is preserved at the public boundary: this function always
+// stores the summary (possibly "") via Session.SetTaskSummary so the
+// summarizing flag clears and the session moves on.
 func (m *Manager) maybeStartTaskSummary(sess *Session) {
 	if sess == nil {
 		return
@@ -362,7 +397,7 @@ func (m *Manager) maybeStartTaskSummary(sess *Session) {
 		defer m.watchers.Done()
 		defer sess.finishTaskSummary()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), haikuSummaryOverallTimeout)
 		defer cancel()
 
 		// Cancel the summarizer subprocess if the manager shuts down mid-call.
@@ -376,7 +411,35 @@ func (m *Manager) maybeStartTaskSummary(sess *Session) {
 			}
 		}()
 
-		summary, _ := ts(ctx, prompt)
+		repoPath := m.repoPath
+		sessID := sess.ID
+		logAttempt := func(attempt int, result string, err error, took time.Duration) {
+			haikuLogAttempt(repoPath, sessID, haikuKindSummary, attempt, result, err, took)
+		}
+
+		// Bind the summarizer to a per-attempt callable. The inner subprocess
+		// is invoked via the configured TaskSummarizer so tests can stub
+		// failures via Manager.SetTaskSummarizer; the helper sees real
+		// (ctx, error) results and can decide whether to retry.
+		call := func(attemptCtx context.Context) (string, error) {
+			return ts(attemptCtx, prompt)
+		}
+
+		start := time.Now()
+		summary, err := callHaikuWithRetry(
+			ctx, call, m.done,
+			haikuSummaryAttempts, haikuSummaryPerAttemptTimeout, haikuSummaryBackoff,
+			false, // empty result is retryable for summaries
+			logAttempt,
+		)
+		haikuLogOutcome(repoPath, sessID, haikuKindSummary, summary, err, time.Since(start))
+
+		// Always set the summary so finishTaskSummary clears the flag and the
+		// session never sits indefinitely with a stale "summarizing" state.
+		// Failures coerce to "" — callers treat that as "no summary available".
+		if err != nil {
+			summary = ""
+		}
 		sess.SetTaskSummary(summary)
 	}()
 }

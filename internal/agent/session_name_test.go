@@ -2,6 +2,7 @@ package agent
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/devenjarvis/baton/internal/git"
@@ -20,7 +21,10 @@ func TestSlugify(t *testing.T) {
 		{"123-start", "123-start"},
 		{"", ""},
 		{"!@#$%", ""},
-		{"a very long string that exceeds the forty character limit for slugs yes", "a-very-long-string-that-exceeds-the-fort"},
+		// Truncation at the last "-" boundary inside the first 40 chars.
+		// The 41-byte search window for this input ends in "...the-forty",
+		// so the last "-" lands at index 35 and we cut to "a-very-long-string-that-exceeds-the".
+		{"a very long string that exceeds the forty character limit for slugs yes", "a-very-long-string-that-exceeds-the"},
 	}
 
 	for _, tc := range tests {
@@ -28,6 +32,35 @@ func TestSlugify(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("slugify(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestSlugifyWordBoundaryTruncation(t *testing.T) {
+	// When the slug is exactly 41 chars and the byte at index 40 is "-",
+	// the cut keeps the full 40 chars (the word ends naturally at the limit).
+	// "focus-mode-input-leak-but-also-something" is 40 chars, followed by "-"
+	// in the original input — so we keep all 40.
+	if got := slugify("focus mode input leak but also something else here"); got != "focus-mode-input-leak-but-also-something" {
+		t.Errorf("boundary-aligned 40-char truncation: got %q", got)
+	}
+
+	// Mid-word truncation: input collapses to 43 chars where the byte at index
+	// 40 is mid-word ("i" of "summari..."), so we trim back to the last "-"
+	// inside the first 40 chars.
+	if got := slugify("i don t see a task description to summarize"); got != "i-don-t-see-a-task-description-to" {
+		t.Errorf("mid-word truncation: got %q", got)
+	}
+
+	// Hard-cut fallback: a 50-char run with no "-" in the prefix.
+	long := strings.Repeat("x", 50)
+	if got := slugify(long); got != strings.Repeat("x", 40) {
+		t.Errorf("hard-cut fallback: got %q", got)
+	}
+
+	// Slugs at or below 40 chars are unchanged.
+	short := "this-slug-fits-within-the-forty-char-cap"
+	if got := slugify(short); got != short {
+		t.Errorf("under-limit slug should be unchanged: got %q", got)
 	}
 }
 

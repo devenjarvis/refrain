@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 		}
 	}
 
-	// Production retry config (30s per attempt, 75s overall, 1s+3s backoff)
+	// Production retry config (45s per attempt, 140s overall, 1s+3s backoff)
 	// is realistic for a `claude -p` cold start but glacial in unit tests.
 	// Shrink to fast-but-still-realistic values so tests still exercise the
 	// retry path without padding wall-clock time. Unit tests of the wrapper
@@ -40,6 +40,12 @@ func TestMain(m *testing.M) {
 	haikuNamePerAttemptTimeout = 500 * time.Millisecond
 	haikuNameOverallTimeout = 3 * time.Second
 	haikuNameBackoff = []time.Duration{}
+
+	// Same shrink for the task-summary retry budget so the integration tests
+	// don't sit through real-world backoffs.
+	haikuSummaryPerAttemptTimeout = 500 * time.Millisecond
+	haikuSummaryOverallTimeout = 3 * time.Second
+	haikuSummaryBackoff = []time.Duration{}
 
 	os.Exit(m.Run())
 }

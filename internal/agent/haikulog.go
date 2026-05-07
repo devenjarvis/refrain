@@ -57,34 +57,47 @@ func haikuLog(repoPath, line string) {
 	_, _ = f.WriteString(line)
 }
 
+// Haiku flow kinds used as the `kind=` field in diagnostic log lines so a
+// shared haiku.log distinguishes branch-naming from task-summary attempts.
+const (
+	haikuKindBranch  = "branch"
+	haikuKindSummary = "summary"
+)
+
 // haikuLogAttempt formats and writes one per-attempt diagnostic line.
-func haikuLogAttempt(repoPath, sessionID string, attempt int, suffix string, err error, took time.Duration) {
+// kind names which haiku flow produced the line (haikuKindBranch /
+// haikuKindSummary). For branch flows the result column is labeled `suffix`;
+// for summaries it is labeled `result`.
+func haikuLogAttempt(repoPath, sessionID, kind string, attempt int, result string, err error, took time.Duration) {
+	resultKey := haikuResultKey(kind)
 	status := "err"
 	detail := ""
 	switch {
 	case err != nil:
 		detail = fmt.Sprintf(" err=%q", err.Error())
-	case suffix == "":
-		detail = " err=\"empty suffix\""
+	case result == "":
+		detail = fmt.Sprintf(" err=\"empty %s\"", resultKey)
 	default:
 		status = "ok"
-		detail = fmt.Sprintf(" suffix=%s", suffix)
+		detail = fmt.Sprintf(" %s=%s", resultKey, result)
 	}
 	haikuLog(repoPath, fmt.Sprintf(
-		"%s session=%s attempt=%d status=%s took=%s%s",
+		"%s session=%s kind=%s attempt=%d status=%s took=%s%s",
 		time.Now().UTC().Format(time.RFC3339),
-		sessionID, attempt, status, took.Round(time.Millisecond), detail,
+		sessionID, kind, attempt, status, took.Round(time.Millisecond), detail,
 	))
 }
 
 // haikuLogOutcome formats and writes one final-outcome diagnostic line for
-// the whole rename sequence (across all retries).
-func haikuLogOutcome(repoPath, sessionID, suffix string, err error, took time.Duration) {
-	if err == nil && suffix != "" {
+// the whole haiku sequence (across all retries). See haikuLogAttempt for
+// the meaning of kind.
+func haikuLogOutcome(repoPath, sessionID, kind, result string, err error, took time.Duration) {
+	resultKey := haikuResultKey(kind)
+	if err == nil && result != "" {
 		haikuLog(repoPath, fmt.Sprintf(
-			"%s session=%s status=ok suffix=%s took=%s",
+			"%s session=%s kind=%s status=ok %s=%s took=%s",
 			time.Now().UTC().Format(time.RFC3339),
-			sessionID, suffix, took.Round(time.Millisecond),
+			sessionID, kind, resultKey, result, took.Round(time.Millisecond),
 		))
 		return
 	}
@@ -93,8 +106,18 @@ func haikuLogOutcome(repoPath, sessionID, suffix string, err error, took time.Du
 		detail = err.Error()
 	}
 	haikuLog(repoPath, fmt.Sprintf(
-		"%s session=%s status=fail err=%q took=%s",
+		"%s session=%s kind=%s status=fail err=%q took=%s",
 		time.Now().UTC().Format(time.RFC3339),
-		sessionID, detail, took.Round(time.Millisecond),
+		sessionID, kind, detail, took.Round(time.Millisecond),
 	))
+}
+
+// haikuResultKey picks the result-column label for the given kind so log
+// lines stay greppable per flow ("suffix=" for branches, "result=" for
+// summaries which can contain spaces).
+func haikuResultKey(kind string) string {
+	if kind == haikuKindBranch {
+		return "suffix"
+	}
+	return "result"
 }

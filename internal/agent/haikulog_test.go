@@ -96,39 +96,75 @@ func TestHaikuLog_ConcurrentWritesNoInterleaving(t *testing.T) {
 
 func TestHaikuLogAttempt_FormatsOkAndErr(t *testing.T) {
 	repo := t.TempDir()
-	haikuLogAttempt(repo, "sess-1", 1, "", errors.New("boom"), 100*time.Millisecond)
-	haikuLogAttempt(repo, "sess-1", 2, "good-slug", nil, 200*time.Millisecond)
+	haikuLogAttempt(repo, "sess-1", haikuKindBranch, 1, "", errors.New("boom"), 100*time.Millisecond)
+	haikuLogAttempt(repo, "sess-1", haikuKindBranch, 2, "good-slug", nil, 200*time.Millisecond)
 
 	body, err := os.ReadFile(haikuLogPath(repo))
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
 	got := string(body)
-	if !strings.Contains(got, "session=sess-1 attempt=1 status=err") {
+	if !strings.Contains(got, "session=sess-1 kind=branch attempt=1 status=err") {
 		t.Errorf("missing err line: %q", got)
 	}
 	if !strings.Contains(got, `err="boom"`) {
 		t.Errorf("missing quoted err detail: %q", got)
 	}
-	if !strings.Contains(got, "session=sess-1 attempt=2 status=ok took=200ms suffix=good-slug") {
+	if !strings.Contains(got, "session=sess-1 kind=branch attempt=2 status=ok took=200ms suffix=good-slug") {
 		t.Errorf("missing ok line: %q", got)
 	}
 }
 
-func TestHaikuLogOutcome_FormatsBothPaths(t *testing.T) {
+func TestHaikuLogAttempt_SummaryKindUsesResultLabel(t *testing.T) {
 	repo := t.TempDir()
-	haikuLogOutcome(repo, "sess-2", "", errors.New("nope"), 500*time.Millisecond)
-	haikuLogOutcome(repo, "sess-2", "name", nil, 1500*time.Millisecond)
+	haikuLogAttempt(repo, "sess-x", haikuKindSummary, 1, "fix the broken login", nil, 50*time.Millisecond)
+	haikuLogAttempt(repo, "sess-x", haikuKindSummary, 2, "", errors.New("nope"), 50*time.Millisecond)
 
 	body, err := os.ReadFile(haikuLogPath(repo))
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
 	got := string(body)
-	if !strings.Contains(got, `status=fail err="nope" took=500ms`) {
+	if !strings.Contains(got, "kind=summary attempt=1 status=ok took=50ms result=fix the broken login") {
+		t.Errorf("missing summary ok line: %q", got)
+	}
+	if !strings.Contains(got, "kind=summary attempt=2 status=err") {
+		t.Errorf("missing summary err line: %q", got)
+	}
+}
+
+func TestHaikuLogOutcome_FormatsBothPaths(t *testing.T) {
+	repo := t.TempDir()
+	haikuLogOutcome(repo, "sess-2", haikuKindBranch, "", errors.New("nope"), 500*time.Millisecond)
+	haikuLogOutcome(repo, "sess-2", haikuKindBranch, "name", nil, 1500*time.Millisecond)
+
+	body, err := os.ReadFile(haikuLogPath(repo))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	got := string(body)
+	if !strings.Contains(got, `kind=branch status=fail err="nope" took=500ms`) {
 		t.Errorf("missing fail line: %q", got)
 	}
-	if !strings.Contains(got, "status=ok suffix=name took=1.5s") {
+	if !strings.Contains(got, "kind=branch status=ok suffix=name took=1.5s") {
 		t.Errorf("missing ok line: %q", got)
+	}
+}
+
+func TestHaikuLogOutcome_SummaryKind(t *testing.T) {
+	repo := t.TempDir()
+	haikuLogOutcome(repo, "sess-3", haikuKindSummary, "", errors.New("dead"), 25*time.Millisecond)
+	haikuLogOutcome(repo, "sess-3", haikuKindSummary, "do the thing", nil, 75*time.Millisecond)
+
+	body, err := os.ReadFile(haikuLogPath(repo))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	got := string(body)
+	if !strings.Contains(got, `kind=summary status=fail err="dead" took=25ms`) {
+		t.Errorf("missing summary fail line: %q", got)
+	}
+	if !strings.Contains(got, "kind=summary status=ok result=do the thing took=75ms") {
+		t.Errorf("missing summary ok line: %q", got)
 	}
 }

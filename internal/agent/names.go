@@ -48,14 +48,25 @@ func RandomName(existing []string) string {
 var nonAlnumRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
 // slugify lowercases s, collapses runs of non-alphanumeric characters to "-",
-// trims leading/trailing "-", and truncates to 40 characters.
+// trims leading/trailing "-", and truncates at a "-" word boundary at or
+// before index 40. If the byte at index 40 is itself a "-" the cut keeps the
+// full 40 chars (the word ends naturally at the limit); otherwise we trim
+// back to the last "-" inside the first 40 chars. Falls back to a hard cut
+// + right-trim when no boundary exists in the prefix.
 // Returns "" if the result is empty or doesn't start with [a-zA-Z0-9].
 func slugify(s string) string {
 	slug := nonAlnumRe.ReplaceAllString(strings.ToLower(s), "-")
 	slug = strings.Trim(slug, "-")
 	if len(slug) > 40 {
-		slug = slug[:40]
-		slug = strings.TrimRight(slug, "-")
+		// Include the byte at index 40 in the search window so a slug whose
+		// 41st byte is '-' is recognised as already ending on a boundary at
+		// index 40, rather than being trimmed back to the previous '-'.
+		window := slug[:41]
+		if cut := strings.LastIndexByte(window, '-'); cut > 0 {
+			slug = slug[:cut]
+		} else {
+			slug = strings.TrimRight(slug[:40], "-")
+		}
 	}
 	if slug == "" {
 		return ""

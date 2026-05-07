@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1983,5 +1985,216 @@ func TestTaskSummarizerShutdownCancelsInflight(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Shutdown did not return — summarizer goroutine likely leaked")
+	}
+}
+
+// TestSmartBranchRename_RetryUsesOriginalPrompt verifies that when the namer
+// fails on the first prompt and a second UserPromptSubmit arrives with
+// different text, the namer is re-invoked with the ORIGINAL prompt text rather
+// than the second prompt. This preserves the user's original intent across
+// retries (which would otherwise be lost when Haiku exhausted its first-prompt
+// retry budget and a follow-up prompt landed before the gate cleared).
+func TestSmartBranchRename_RetryUsesOriginalPrompt(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	failing := &stubNamer{err: errors.New("haiku transient")}
+	mgr.SetBranchNamer(failing.fn())
+
+	cfg := Config{Name: "retry-orig-prompt", Task: "test", Rows: 24, Cols: 80}
+	sess, ag, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+		return exec.Command("bash", "-c", "sleep 5")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-mgr.Events():
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for EventCreated")
+	}
+
+	const originalPrompt = "implement focus mode pomodoro timer"
+	if err := hook.SendEvent(mgr.HookSocketPath(), hook.Event{
+		Kind:    hook.KindUserPromptSubmit,
+		AgentID: ag.ID,
+		Prompt:  originalPrompt,
+	}); err != nil {
+		t.Fatalf("SendEvent first: %v", err)
+	}
+	// Wait for the namer to be called at least once AND for the rename
+	// goroutine to release the in-flight gate. Polling both conditions
+	// avoids a timing race on slow CI hosts where a fixed sleep would let
+	// the follow-up prompt arrive before TryStartRename is reset.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if failing.calls.Load() >= 1 && !sess.IsRenaming() {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if sess.IsRenaming() {
+		t.Fatal("rename gate did not clear after first-prompt failure")
+	}
+	if sess.HasClaudeName() {
+		t.Fatal("Session.HasClaudeName should stay false after namer error")
+	}
+
+	// Swap in a stub that records its instruction so we can assert which
+	// prompt drove the retry.
+	good := &stubNamer{result: "focus-mode-pomodoro"}
+	mgr.SetBranchNamer(good.fn())
+
+	const followUpPrompt = "now also wire up break reminders"
+	if err := hook.SendEvent(mgr.HookSocketPath(), hook.Event{
+		Kind:    hook.KindUserPromptSubmit,
+		AgentID: ag.ID,
+		Prompt:  followUpPrompt,
+	}); err != nil {
+		t.Fatalf("SendEvent retry: %v", err)
+	}
+
+	got := waitForBranch(t, sess, "baton/focus-mode-pomodoro", 2*time.Second)
+	if got != "baton/focus-mode-pomodoro" {
+		t.Errorf("retry branch = %q, want baton/focus-mode-pomodoro", got)
+	}
+	instr := good.instruction()
+	if !strings.Contains(instr, originalPrompt) {
+		t.Errorf("retry instruction did not include original prompt:\n got=%q\nwant substring %q", instr, originalPrompt)
+	}
+	if strings.Contains(instr, followUpPrompt) {
+		t.Errorf("retry instruction unexpectedly included follow-up prompt:\n got=%q", instr)
+	}
+}
+
+// TestTaskSummarizerRetriesOnError verifies that subprocess errors in the
+// summarizer trigger the retry helper, that each attempt is logged with
+// kind=summary, and that the final outcome line records the failure. The
+// session's TaskSummary stays empty (current swallow-and-coerce behavior).
+func TestTaskSummarizerRetriesOnError(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	// Stub returns an error on every call so all attempts fail.
+	var calls atomic.Int32
+	mgr.SetTaskSummarizer(func(ctx context.Context, prompt string) (string, error) {
+		calls.Add(1)
+		return "", errors.New("haiku exec failed")
+	})
+	mgr.SetBranchNamer(func(_ context.Context, _ string) (string, error) {
+		return "stub-branch", nil
+	})
+
+	cfg := Config{Name: "summary-retries", Task: "test", Rows: 24, Cols: 80}
+	sess, ag, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+		return exec.Command("bash", "-c", "sleep 5")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-mgr.Events():
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for EventCreated")
+	}
+
+	if err := hook.SendEvent(mgr.HookSocketPath(), hook.Event{
+		Kind:    hook.KindUserPromptSubmit,
+		AgentID: ag.ID,
+		Prompt:  "rewrite the websocket reconnect logic",
+	}); err != nil {
+		t.Fatalf("SendEvent: %v", err)
+	}
+
+	// Wait for HasTaskSummary to flip true: the goroutine always calls
+	// SetTaskSummary at the end so the gate clears even after exhausting retries.
+	if !waitForTaskSummary(t, sess, 5*time.Second) {
+		t.Fatal("HasTaskSummary did not become true after retries exhausted")
+	}
+	if got := sess.TaskSummary(); got != "" {
+		t.Errorf("TaskSummary = %q, want empty after retries exhausted", got)
+	}
+	if got := calls.Load(); got != int32(haikuSummaryAttempts) {
+		t.Errorf("summarizer call count = %d, want %d", got, haikuSummaryAttempts)
+	}
+
+	// Inspect the haiku log: expect attempts and a final outcome line, all
+	// tagged kind=summary.
+	body, err := os.ReadFile(haikuLogPath(repo))
+	if err != nil {
+		t.Fatalf("read haiku.log: %v", err)
+	}
+	attemptCount := 0
+	outcomeCount := 0
+	for _, line := range strings.Split(strings.TrimRight(string(body), "\n"), "\n") {
+		if !strings.Contains(line, "kind=summary") {
+			continue
+		}
+		switch {
+		case strings.Contains(line, " attempt="):
+			attemptCount++
+		case strings.Contains(line, "status=fail") || strings.Contains(line, "status=ok"):
+			outcomeCount++
+		}
+	}
+	if attemptCount != haikuSummaryAttempts {
+		t.Errorf("kind=summary attempt lines = %d, want %d\nlog:\n%s", attemptCount, haikuSummaryAttempts, body)
+	}
+	if outcomeCount != 1 {
+		t.Errorf("kind=summary outcome lines = %d, want 1\nlog:\n%s", outcomeCount, body)
+	}
+}
+
+// TestTaskSummarizerSucceedsAfterTransientError verifies that a transient
+// error on the first attempt is recovered by a successful second attempt,
+// and that the session ends up with the summary text.
+func TestTaskSummarizerSucceedsAfterTransientError(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	var calls atomic.Int32
+	mgr.SetTaskSummarizer(func(ctx context.Context, prompt string) (string, error) {
+		n := calls.Add(1)
+		if n == 1 {
+			return "", errors.New("first call flakes")
+		}
+		return "rewrite websocket reconnect", nil
+	})
+	mgr.SetBranchNamer(func(_ context.Context, _ string) (string, error) {
+		return "stub-branch", nil
+	})
+
+	cfg := Config{Name: "summary-recover", Task: "test", Rows: 24, Cols: 80}
+	sess, ag, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+		return exec.Command("bash", "-c", "sleep 5")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-mgr.Events():
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for EventCreated")
+	}
+
+	if err := hook.SendEvent(mgr.HookSocketPath(), hook.Event{
+		Kind:    hook.KindUserPromptSubmit,
+		AgentID: ag.ID,
+		Prompt:  "rewrite websocket reconnect",
+	}); err != nil {
+		t.Fatalf("SendEvent: %v", err)
+	}
+
+	if !waitForTaskSummary(t, sess, 5*time.Second) {
+		t.Fatal("HasTaskSummary did not become true")
+	}
+	if got := sess.TaskSummary(); got != "rewrite websocket reconnect" {
+		t.Errorf("TaskSummary = %q, want %q", got, "rewrite websocket reconnect")
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("summarizer call count = %d, want 2", got)
 	}
 }
