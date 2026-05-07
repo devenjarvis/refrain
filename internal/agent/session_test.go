@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -820,5 +821,90 @@ func TestSession_LastOutputTime_ZeroWhenOnlyShellAgents(t *testing.T) {
 
 	if got := s.LastOutputTime(); !got.IsZero() {
 		t.Errorf("LastOutputTime() = %v, want zero (only shell agents)", got)
+	}
+}
+
+// --- IsReviewable tests ---
+
+func makeReviewableSession(t *testing.T, statuses []Status, includeShell bool) *Session {
+	t.Helper()
+	s := newSession("id", "name", &git.WorktreeInfo{})
+	s.mu.Lock()
+	for i, st := range statuses {
+		id := fmt.Sprintf("a%d", i)
+		ag := &Agent{ID: id, IsShell: false, CreatedAt: time.Now()}
+		ag.status = st
+		s.agents[id] = ag
+	}
+	if includeShell {
+		shell := &Agent{ID: "shell", IsShell: true, CreatedAt: time.Now()}
+		shell.status = StatusActive
+		s.agents["shell"] = shell
+	}
+	s.mu.Unlock()
+	return s
+}
+
+func TestSession_IsReviewable_AllIdle(t *testing.T) {
+	s := makeReviewableSession(t, []Status{StatusIdle, StatusIdle}, false)
+	if !s.IsReviewable() {
+		t.Error("IsReviewable() = false, want true for all-idle session")
+	}
+}
+
+func TestSession_IsReviewable_MixedIdleAndActive(t *testing.T) {
+	s := makeReviewableSession(t, []Status{StatusIdle, StatusActive}, false)
+	if s.IsReviewable() {
+		t.Error("IsReviewable() = true, want false when an agent is Active")
+	}
+}
+
+func TestSession_IsReviewable_AllDone(t *testing.T) {
+	s := makeReviewableSession(t, []Status{StatusDone, StatusDone}, false)
+	if !s.IsReviewable() {
+		t.Error("IsReviewable() = false, want true for all-done session")
+	}
+}
+
+func TestSession_IsReviewable_Waiting(t *testing.T) {
+	s := makeReviewableSession(t, []Status{StatusWaiting}, false)
+	if s.IsReviewable() {
+		t.Error("IsReviewable() = true, want false for waiting session")
+	}
+}
+
+func TestSession_IsReviewable_Starting(t *testing.T) {
+	s := makeReviewableSession(t, []Status{StatusStarting}, false)
+	if s.IsReviewable() {
+		t.Error("IsReviewable() = true, want false for starting session")
+	}
+}
+
+func TestSession_IsReviewable_ShellOnly(t *testing.T) {
+	s := makeReviewableSession(t, nil, true)
+	if s.IsReviewable() {
+		t.Error("IsReviewable() = true, want false for shell-only session")
+	}
+}
+
+func TestSession_IsReviewable_NoAgents(t *testing.T) {
+	s := newSession("id", "name", &git.WorktreeInfo{})
+	if s.IsReviewable() {
+		t.Error("IsReviewable() = true, want false for no-agents session")
+	}
+}
+
+func TestSession_IsReviewable_SingleError(t *testing.T) {
+	s := makeReviewableSession(t, []Status{StatusError}, false)
+	if !s.IsReviewable() {
+		t.Error("IsReviewable() = false, want true for single-error session")
+	}
+}
+
+func TestSession_IsReviewable_IgnoresShellWhenOtherAgentsReviewable(t *testing.T) {
+	// Shell agent in StatusActive shouldn't block reviewability.
+	s := makeReviewableSession(t, []Status{StatusIdle}, true)
+	if !s.IsReviewable() {
+		t.Error("IsReviewable() = false, want true (shell agent should be ignored)")
 	}
 }

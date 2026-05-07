@@ -1,0 +1,3 @@
+### Fixed
+
+- Focus-mode `m` (mark for review) and `r` (open review) keys now work end-to-end during a normal Claude workflow. Previously `m` only fired after the user manually `/exit`'d Claude (the only path that set `DoneAt`), which meant the review queue was unreachable in typical use and `r` always saw an empty queue. `m` is now available the moment Claude finishes a turn (any non-shell agent in `Idle`/`Done`/`Error`), and both keys surface inline error messages explaining no-ops instead of failing silently. `m` also respects which section the cursor is on, and finished session cards now show a `✓ idle — press m to review` cue so the affordance is discoverable.

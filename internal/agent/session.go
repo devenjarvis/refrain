@@ -257,6 +257,32 @@ func (s *Session) Status() Status {
 	return StatusIdle
 }
 
+// IsReviewable reports whether the session is at a natural review point: it
+// has at least one non-shell agent, and every non-shell agent is in
+// {StatusIdle, StatusDone, StatusError}. Equivalently, no non-shell agent is
+// Active, Waiting, or Starting. Shell agents are ignored — they're long-lived
+// helpers, not work that produces a reviewable result. This is additive to
+// MarkDone()/DoneAt(), which still mean "process exited"; IsReviewable also
+// returns true between Claude turns when the agent is Idle but hasn't /exit'd.
+func (s *Session) IsReviewable() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	nonShell := 0
+	for _, a := range s.agents {
+		if a.IsShell {
+			continue
+		}
+		nonShell++
+		switch a.Status() {
+		case StatusIdle, StatusDone, StatusError:
+			// reviewable
+		default:
+			return false
+		}
+	}
+	return nonShell > 0
+}
+
 // AgentCount returns the number of agents in this session.
 func (s *Session) AgentCount() int {
 	s.mu.RLock()
@@ -525,6 +551,22 @@ func (s *Session) RestoreDoneAt(t time.Time) {
 // NewSessionForTest creates a Session for use in tests outside the agent package.
 func NewSessionForTest(id, name string) *Session {
 	return newSession(id, name, &git.WorktreeInfo{})
+}
+
+// AddTestAgent injects a synthetic agent with the given id/shell flag/status
+// into the session for use in tests outside the agent package. It bypasses the
+// normal PTY-spawning path so callers don't need a real subprocess to exercise
+// status-dependent session logic (e.g. IsReviewable). The status write is
+// guarded by a.mu to match the pattern of every production writer of status.
+func (s *Session) AddTestAgent(id string, isShell bool, status Status) *Agent {
+	a := &Agent{ID: id, IsShell: isShell, CreatedAt: time.Now()}
+	a.mu.Lock()
+	a.status = status
+	a.mu.Unlock()
+	s.mu.Lock()
+	s.agents[id] = a
+	s.mu.Unlock()
+	return a
 }
 
 // TaskSummary returns the session's task summary. Empty until SetTaskSummary is called.

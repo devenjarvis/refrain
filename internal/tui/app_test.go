@@ -2348,12 +2348,12 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 // view marks the session under the cursor (focusActiveIdx), not the first matching
 // session in the list.
 func TestFocusMode_MKey_IsCursorAware(t *testing.T) {
-	sessA := &agent.Session{Name: "active-a"}
+	sessA := agent.NewSessionForTest("a", "active-a")
 	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
-	sessA.MarkDone()
-	sessB := &agent.Session{Name: "active-b"}
+	sessA.AddTestAgent("a-1", false, agent.StatusIdle)
+	sessB := agent.NewSessionForTest("b", "active-b")
 	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
-	sessB.MarkDone()
+	sessB.AddTestAgent("b-1", false, agent.StatusIdle)
 
 	app := NewApp()
 	app.width = 120
@@ -2378,5 +2378,166 @@ func TestFocusMode_MKey_IsCursorAware(t *testing.T) {
 	}
 	if sessA.LifecyclePhase() != agent.LifecycleInProgress {
 		t.Errorf("expected sessA (non-cursor session) phase unchanged=InProgress, got %v", sessA.LifecyclePhase())
+	}
+}
+
+// makeFocusModeMRApp wires up an App in focus mode with one in-progress session
+// (sessA) and one ready-for-review session (sessR). Used by the m/r handler tests
+// below. The caller is responsible for adding agents to sessA via AddTestAgent.
+func makeFocusModeMRApp(t *testing.T) (App, *agent.Session, *agent.Session) {
+	t.Helper()
+	sessA := agent.NewSessionForTest("a", "active-a")
+	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
+	sessR := agent.NewSessionForTest("r", "review-r")
+	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.focusModeActive = true
+	app.dashboard.focusModeActive = true
+	app.dashboard.items = []listItem{
+		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
+		{kind: listItemSession, repoPath: "/r", session: sessA},
+		{kind: listItemSession, repoPath: "/r", session: sessR},
+	}
+	return app, sessA, sessR
+}
+
+// TestFocusMode_MKey_CursorOnReviewSection_ShowsError verifies that pressing "m"
+// while the cursor is on the REVIEW QUEUE section is a no-op that surfaces an
+// error explaining why nothing happened.
+func TestFocusMode_MKey_CursorOnReviewSection_ShowsError(t *testing.T) {
+	app, sessA, _ := makeFocusModeMRApp(t)
+	sessA.AddTestAgent("a-1", false, agent.StatusIdle)
+	app.focusCursorSection = focusSectionReview
+	app.focusQueueIndex = 0
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	app = model.(App)
+
+	if app.err == "" {
+		t.Fatal("expected error message when pressing m with cursor on review section")
+	}
+	if !strings.Contains(app.err, "review queue") {
+		t.Errorf("expected error to mention review queue, got %q", app.err)
+	}
+	// sessA must NOT have transitioned phase.
+	if sessA.LifecyclePhase() != agent.LifecycleInProgress {
+		t.Errorf("expected sessA phase unchanged=InProgress, got %v", sessA.LifecyclePhase())
+	}
+}
+
+// TestFocusMode_MKey_ActiveSession_ShowsRunningError verifies that pressing "m"
+// on an active (non-reviewable) session surfaces a "still running" error and
+// does not transition the session phase.
+func TestFocusMode_MKey_ActiveSession_ShowsRunningError(t *testing.T) {
+	app, sessA, _ := makeFocusModeMRApp(t)
+	sessA.AddTestAgent("a-1", false, agent.StatusActive)
+	app.focusCursorSection = focusSectionActive
+	app.focusActiveIdx = 0
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	app = model.(App)
+
+	if app.err == "" {
+		t.Fatal("expected error message when pressing m on active session")
+	}
+	if !strings.Contains(app.err, "still running") {
+		t.Errorf("expected error to mention still running, got %q", app.err)
+	}
+	if sessA.LifecyclePhase() != agent.LifecycleInProgress {
+		t.Errorf("expected sessA phase unchanged=InProgress, got %v", sessA.LifecyclePhase())
+	}
+}
+
+// TestFocusMode_MKey_IdleSession_TransitionsToReady verifies that pressing "m"
+// on a session whose agents are all idle (Claude finished a turn but did not
+// /exit) transitions the session to ReadyForReview and fires the diff fetch.
+func TestFocusMode_MKey_IdleSession_TransitionsToReady(t *testing.T) {
+	app, sessA, _ := makeFocusModeMRApp(t)
+	sessA.AddTestAgent("a-1", false, agent.StatusIdle)
+	app.focusCursorSection = focusSectionActive
+	app.focusActiveIdx = 0
+
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	app = model.(App)
+
+	if sessA.LifecyclePhase() != agent.LifecycleReadyForReview {
+		t.Errorf("expected sessA phase=ReadyForReview, got %v", sessA.LifecyclePhase())
+	}
+	if app.focusQueueIndex != 0 {
+		t.Errorf("expected focusQueueIndex reset to 0, got %d", app.focusQueueIndex)
+	}
+	if cmd == nil {
+		t.Error("expected a diff-fetch Cmd, got nil")
+	}
+	if app.err != "" {
+		t.Errorf("expected no error on success, got %q", app.err)
+	}
+}
+
+// TestFocusMode_RKey_EmptyQueue_ShowsError verifies that pressing "r" with no
+// review-phase sessions surfaces an error and does not change panelFocus.
+func TestFocusMode_RKey_EmptyQueue_ShowsError(t *testing.T) {
+	sessA := agent.NewSessionForTest("a", "active-a")
+	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
+	sessA.AddTestAgent("a-1", false, agent.StatusActive)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.focusModeActive = true
+	app.dashboard.focusModeActive = true
+	app.dashboard.items = []listItem{
+		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
+		{kind: listItemSession, repoPath: "/r", session: sessA},
+	}
+	app.focusCursorSection = focusSectionActive
+	app.focusActiveIdx = 0
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	app = model.(App)
+
+	if app.err == "" {
+		t.Fatal("expected error message when pressing r with empty queue")
+	}
+	if !strings.Contains(app.err, "review queue is empty") {
+		t.Errorf("expected error to mention empty review queue, got %q", app.err)
+	}
+	if app.dashboard.panelFocus == focusReview {
+		t.Error("expected panelFocus to stay focusList, got focusReview")
+	}
+	if app.reviewSession != nil {
+		t.Errorf("expected reviewSession to stay nil, got %v", app.reviewSession)
+	}
+}
+
+// TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel verifies that pressing "r"
+// with at least one review-phase session opens the review panel and selects the
+// session at focusQueueIndex.
+func TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel(t *testing.T) {
+	app, _, sessR := makeFocusModeMRApp(t)
+	app.focusCursorSection = focusSectionReview
+	app.focusQueueIndex = 0
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	app = model.(App)
+
+	if app.err != "" {
+		t.Errorf("expected no error, got %q", app.err)
+	}
+	if app.dashboard.panelFocus != focusReview {
+		t.Errorf("expected panelFocus=focusReview, got %v", app.dashboard.panelFocus)
+	}
+	if app.reviewSession != sessR {
+		t.Errorf("expected reviewSession=sessR, got %v", app.reviewSession)
+	}
+	if sessR.LifecyclePhase() != agent.LifecycleInReview {
+		t.Errorf("expected sessR phase=InReview, got %v", sessR.LifecyclePhase())
 	}
 }

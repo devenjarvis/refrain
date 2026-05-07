@@ -806,8 +806,8 @@ func (d dashboardModel) allInProgressSessions() []listItem {
 }
 
 // sessionFocusStatus returns a styled inline status badge for a session row in
-// the unified SESSIONS list. Priority: Error > Waiting > May Need Input > finished (DoneAt set)
-// > normal (N active, M idle).
+// the unified SESSIONS list. Priority: Error > Waiting > May Need Input >
+// idle-but-reviewable > finished (DoneAt set) > normal (N active, M idle).
 func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 	var waitingCount, activeCount, idleCount, idleAskingCount int
 	var firstWaitingReason string
@@ -845,6 +845,9 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 	}
 	if idleAskingCount > 0 {
 		return lipgloss.NewStyle().Foreground(ColorWarning).Render(fmt.Sprintf("? %d idle — may need input", idleAskingCount))
+	}
+	if sess.IsReviewable() && sess.DoneAt().IsZero() {
+		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ idle — press m to review")
 	}
 	if !sess.DoneAt().IsZero() {
 		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ finished — awaiting prompt")
@@ -910,6 +913,8 @@ func (d dashboardModel) sessionFocusStripeColor(sess *agent.Session) lipgloss.Co
 		return ColorWaiting
 	case hasIdleAsking:
 		return ColorWarning
+	case sess.IsReviewable() && sess.DoneAt().IsZero():
+		return ColorSuccess
 	case !sess.DoneAt().IsZero():
 		return ColorSuccess
 	default:

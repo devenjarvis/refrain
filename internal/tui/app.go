@@ -1140,19 +1140,42 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			case "m":
 				// Mark the session under the focus cursor as ReadyForReview.
-				inProgress := a.dashboard.allInProgressSessions()
-				if a.focusActiveIdx < len(inProgress) {
-					sess := inProgress[a.focusActiveIdx].session
-					if sess != nil && !sess.DoneAt().IsZero() {
-						sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
-						a.focusQueueIndex = 0
-						return a, a.fetchReviewDiffCmd(sess)
-					}
+				if a.focusCursorSection != focusSectionActive {
+					a.setError("nothing to mark — cursor is on the review queue")
+					return a, nil
 				}
-				return a, nil
+				inProgress := a.dashboard.allInProgressSessions()
+				if len(inProgress) == 0 {
+					a.setError("no in-progress sessions")
+					return a, nil
+				}
+				if a.focusActiveIdx >= len(inProgress) {
+					a.setError("no in-progress sessions")
+					return a, nil
+				}
+				sess := inProgress[a.focusActiveIdx].session
+				if sess == nil {
+					a.setError("no in-progress sessions")
+					return a, nil
+				}
+				if !sess.IsReviewable() {
+					switch sess.Status() {
+					case agent.StatusActive:
+						a.setError("session is still running — wait for Claude to finish its turn")
+					case agent.StatusWaiting:
+						a.setError("session is waiting for input — resolve the prompt first")
+					default:
+						a.setError("session is still running — wait for Claude to finish its turn")
+					}
+					return a, nil
+				}
+				sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
+				a.focusQueueIndex = 0
+				return a, a.fetchReviewDiffCmd(sess)
 			case "r":
 				reviewItems := a.dashboard.reviewQueueSessions()
 				if len(reviewItems) == 0 {
+					a.setError("review queue is empty — press m on a finished session first")
 					return a, nil
 				}
 				idx := a.focusQueueIndex

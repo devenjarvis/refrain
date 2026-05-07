@@ -75,3 +75,89 @@ func TestRenderFocusActiveCursor(t *testing.T) {
 			unselectedLine, out)
 	}
 }
+
+// TestSessionFocusStatus_IdleReviewableShowsCue verifies that a session whose
+// non-shell agents are all Idle (and DoneAt is zero — i.e. Claude finished a
+// turn but did not /exit) renders the "press m to review" cue. This makes the
+// review affordance discoverable on every natural review point, not only after
+// the user manually exits Claude.
+func TestSessionFocusStatus_IdleReviewableShowsCue(t *testing.T) {
+	sess := agent.NewSessionForTest("s", "active-a")
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	ag := sess.AddTestAgent("a-1", false, agent.StatusIdle)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	badge := d.sessionFocusStatus(sess)
+	if !strings.Contains(badge, "press m to review") {
+		t.Errorf("expected reviewable cue, got %q", badge)
+	}
+}
+
+// TestSessionFocusStatus_ActiveDoesNotShowCue verifies that the "press m to
+// review" cue does not fire when at least one non-shell agent is Active —
+// i.e. Claude is mid-turn and there is nothing to review yet.
+func TestSessionFocusStatus_ActiveDoesNotShowCue(t *testing.T) {
+	sess := agent.NewSessionForTest("s", "active-a")
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	badge := d.sessionFocusStatus(sess)
+	if strings.Contains(badge, "press m to review") {
+		t.Errorf("did not expect reviewable cue with active agent, got %q", badge)
+	}
+}
+
+// TestSessionFocusStripeColor_IdleReviewableMatchesBadge verifies that the
+// session stripe color and the badge color agree for the new idle-reviewable
+// state — the function comment on sessionFocusStripeColor makes this an
+// explicit invariant.
+func TestSessionFocusStripeColor_IdleReviewableMatchesBadge(t *testing.T) {
+	sess := agent.NewSessionForTest("s", "active-a")
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	ag := sess.AddTestAgent("a-1", false, agent.StatusIdle)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	if got := d.sessionFocusStripeColor(sess); got != ColorSuccess {
+		t.Errorf("expected stripe ColorSuccess for idle-reviewable session, got %v", got)
+	}
+}
+
+// TestSessionFocusStatus_FinishedTakesPrecedence verifies that once DoneAt is
+// set (Claude /exit'd), the existing "✓ finished — awaiting prompt" badge wins
+// over the new idle cue, preserving the original badge ordering.
+func TestSessionFocusStatus_FinishedTakesPrecedence(t *testing.T) {
+	sess := agent.NewSessionForTest("s", "active-a")
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	ag := sess.AddTestAgent("a-1", false, agent.StatusDone)
+	sess.MarkDone()
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	badge := d.sessionFocusStatus(sess)
+	if !strings.Contains(badge, "finished") {
+		t.Errorf("expected finished badge to win, got %q", badge)
+	}
+	if strings.Contains(badge, "press m to review") {
+		t.Errorf("expected idle cue not to fire when DoneAt set, got %q", badge)
+	}
+}
