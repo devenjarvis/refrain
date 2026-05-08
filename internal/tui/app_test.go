@@ -2190,13 +2190,14 @@ func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
 	}
 }
 
-// TestFetchReviewDiffCmd_UsesSessionRepoNotActiveRepo verifies that
-// fetchReviewDiffCmd targets the session's owning repo rather than
-// a.activeRepo. The bug was reachable via the multi-repo pipeline cursor: a
-// session in a non-active repo would have its diff fetched against the wrong
-// worktree root.
-func TestFetchReviewDiffCmd_UsesSessionRepoNotActiveRepo(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-fetchreview-*")
+// TestRepoPathForSession_FindsSessionsAcrossMultiRepo verifies that
+// repoPathForSession returns the owning repo of a session even when
+// activeRepo points elsewhere — the multi-repo correctness condition the
+// review-panel `'e'` key (and the defensive fetchReviewDiffCmd update) both
+// depend on. Without this, pressing `'e'` on a session in a non-active repo
+// would resolve the IDE command from the wrong repo's resolvedCache.
+func TestRepoPathForSession_FindsSessionsAcrossMultiRepo(t *testing.T) {
+	dir, err := os.MkdirTemp("", "baton-repopath-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2216,40 +2217,27 @@ func TestFetchReviewDiffCmd_UsesSessionRepoNotActiveRepo(t *testing.T) {
 	defer mgr.Shutdown()
 
 	sess, _, err := mgr.CreateSessionWithCommand(agent.Config{
-		Name: "diff-fetch", Task: "test", RepoPath: dir, Rows: 24, Cols: 80,
+		Name: "lookup", Task: "test", RepoPath: dir, Rows: 24, Cols: 80,
 	}, func(_ string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 30") })
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
 	app.managers[dir] = mgr
-	// activeRepo points at a *different* repo to prove the cmd uses the
-	// session's owning repo rather than activeRepo.
+	// activeRepo deliberately points elsewhere so the test fails loudly if
+	// repoPathForSession ever falls back to activeRepo.
 	app.activeRepo = "/nonexistent/wrong-repo"
-	app.dashboard.items = []listItem{
-		{kind: listItemRepo, repoPath: dir, repoName: "diff-fetch"},
-		{kind: listItemSession, repoPath: dir, session: sess},
+	// cfg must list the real repo for repoPathForSession to walk it.
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+
+	got := app.repoPathForSession(sess.ID)
+	if got != dir {
+		t.Fatalf("repoPathForSession = %q, want %q (must not fall back to activeRepo)", got, dir)
 	}
 
-	cmd := app.fetchReviewDiffCmd(sess)
-	if cmd == nil {
-		t.Fatal("expected non-nil cmd")
-	}
-	msg, ok := cmd().(reviewDiffMsg)
-	if !ok {
-		t.Fatalf("expected reviewDiffMsg, got %T", cmd())
-	}
-	// The cmd should succeed against the session's repo. Pre-fix this would
-	// fail or return wrong stats because activeRepo=/nonexistent/wrong-repo.
-	if msg.err != nil {
-		t.Errorf("expected nil err using session's repo, got %v", msg.err)
-	}
-	if msg.entry == nil {
-		t.Errorf("expected non-nil entry, got nil")
+	// Unknown session ID returns "" so call sites can fall back to activeRepo.
+	if got := app.repoPathForSession("does-not-exist"); got != "" {
+		t.Errorf("repoPathForSession(unknown) = %q, want \"\"", got)
 	}
 }
