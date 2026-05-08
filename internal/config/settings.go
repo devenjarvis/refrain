@@ -20,7 +20,6 @@ const (
 	MaxSidebarWidth          = 60
 
 	// Wellness defaults.
-	DefaultFocusModeEnabled    = false
 	DefaultFocusSessionMinutes = 90
 	DefaultFocusBreakMinutes   = 15
 	DefaultMaxConcurrentAgents = 3
@@ -57,11 +56,10 @@ type GlobalSettings struct {
 	SidebarWidth      *int    `json:"sidebar_width,omitempty"`
 
 	// Wellness settings — global preferences, not per-repo.
-	FocusModeEnabled    *bool `json:"focus_mode_enabled,omitempty"`
-	FocusSessionMinutes *int  `json:"focus_session_minutes,omitempty"`
-	FocusBreakMinutes   *int  `json:"focus_break_minutes,omitempty"`
-	MaxConcurrentAgents *int  `json:"max_concurrent_agents,omitempty"`
-	MaxReviewBacklog    *int  `json:"max_review_backlog,omitempty"`
+	FocusSessionMinutes *int `json:"focus_session_minutes,omitempty"`
+	FocusBreakMinutes   *int `json:"focus_break_minutes,omitempty"`
+	MaxConcurrentAgents *int `json:"max_concurrent_agents,omitempty"`
+	MaxReviewBacklog    *int `json:"max_review_backlog,omitempty"`
 }
 
 // RepoSettings holds per-repo overrides stored at <repo>/.baton/config.json.
@@ -90,7 +88,6 @@ type ResolvedSettings struct {
 	SidebarWidth      int
 
 	// Wellness settings.
-	FocusModeEnabled    bool
 	FocusSessionMinutes int
 	FocusBreakMinutes   int
 	MaxConcurrentAgents int
@@ -108,7 +105,6 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		AgentProgram:        DefaultAgentProgram,
 		WorktreeDir:         DefaultWorktreeDir,
 		SidebarWidth:        DefaultSidebarWidth,
-		FocusModeEnabled:    DefaultFocusModeEnabled,
 		FocusSessionMinutes: DefaultFocusSessionMinutes,
 		FocusBreakMinutes:   DefaultFocusBreakMinutes,
 		MaxConcurrentAgents: DefaultMaxConcurrentAgents,
@@ -139,9 +135,6 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if global.SidebarWidth != nil {
 			r.SidebarWidth = ClampSidebarWidth(*global.SidebarWidth)
-		}
-		if global.FocusModeEnabled != nil {
-			r.FocusModeEnabled = *global.FocusModeEnabled
 		}
 		if global.FocusSessionMinutes != nil {
 			r.FocusSessionMinutes = *global.FocusSessionMinutes

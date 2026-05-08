@@ -51,9 +51,9 @@ If you use Claude Code regularly, you've probably wanted to run multiple tasks a
 
 1. Run `baton` inside a git repo
 2. Press `n` to create a session and give Claude a task
-3. Watch the agent work from the dashboard (or press `⏎` to focus the terminal)
-4. Press `d` to review the diff when it finishes
-5. Merge the result back to your branch
+3. Watch the agent work; press `⏎` to drop into the agent terminal, `esc` to return
+4. Press `m` to mark the session ready when Claude finishes its turn
+5. Press `r` to review and ship
 
 No tmux required. No context switching.
 
@@ -61,7 +61,7 @@ Running three or more parallel agents creates real cognitive overhead that's eas
 
 The design targets behind Baton come from two well-established findings: context-switch recovery takes on average 9.5 minutes, and deep work cycles around a 90-minute block. Every unnecessary interrupt — a glance at a stuck agent, a quick tab-switch to check output — drains from those budgets in ways that don't show up until you're staring at your screen at 4 pm wondering where the day went.
 
-Focus Mode is Baton's answer to that problem. It replaces the multi-agent dashboard with a pipeline view: one active terminal to drive, a review queue for sessions ready to merge, and an attention list for anything that needs a decision. You work in flow; Baton does the monitoring.
+Baton's dashboard is the answer: a pipeline view with one cursor that moves across SESSIONS (in-progress) and a REVIEW QUEUE (ready to merge). You work in flow; Baton does the monitoring.
 
 ## Usage
 
@@ -75,35 +75,43 @@ The first run auto-registers the current directory and adds `.baton/` to `.gitig
 
 ### Keybindings
 
-**Dashboard** (list focused):
+**Pipeline view** (the dashboard):
 
-| Key       | Action                                                     |
-|-----------|------------------------------------------------------------|
-| `j` / `k` | Navigate repos, sessions, and agents                       |
-| `⏎` / `→` | Focus terminal preview (on agent) or repo config (on repo) |
-| `n`       | Create a new session                                       |
-| `c`       | Add another agent to the selected session                  |
-| `t`       | Open or focus a shell in the selected session's worktree   |
-| `e`       | Open selected session's worktree in the configured IDE     |
-| `o`       | Create session on an existing branch or PR                 |
-| `a`       | Add a repo (file browser)                                  |
-| `s`       | Global settings                                            |
-| `d`       | Diff the session's worktree, or remove selected repo       |
-| `x`       | Kill the selected agent                                    |
-| `X`       | Kill the selected agent's entire session                   |
-| `q`       | Detach and exit (prompts if agents are running)            |
-| `f`       | Toggle Focus Mode                                          |
+| Key              | Action                                                     |
+|------------------|------------------------------------------------------------|
+| `j` / `k`        | Move the cursor across SESSIONS and REVIEW QUEUE rows      |
+| `⏎` / `space`    | Open the cursor-selected session's agent in focusLaunch    |
+| `n`              | Create a new session                                       |
+| `N`              | Cycle to the next registered repo                          |
+| `m`              | Mark the cursor-selected SESSIONS row ready for review     |
+| `r`              | Open the review panel for the cursor-selected REVIEW row   |
+| `c`              | Add another agent to the cursor-selected session           |
+| `t`              | Open or focus a shell in the cursor-selected session       |
+| `d`              | Diff the cursor-selected session's worktree                |
+| `e`              | Open the worktree in the configured IDE                    |
+| `p`              | Open the session's PR in the browser                       |
+| `o`              | Create a session on an existing branch or PR               |
+| `a`              | Add a repo (file browser)                                  |
+| `s`              | Global settings                                            |
+| `x`              | Kill the cursor-selected session's primary agent           |
+| `X`              | Kill the entire cursor-selected session                    |
+| `b`              | Take a break (engages the wellness break overlay)          |
+| `q`              | Detach and exit (prompts if agents are running)            |
 
-**Terminal preview** (terminal preview focused):
+**Agent terminal** (focusLaunch — opened by pressing `⏎` on a session):
 
-| Key              | Action                                        |
-|------------------|-----------------------------------------------|
-| `ctrl+e` / `esc` | Return to list                                |
-| `shift+esc`      | Send ESC to the agent (e.g. Claude interrupt) |
-| `pgup` / `pgdn`  | Scroll backward / forward                     |
-| `home`           | Jump back to live output                      |
-| *drag*           | Native terminal text selection                |
-| *other keys*     | Forwarded to the agent                        |
+| Key              | Action                                          |
+|------------------|-------------------------------------------------|
+| `esc`            | Return to the pipeline                          |
+| `shift+esc`      | Send ESC to the agent (e.g. Claude interrupt)   |
+| `alt+[` / `alt+]`| Switch between agents in the same session       |
+| `ctrl+t`         | Add a shell to this session                     |
+| `ctrl+n`         | Add a new agent to this session                 |
+| `ctrl+w`         | Close the current tab                           |
+| `pgup` / `pgdn`  | Scroll backward / forward                       |
+| `home`           | Jump back to live output                        |
+| *drag*           | Native terminal text selection                  |
+| *other keys*     | Forwarded to the agent                          |
 
 **Diff summary:**
 
@@ -123,7 +131,7 @@ The first run auto-registers the current directory and adds `.baton/` to `.gitig
 | `esc`     | Back to summary   |
 | `q`       | Back to dashboard |
 
-Click support on the dashboard: click a row in the list to select it; click in the preview panel to enter terminal preview.
+Click support on the dashboard: single-click on a session card moves the cursor; double-click activates (focusLaunch for an active session, review panel for a queue row). Clicking the PR indicator on a review row opens the PR in the browser.
 
 ### Branch naming
 
@@ -136,28 +144,15 @@ The prefix is configurable via `BranchPrefix` in global or per-repo settings, an
 
 Unknown `{tokens}` are left literal. Example: `BranchPrefix: "{user}/"` produces `dj/add-dark-mode` after the first-prompt rename.
 
-### Focus Mode
+### Wellness controls
 
-Focus Mode is a pipeline view that reduces cognitive overhead when managing parallel agents. Press `f` from the dashboard to activate it.
+The dashboard surfaces three wellness affordances tuned to keep parallel-agent work sustainable:
 
-| Key              | Action                                        |
-|------------------|-----------------------------------------------|
-| `j` / `k`        | Navigate between panels and agents            |
-| `n`              | New session                                   |
-| `space` / `⏎`   | Open agent terminal fullscreen                |
-| `N`              | Cycle to next repo                            |
-| `esc` / `ctrl+e` | Return to dashboard                           |
-| `shift+esc`      | Send ESC interrupt to agent                   |
-| `pgup` / `pgdn`  | Scroll terminal output                        |
-| `home`           | Jump to live output                           |
+- **Session timer** (`focus_session_minutes`, default `90`) — when the configured block elapses, Baton automatically opens a centered break overlay with a coherent-breathing animation.
+- **Soft agent limit** (`max_concurrent_agents`, default `3`) — pressing `n` past the cap shows a one-key warning; pressing `n` a second time overrides and spawns anyway.
+- **Soft review backlog** (`max_review_backlog`, default `5`) — same two-press override pattern when the REVIEW QUEUE has too many sessions waiting.
 
-Focus Mode is controlled by three config keys (global or per-repo settings):
-
-- `focus_mode_enabled` — enable Focus Mode (default: `false`)
-- `focus_session_minutes` — session block length in minutes (default: `90`)
-- `max_concurrent_agents` — soft cap on parallel agents (default: `3`)
-
-When `focus_session_minutes` elapses, Baton surfaces a break hint in the TUI and appends a session record to `.baton/logs/wellness.log`.
+Every block (work + break) is appended to `.baton/logs/wellness.log` so you can audit your own pacing later.
 
 ## How It Works
 

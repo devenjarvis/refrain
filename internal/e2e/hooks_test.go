@@ -74,7 +74,7 @@ func TestHookPipeline(t *testing.T) {
 	s.extraEnv = append(s.extraEnv, "BATON_E2E_BATON="+batonBin)
 	s.Start()
 
-	s.WaitForText("AGENTS", 10000)
+	s.WaitForText("FOCUS", 10000)
 	s.Press("n")
 	// After "n", baton spawns the stub and auto-focuses its PTY. The stub
 	// prints a greeting; wait for it so we know the process is live before
@@ -83,62 +83,42 @@ func TestHookPipeline(t *testing.T) {
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
-	// Active (▶) — session-start fires at t≈0.3s.
-	if !waitForAgentSymbol(s, "▶", 5000) {
-		t.Fatalf("never observed Active (▶) symbol\nScreen:\n%s", s.Screenshot())
+	// Active — session-start fires at t≈0.3s. The pipeline session card
+	// surfaces this as "%d active, %d idle".
+	if !waitForBadgeText(s, "active", 5000) {
+		t.Fatalf("never observed Active badge text\nScreen:\n%s", s.Screenshot())
 	}
-	// Waiting (⏺) — notification fires at t≈1.5s.
-	if !waitForAgentSymbol(s, "⏺", 5000) {
-		t.Fatalf("never observed Waiting (⏺) symbol\nScreen:\n%s", s.Screenshot())
+	// Waiting — notification fires at t≈1.5s. The session card surfaces
+	// this as "%d waiting".
+	if !waitForBadgeText(s, "waiting", 5000) {
+		t.Fatalf("never observed Waiting badge text\nScreen:\n%s", s.Screenshot())
 	}
-	// Idle (⏸) — stop fires at t≈3.5s.
-	if !waitForAgentSymbol(s, "⏸", 5000) {
-		t.Fatalf("never observed Idle (⏸) after Stop\nScreen:\n%s", s.Screenshot())
+	// Idle — stop fires at t≈3.5s. The session card surfaces this as the
+	// "✓ idle — press m to review" cue.
+	if !waitForBadgeText(s, "press m to review", 5000) {
+		t.Fatalf("never observed idle review cue after Stop\nScreen:\n%s", s.Screenshot())
 	}
-	// Active (▶) again — user-prompt-submit fires at t≈5.5s and re-arms.
-	// This is the observable signal that UserPromptSubmit transitioned the
-	// bubble back to Active. (The chime re-arm flag is not visible on
-	// screen; the second Idle below confirms the manager saw the transition
-	// and emitted a status-change event.)
-	if !waitForAgentSymbol(s, "▶", 5000) {
-		t.Fatalf("never observed re-armed Active (▶) after UserPromptSubmit\nScreen:\n%s", s.Screenshot())
+	// Active again — user-prompt-submit fires at t≈5.5s and re-arms.
+	if !waitForBadgeText(s, "active", 5000) {
+		t.Fatalf("never observed re-armed Active badge after UserPromptSubmit\nScreen:\n%s", s.Screenshot())
 	}
-	// Idle (⏸) again — stop fires at t≈7.5s. This doubles as a re-arm check:
+	// Idle again — stop fires at t≈7.5s. This doubles as a re-arm check:
 	// if UserPromptSubmit hadn't re-armed, there'd be no intermediate Active
 	// and the second Stop would be a no-op status-wise.
-	if !waitForAgentSymbol(s, "⏸", 5000) {
-		t.Fatalf("never observed final Idle (⏸) after second Stop\nScreen:\n%s", s.Screenshot())
+	if !waitForBadgeText(s, "press m to review", 5000) {
+		t.Fatalf("never observed final idle cue after second Stop\nScreen:\n%s", s.Screenshot())
 	}
 }
 
-// waitForAgentSymbol polls Screenshot until an agent row with the given
-// leading status symbol is visible, or timeoutMs elapses.
-func waitForAgentSymbol(s *Session, symbol string, timeoutMs int) bool {
+// waitForBadgeText polls Screenshot until the SESSIONS section's status badge
+// contains the given substring, or timeoutMs elapses.
+func waitForBadgeText(s *Session, needle string, timeoutMs int) bool {
 	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if screenHasAgentSymbol(s.Screenshot(), symbol) {
+		if strings.Contains(s.Screenshot(), needle) {
 			return true
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
-	return screenHasAgentSymbol(s.Screenshot(), symbol)
-}
-
-// screenHasAgentSymbol reports whether any line in screen is an agent row
-// starting (after whitespace and optional selection arrow) with symbol+space.
-// Session-header rows (which contain box-drawing "──") are skipped so a
-// session's rolled-up status doesn't mask the agent-row symbol we care about.
-func screenHasAgentSymbol(screen, symbol string) bool {
-	needle := symbol + " "
-	for _, line := range strings.Split(screen, "\n") {
-		if strings.Contains(line, "──") {
-			continue
-		}
-		trimmed := strings.TrimLeft(line, " ")
-		trimmed = strings.TrimPrefix(trimmed, "▸ ")
-		if strings.HasPrefix(trimmed, needle) {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s.Screenshot(), needle)
 }

@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 // TestArtifactsOnPlanReview drives a bash-scripted agent through a
@@ -26,7 +24,7 @@ func TestArtifactsOnPlanReview(t *testing.T) {
 	dumpPath := t.TempDir() + "/baton_view_dump.txt"
 	s.extraEnv = append(s.extraEnv, "BATON_E2E_DEBUG_DUMP="+dumpPath)
 	s.Start()
-	s.WaitForText("AGENTS", 10000)
+	s.WaitForText("FOCUS", 10000)
 
 	// Create a session; "n" auto-focuses the terminal and launches bash.
 	s.Press("n")
@@ -65,72 +63,5 @@ func TestArtifactsOnPlanReview(t *testing.T) {
 	}
 	if strings.Contains(viewStr, "GHOST_ARTIFACT_FOO") {
 		t.Errorf("frame 1 ghost marker still in baton's view after frame 2 redraw\nView:\n%s", viewStr)
-	}
-}
-
-// TestPreviewPanelModeSwitch verifies that dashboard.View() always covers the
-// full terminal width in both focusList and focusTerminal modes. Regression for
-// the focusList width-mismatch bug: Width(fixedTermWidth) left 2 columns
-// unwritten per render, allowing stale content from prior focusTerminal border
-// chars to persist. With the fix, Width(fixedTermWidth+2) matches focusTerminal's
-// outer width so every column is explicitly written in both modes.
-//
-// Note: the PR height overflow (focusTerminal Height with PR visible) requires a
-// live GitHub PR to trigger and is not covered here.
-func TestPreviewPanelModeSwitch(t *testing.T) {
-	// tu session is launched at 120x40 (see Session.Start); columns are stable.
-	const termWidth = 120
-
-	s := newSession(t)
-	dumpPath := t.TempDir() + "/mode_switch_dump.txt"
-	s.extraEnv = append(s.extraEnv, "BATON_E2E_DEBUG_DUMP="+dumpPath)
-	s.Start()
-	s.WaitForText("AGENTS", 10000)
-
-	// Create a session; "n" auto-focuses the terminal and launches bash.
-	s.Press("n")
-	s.WaitForText(`\$`, 10000)
-
-	// Emit visible content so the preview renders something non-trivial.
-	s.Type("echo LAYOUT_MARKER_LINE\n")
-	s.WaitForText("LAYOUT_MARKER_LINE", 5000)
-	s.WaitStable(500)
-
-	// focusTerminal: every line must span the full terminal width.
-	assertViewWidth(t, "focusTerminal", dumpPath, termWidth)
-
-	// Switch to focusList — the key regression mode.
-	s.Press("Escape")
-	s.WaitForText("navigate", 5000)
-	s.WaitStable(300)
-
-	// Without the fix, Width(fixedTermWidth) produced 118-char lines instead of 120.
-	assertViewWidth(t, "focusList", dumpPath, termWidth)
-
-	// Stress: multiple focus-mode round trips must not degrade the invariant.
-	for range 3 {
-		s.Press("Enter")
-		s.WaitForText(`\$`, 3000)
-		s.Press("Escape")
-		s.WaitForText("navigate", 3000)
-		s.WaitStable(300)
-	}
-	assertViewWidth(t, "focusList after repeated switches", dumpPath, termWidth)
-}
-
-// assertViewWidth reads the BATON_E2E_DEBUG_DUMP at dumpPath and asserts that
-// every line is exactly wantWidth display cells wide (ANSI stripped).
-func assertViewWidth(t *testing.T, mode, dumpPath string, wantWidth int) {
-	t.Helper()
-	data, err := os.ReadFile(dumpPath)
-	if err != nil {
-		t.Fatalf("%s: reading dump: %v", mode, err)
-	}
-	view := strings.TrimRight(string(data), "\n")
-	lines := strings.Split(view, "\n")
-	for i, line := range lines {
-		if got := ansi.StringWidth(line); got != wantWidth {
-			t.Errorf("%s: line %d visible width = %d, want %d", mode, i, got, wantWidth)
-		}
 	}
 }

@@ -12,22 +12,21 @@ type keyHint struct {
 }
 
 var (
+	// dashboardHints is the unified hint set shown on the pipeline view (the
+	// only dashboard mode). Workflow keys (c/x/X/t/e/p/d/o/a/s) act on the
+	// session under the pipeline cursor. Kept tight so a 120-col terminal
+	// never truncates "quit" off the right edge.
 	dashboardHints = []keyHint{
 		{"j/k", "navigate"},
-		{"⏎/→", "interact"},
+		{"⏎", "open"},
 		{"n", "new session"},
+		{"m", "ready"},
+		{"r", "review"},
 		{"c", "add agent"},
+		{"d", "diff"},
 		{"t", "shell"},
-		{"e", "open in IDE"},
-		{"p", "open PR"},
-		{"click PR#", "open"},
-		{"f", "focus mode"},
+		{"x/X", "kill"},
 		{"s", "settings"},
-		{"a", "add repo"},
-		{"o", "open branch"},
-		{"d", "diff/remove"},
-		{"x", "kill agent"},
-		{"X", "kill session"},
 		{"q", "quit"},
 	}
 
@@ -73,26 +72,14 @@ var (
 		{"esc", "cancel"},
 	}
 
-	focusModeHints = []keyHint{
-		{"j/k", "navigate"},
-		{"⏎", "open"},
-		{"m", "mark ready"},
-		{"r", "review"},
-		{"n", "new"},
-		{"N", "change repo"},
-		{"f", "exit focus"},
-	}
-
 	focusLaunchHints = []keyHint{
-		{"enter", "send"},
-		{"pgup/pgdn", "scroll"},
-		{"home", "live"},
-		{"alt+[/]", "switch tab"},
-		{"ctrl+t", "shell"},
-		{"ctrl+n", "new agent"},
-		{"ctrl+w", "close tab"},
 		{"esc", "back"},
 		{"⇧esc", "interrupt"},
+		{"alt+[/]", "tab"},
+		{"ctrl+t", "shell"},
+		{"ctrl+n", "agent"},
+		{"ctrl+w", "close"},
+		{"pgup/pgdn", "scroll"},
 	}
 
 	repoPickerHints = []keyHint{

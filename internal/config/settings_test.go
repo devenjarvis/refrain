@@ -484,9 +484,6 @@ func TestClampSidebarWidth(t *testing.T) {
 func TestResolve_WellnessDefaults(t *testing.T) {
 	r := config.Resolve(nil, nil)
 
-	if r.FocusModeEnabled != config.DefaultFocusModeEnabled {
-		t.Errorf("FocusModeEnabled = %v, want %v", r.FocusModeEnabled, config.DefaultFocusModeEnabled)
-	}
 	if r.FocusSessionMinutes != config.DefaultFocusSessionMinutes {
 		t.Errorf("FocusSessionMinutes = %d, want %d", r.FocusSessionMinutes, config.DefaultFocusSessionMinutes)
 	}
@@ -496,19 +493,14 @@ func TestResolve_WellnessDefaults(t *testing.T) {
 }
 
 func TestResolve_WellnessGlobalOverride(t *testing.T) {
-	enabled := true
 	minutes := 60
 	maxAgents := 5
 	g := &config.GlobalSettings{
-		FocusModeEnabled:    &enabled,
 		FocusSessionMinutes: &minutes,
 		MaxConcurrentAgents: &maxAgents,
 	}
 	r := config.Resolve(g, nil)
 
-	if !r.FocusModeEnabled {
-		t.Error("FocusModeEnabled should be true (global override)")
-	}
 	if r.FocusSessionMinutes != 60 {
 		t.Errorf("FocusSessionMinutes = %d, want 60", r.FocusSessionMinutes)
 	}

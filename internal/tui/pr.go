@@ -178,13 +178,3 @@ func prIndicatorWidth(entry *prCacheEntry) int {
 	}
 	return w
 }
-
-// formatCheckDuration formats a duration for check run display.
-func formatCheckDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	m := int(d.Minutes())
-	s := int(d.Seconds()) % 60
-	return fmt.Sprintf("%dm%ds", m, s)
-}

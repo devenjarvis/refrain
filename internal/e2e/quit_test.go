@@ -10,7 +10,7 @@ func TestQuitNoAgents(t *testing.T) {
 	s := newSession(t)
 	s.Start()
 
-	s.WaitForText("AGENTS", 10000)
+	s.WaitForText("FOCUS", 10000)
 
 	s.Press("q")
 
@@ -29,7 +29,7 @@ func TestQuitConfirmation(t *testing.T) {
 	s := newSession(t)
 	s.Start()
 
-	s.WaitForText("AGENTS", 10000)
+	s.WaitForText("FOCUS", 10000)
 
 	// Create a new agent session (bash).
 	s.Press("n")

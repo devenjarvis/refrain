@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	fieldFocusMode    = "Focus Mode on Startup"
 	fieldFocusSession = "Focus Session (min)"
 	fieldFocusBreak   = "Break (min)"
 	fieldMaxAgents    = "Max Concurrent Agents"
@@ -66,10 +65,6 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 		sidebarWidth = strconv.Itoa(*gs.SidebarWidth)
 	}
 
-	focusModeEnabled := config.DefaultFocusModeEnabled
-	if gs.FocusModeEnabled != nil {
-		focusModeEnabled = *gs.FocusModeEnabled
-	}
 	focusSessionMinutes := ""
 	if gs.FocusSessionMinutes != nil {
 		focusSessionMinutes = strconv.Itoa(*gs.FocusSessionMinutes)
@@ -97,7 +92,6 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 	fields = addTextInput(fields, "Agent Program", agentProgram, config.DefaultAgentProgram, inputWidth)
 	fields = addEditorFields(fields, ideCommand, inputWidth)
 	fields = addTextInput(fields, "Sidebar Width", sidebarWidth, strconv.Itoa(config.DefaultSidebarWidth), inputWidth)
-	fields = addToggle(fields, fieldFocusMode, focusModeEnabled)
 	fields = addTextInput(fields, fieldFocusSession, focusSessionMinutes, strconv.Itoa(config.DefaultFocusSessionMinutes), inputWidth)
 	fields = addTextInput(fields, fieldFocusBreak, focusBreakMinutes, strconv.Itoa(config.DefaultFocusBreakMinutes), inputWidth)
 	fields = addTextInput(fields, fieldMaxAgents, maxConcurrentAgents, strconv.Itoa(config.DefaultMaxConcurrentAgents), inputWidth)
@@ -175,9 +169,6 @@ func (m globalConfigModel) extractSettings() *config.GlobalSettings {
 			s.SidebarWidth = &clamped
 		}
 	}
-
-	focusMode := m.form.toggleValue(fieldFocusMode)
-	s.FocusModeEnabled = &focusMode
 
 	if v := m.form.textValue(fieldFocusSession); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

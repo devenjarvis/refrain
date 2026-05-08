@@ -290,6 +290,53 @@ func (s *Session) AgentCount() int {
 	return len(s.agents)
 }
 
+// AgentStatusPriority returns a sortable rank for an agent's current status,
+// used by both Session.PrimaryAgent (deterministic pick for pipeline keys) and
+// the App-level focusLaunch auto-open pick. Order: Active > Waiting > Idle >
+// Starting > Done/Error. Defining it once avoids the two callers drifting if a
+// new status is ever added.
+func AgentStatusPriority(a *Agent) int {
+	switch a.Status() {
+	case StatusActive:
+		return 5
+	case StatusWaiting:
+		return 4
+	case StatusIdle:
+		return 3
+	case StatusStarting:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// PrimaryAgent returns the highest-priority non-shell agent in the session, or
+// nil if the session has no agents at all. Shell agents are skipped unless
+// they are the only thing in the session, in which case the first shell is
+// returned. Used by pipeline workflow keys (c, x) to pick a deterministic
+// target without forcing the user to drill into focusLaunch.
+func (s *Session) PrimaryAgent() *Agent {
+	agents := s.Agents()
+	if len(agents) == 0 {
+		return nil
+	}
+	var best *Agent
+	bestPri := -1
+	for _, a := range agents {
+		if a.IsShell {
+			continue
+		}
+		if pri := AgentStatusPriority(a); pri > bestPri {
+			bestPri = pri
+			best = a
+		}
+	}
+	if best != nil {
+		return best
+	}
+	return agents[0]
+}
+
 // KillAgent kills a single agent but does not remove the session.
 func (s *Session) KillAgent(id string) {
 	s.mu.RLock()

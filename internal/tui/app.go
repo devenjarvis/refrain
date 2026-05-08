@@ -120,8 +120,7 @@ type App struct {
 	lastKnownStatus map[string]agent.Status
 	audioPlayer     *audio.Player
 
-	// Wellness / focus mode state.
-	focusModeActive        bool
+	// Wellness state.
 	appStart               time.Time // set once at init; never reset; used for total session duration in wellness log
 	sessionStart           time.Time // per-block work timer; reset on each break completion
 	lastReviewAt           time.Time
@@ -130,7 +129,7 @@ type App struct {
 	focusBreakMinutes      int          // cached from resolved global settings
 	focusActiveIdx         int          // index into allInProgressSessions()
 	focusQueueIndex        int          // index into reviewQueueSessions
-	focusCursorSection     focusSection // which section the focus-mode cursor is on
+	focusCursorSection     focusSection // which section the pipeline cursor is on
 	focusLaunchAgent       *agent.Agent
 	focusLaunchSession     *agent.Session
 	focusBacklogWarning    bool // first n at backlog limit shows warning; second proceeds
@@ -146,13 +145,17 @@ type App struct {
 	// Wellness counters (written to log on quit).
 	agentsCreatedCount   int
 	sessionsCreatedCount int
-	focusModeSwitches    int
 
 	// closingAgents and closingSessions track in-flight kill requests so the
 	// dashboard can render a "closing…" indicator while the async teardown runs.
 	// Lives in the TUI because it's purely a UI concern.
 	closingAgents   map[string]bool
 	closingSessions map[string]bool
+
+	// Pipeline mouse click tracking for double-click detection.
+	lastPipelineClick    time.Time
+	lastPipelineClickSec focusSection
+	lastPipelineClickIdx int
 
 	diffStatsCache      map[string]*diffStatsEntry // keyed by session ID
 	diffRefreshInFlight bool
@@ -235,7 +238,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.branchPicker.height = msg.Height - 1
 		a.repoPicker.width = msg.Width
 		a.repoPicker.height = msg.Height - 1
-		a.recomputePRSectionY()
 		// A resize remaps the VT viewport — any in-flight selection is now
 		// pointing at stale cells. Drop it.
 		a.dashboard.clearSelection()
@@ -268,9 +270,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		resolved := config.Resolve(a.globalSettings, nil)
 		a.dashboard.sidebarWidth = resolved.SidebarWidth
-		a.focusModeActive = resolved.FocusModeEnabled
 		a.focusSessionMinutes = resolved.FocusSessionMinutes
 		a.focusBreakMinutes = resolved.FocusBreakMinutes
+		a.focusCursorSection = focusSectionActive
+		// Default activeRepo to the first registered repo so the pipeline
+		// header shows "repo: <name>" and workflow keys ('n', 'a', 'o') target
+		// a known repo on a fresh dashboard.
+		if a.activeRepo == "" && len(msg.cfg.Repos) > 0 {
+			a.activeRepo = msg.cfg.Repos[0].Path
+		}
 
 		// Load per-repo settings and build resolved cache.
 		for _, repo := range msg.cfg.Repos {
@@ -381,7 +389,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.audioPlayer.Play()
 				}
 			}
-		} else if a.focusModeActive && a.focusSessionMinutes > 0 &&
+		} else if a.focusSessionMinutes > 0 &&
 			a.dashboard.panelFocus != focusLaunch &&
 			time.Since(a.sessionStart) >= time.Duration(a.focusSessionMinutes)*time.Minute {
 			// Auto-enter break when the work block elapses. The asymmetry
@@ -395,7 +403,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.focusBreakShortWarning = false
 			a.focusBreakTimerUp = false
 			a.focusBreakAnimFrame = 0
-			// Bypass focus-mode chime suppression — same rationale as
+			// Bypass the dashboard chime suppression — same rationale as
 			// the break-end branch above.
 			if a.audioPlayer != nil {
 				a.audioPlayer.Play()
@@ -497,14 +505,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// (Claude needs user input). ChimedForTurn is the shared gate:
 			// whichever fires first in a turn wins, and the other is
 			// silently skipped. The flag resets on Enter or UserPromptSubmit.
-			// In focus mode, StatusIdle chimes are suppressed — only
-			// StatusWaiting (permission prompts) still fires.
+			// StatusIdle chimes are suppressed — only StatusWaiting
+			// (permission prompts) still fires. Suppressing the idle chime
+			// is the wellness-first default: every block ends in idle, and
+			// chiming on every turn trains the user to ignore it.
 			if msg.event.Status == agent.StatusIdle || msg.event.Status == agent.StatusWaiting {
 				if mgr := a.managers[msg.repoPath]; mgr != nil {
 					if ag := mgr.Get(msg.event.AgentID); ag != nil && !ag.IsShell {
 						if ag.HasReceivedInput() && !ag.ChimedForTurn() {
 							resolved := a.resolvedCache[msg.repoPath]
-							chimeAllowed := !a.focusModeActive || msg.event.Status == agent.StatusWaiting
+							chimeAllowed := msg.event.Status == agent.StatusWaiting
 							if resolved.AudioEnabled && a.audioPlayer != nil && chimeAllowed {
 								a.audioPlayer.Play()
 								ag.MarkChimedForTurn()
@@ -577,31 +587,33 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		a.refreshAgentList()
-		// Find the new agent by ID, select it, and auto-focus its terminal.
+		// Find the new agent by ID, select it, and auto-focus its terminal in
+		// focusLaunch.
 		if msg.agentID != "" {
 			for i, item := range a.dashboard.items {
 				if item.kind == listItemAgent && item.agent != nil && item.agent.ID == msg.agentID {
 					a.dashboard.selected = i
-					if a.focusModeActive {
-						a.focusLaunchAgent = item.agent
-						a.focusLaunchSession = item.session
-						a.dashboard.panelFocus = focusLaunch
-						a.dashboard.scrollOffset = 0
-						item.agent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
-					} else {
-						a.dashboard.panelFocus = focusTerminal
+					a.focusLaunchAgent = item.agent
+					a.focusLaunchSession = item.session
+					a.dashboard.panelFocus = focusLaunch
+					a.dashboard.scrollOffset = 0
+					item.agent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+					// Move the pipeline cursor to the new session so when the
+					// user esc's back to focusList their cursor is on the row
+					// they just spawned.
+					if item.session != nil {
+						for idx, s := range a.dashboard.allInProgressSessions() {
+							if s.session == item.session {
+								a.focusActiveIdx = idx
+								a.focusCursorSection = focusSectionActive
+								a.syncFocusCursorToDashboard()
+								break
+							}
+						}
 					}
 					break
 				}
 			}
-		}
-		// Set initial dimensions before any output arrives. The alt-screen
-		// transition detector in the tick handler will fire a follow-up resize
-		// once Claude's TUI enters alternate screen mode.
-		// Skip the bulk resize when focusLaunch is active — the agent was already
-		// resized to fullscreen above and resizeSelectedForDashboard would shrink it.
-		if a.dashboard.panelFocus != focusLaunch {
-			a.resizeSelectedForDashboard()
 		}
 		return a, nil
 
@@ -1104,7 +1116,13 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Open in editor — same pattern as the existing "i" key handler.
 				sess := a.reviewSession
 				if sess != nil && sess.Worktree != nil {
-					repoPath := a.activeRepo
+					// Resolve the IDE command from the session's owning repo
+					// rather than a.activeRepo: pipeline cursor selection lets
+					// the user reach a session in any registered repo.
+					repoPath := a.repoPathForSession(sess.ID)
+					if repoPath == "" {
+						repoPath = a.activeRepo
+					}
 					ideCmd := strings.TrimSpace(a.resolvedCache[repoPath].IDECommand)
 					if ideCmd == "" {
 						a.setError("No IDE configured (set 'IDE Command' in settings)")
@@ -1130,8 +1148,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Focus-mode key handling (fullscreen pipeline view).
-		if a.focusModeActive && a.dashboard.panelFocus != focusReview {
+		// Pipeline view key handling (the only dashboard mode).
+		if a.dashboard.panelFocus != focusReview {
 			switch msg.String() {
 			case "up", "k":
 				a.moveFocusCursorUp()
@@ -1213,8 +1231,6 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, a.fetchReviewDiffCmd(sess)
 				}
 				return a, nil
-			case "d":
-				return a, nil
 			case "n":
 				if a.cfg != nil && len(a.cfg.Repos) > 1 {
 					// Apply the same soft agent-count guard as the single-repo
@@ -1288,32 +1304,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "f":
-			// Toggle focus mode. When exiting focus mode (entering review),
-			// record the review time.
-			if a.focusModeActive {
-				a.lastReviewAt = time.Now()
-				a.focusLaunchAgent = nil
-				a.focusLaunchSession = nil
-			}
-			a.focusModeActive = !a.focusModeActive
-			a.focusModeSwitches++
-			if a.focusModeActive {
-				a.dashboard.panelFocus = focusList
-				a.dashboard.clampToRepo()
-				// Park the cursor on the first non-empty section so the
-				// selection marker is visible the moment focus mode opens,
-				// rather than waiting for the next tick.
-				a.focusCursorSection = focusSectionActive
-				a.clampFocusCursor()
-				a.syncFocusCursorToDashboard()
-			}
-			return a, nil
-
 		case "b":
-			if !a.focusModeActive {
-				return a, nil
-			}
 			switch {
 			case !a.focusBreakMode:
 				// Enter break. Round(0) strips the monotonic reading so
@@ -1358,39 +1349,37 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.activeRepo = repoPath
 
-			// Soft agent-count guidance in focus mode.
-			if a.focusModeActive {
-				resolved := a.resolvedCache[repoPath]
-				if resolved.MaxConcurrentAgents > 0 && a.activeAgentCount() >= resolved.MaxConcurrentAgents {
-					if !a.agentLimitModalActive {
-						a.agentLimitModalActive = true
+			// Soft agent-count guidance.
+			resolved := a.resolvedCache[repoPath]
+			if resolved.MaxConcurrentAgents > 0 && a.activeAgentCount() >= resolved.MaxConcurrentAgents {
+				if !a.agentLimitModalActive {
+					a.agentLimitModalActive = true
+					return a, nil
+				}
+				// Second press: proceed, clear modal flag.
+				a.agentLimitModalActive = false
+			}
+
+			// Soft review-backlog limit.
+			resolvedForBacklog := a.resolvedCache[a.activeRepo]
+			if resolvedForBacklog.MaxReviewBacklog > 0 {
+				var backlogCount int
+				if mgr := a.managers[a.activeRepo]; mgr != nil {
+					for _, sess := range mgr.ListSessions() {
+						if sess.LifecyclePhase() == agent.LifecycleReadyForReview {
+							backlogCount++
+						}
+					}
+				}
+				if backlogCount >= resolvedForBacklog.MaxReviewBacklog {
+					if !a.focusBacklogWarning {
+						a.focusBacklogWarning = true
+						a.setError(fmt.Sprintf("n again to override — %d sessions awaiting review", backlogCount))
 						return a, nil
 					}
-					// Second press: proceed, clear modal flag.
-					a.agentLimitModalActive = false
-				}
-
-				// Soft review-backlog limit.
-				resolvedForBacklog := a.resolvedCache[a.activeRepo]
-				if resolvedForBacklog.MaxReviewBacklog > 0 {
-					var backlogCount int
-					if mgr := a.managers[a.activeRepo]; mgr != nil {
-						for _, sess := range mgr.ListSessions() {
-							if sess.LifecyclePhase() == agent.LifecycleReadyForReview {
-								backlogCount++
-							}
-						}
-					}
-					if backlogCount >= resolvedForBacklog.MaxReviewBacklog {
-						if !a.focusBacklogWarning {
-							a.focusBacklogWarning = true
-							a.setError(fmt.Sprintf("n again to override — %d sessions awaiting review", backlogCount))
-							return a, nil
-						}
-						a.focusBacklogWarning = false // second n: proceed
-					} else {
-						a.focusBacklogWarning = false
-					}
+					a.focusBacklogWarning = false // second n: proceed
+				} else {
+					a.focusBacklogWarning = false
 				}
 			}
 
@@ -1400,7 +1389,6 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.setError("Terminal size not yet known; try again")
 				return a, nil
 			}
-			resolved := a.resolvedCache[repoPath]
 			mgr := a.managers[repoPath]
 			if mgr == nil {
 				return a, nil
@@ -1420,16 +1408,13 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "c":
-			// Add an agent to the selected session.
-			sess := a.dashboard.selectedSession()
+			// Add an agent to the cursor-selected session.
+			sess := a.cursorSelectedSession()
 			if sess == nil {
 				a.setError("No session selected")
 				return a, nil
 			}
-			repoPath := a.dashboard.selectedRepoPath()
-			if repoPath == "" {
-				repoPath = a.activeRepo
-			}
+			repoPath := a.cursorSelectedRepoPath()
 			mgr := a.managers[repoPath]
 			if mgr == nil {
 				return a, nil
@@ -1457,13 +1442,13 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "e":
-			// Open the selected session's worktree in the configured IDE.
-			sess := a.dashboard.selectedSession()
+			// Open the cursor-selected session's worktree in the configured IDE.
+			sess := a.cursorSelectedSession()
 			if sess == nil {
 				a.setError("No session selected")
 				return a, nil
 			}
-			repoPath := a.dashboard.selectedRepoPath()
+			repoPath := a.cursorSelectedRepoPath()
 			ideCmd := strings.TrimSpace(a.resolvedCache[repoPath].IDECommand)
 			if ideCmd == "" {
 				a.setError("No IDE configured (set 'IDE Command' in settings)")
@@ -1494,10 +1479,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "o":
 			// Open branch picker to create session on existing branch/PR.
-			repoPath := a.dashboard.selectedRepoPath()
-			if repoPath == "" {
-				repoPath = a.activeRepo
-			}
+			// `o` is not session-scoped; the picker always targets the active repo.
+			repoPath := a.cursorSelectedRepoPath()
 			if repoPath == "" {
 				a.setError("No repo available")
 				return a, nil
@@ -1518,27 +1501,27 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, loadBranchPickerData(repoPath, a.ghClient, activeBranches)
 
 		case "t":
-			// Open or focus a shell terminal in the selected session.
-			sess := a.dashboard.selectedSession()
+			// Open or focus a shell terminal in the cursor-selected session.
+			sess := a.cursorSelectedSession()
 			if sess == nil {
 				a.setError("No session selected")
 				return a, nil
 			}
 			if sess.HasShell() {
-				// Shell exists — select it and enter focusTerminal.
-				for i, item := range a.dashboard.items {
-					if item.kind == listItemAgent && item.agent != nil && item.agent.IsShell && item.session == sess {
-						a.dashboard.selected = i
-						a.dashboard.panelFocus = focusTerminal
+				// Shell exists — open it in focusLaunch directly.
+				for _, ag := range sess.Agents() {
+					if ag.IsShell {
+						a.focusLaunchAgent = ag
+						a.focusLaunchSession = sess
+						a.dashboard.panelFocus = focusLaunch
+						a.dashboard.scrollOffset = 0
+						ag.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 						break
 					}
 				}
 				return a, nil
 			}
-			repoPath := a.dashboard.selectedRepoPath()
-			if repoPath == "" {
-				repoPath = a.activeRepo
-			}
+			repoPath := a.cursorSelectedRepoPath()
 			mgr := a.managers[repoPath]
 			if mgr == nil {
 				return a, nil
@@ -1563,8 +1546,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "p":
-			// Open the selected session's PR in the browser.
-			sess := a.dashboard.selectedSession()
+			// Open the cursor-selected session's PR in the browser.
+			sess := a.cursorSelectedSession()
 			if sess != nil {
 				if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
 					if err := openURL(entry.pr.URL); err != nil {
@@ -1581,52 +1564,45 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "d":
-			item := a.dashboard.selectedItem()
-			if item == nil {
+			// Diff the cursor-selected session's worktree.
+			sess := a.cursorSelectedSession()
+			if sess == nil {
 				return a, nil
 			}
-			if item.kind == listItemSession || item.kind == listItemAgent {
-				// Diff the session's worktree.
-				sess := item.session
-				if sess == nil {
-					return a, nil
-				}
-				rawDiff, err := git.Diff(item.repoPath, sess.Worktree)
-				if err != nil {
-					a.setError(err.Error())
-					return a, nil
-				}
-				m, err := diffmodel.Parse(rawDiff)
-				if err != nil {
-					a.setError(err.Error())
-					return a, nil
-				}
-				a.view = ViewDiff
-				a.diff = newDiffModel(sess.GetDisplayName(), m, a.width, a.height-1)
+			repoPath := a.cursorSelectedRepoPath()
+			rawDiff, err := git.Diff(repoPath, sess.Worktree)
+			if err != nil {
+				a.setError(err.Error())
 				return a, nil
 			}
-			// Repo header selected — remove the repo.
-			if a.cfg != nil {
-				_ = config.RemoveRepo(a.cfg, item.repoPath)
-				if err := config.Save(a.cfg); err != nil {
-					a.setError(err.Error())
-				}
-				a.refreshAgentList()
+			m, err := diffmodel.Parse(rawDiff)
+			if err != nil {
+				a.setError(err.Error())
+				return a, nil
 			}
+			a.view = ViewDiff
+			a.diff = newDiffModel(sess.GetDisplayName(), m, a.width, a.height-1)
 			return a, nil
 
 		case "x":
-			// Kill the selected agent asynchronously so the UI stays responsive.
-			item := a.dashboard.selectedItem()
-			if item == nil || item.kind != listItemAgent || item.agent == nil || item.session == nil {
+			// Kill the cursor-selected session's primary agent asynchronously.
+			sess := a.cursorSelectedSession()
+			if sess == nil {
+				a.setError("No session selected")
 				return a, nil
 			}
-			mgr := a.managers[item.repoPath]
+			ag := sess.PrimaryAgent()
+			if ag == nil {
+				a.setError("Session has no agents")
+				return a, nil
+			}
+			repoPath := a.cursorSelectedRepoPath()
+			mgr := a.managers[repoPath]
 			if mgr == nil {
 				return a, nil
 			}
-			agentID := item.agent.ID
-			sessionID := item.session.ID
+			agentID := ag.ID
+			sessionID := sess.ID
 			// Already dispatched — no-op to avoid double-kills.
 			if a.closingAgents[agentID] {
 				return a, nil
@@ -1644,22 +1620,23 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "X":
-			// Kill the entire parent session of the selected agent asynchronously.
-			item := a.dashboard.selectedItem()
-			if item == nil || item.session == nil {
+			// Kill the cursor-selected session entirely.
+			sess := a.cursorSelectedSession()
+			if sess == nil {
 				return a, nil
 			}
-			mgr := a.managers[item.repoPath]
+			repoPath := a.cursorSelectedRepoPath()
+			mgr := a.managers[repoPath]
 			if mgr == nil {
 				return a, nil
 			}
-			sessID := item.session.ID
+			sessID := sess.ID
 			// Already dispatched — no-op.
 			if a.closingSessions[sessID] {
 				return a, nil
 			}
 			var agentIDs []string
-			for _, ag := range item.session.Agents() {
+			for _, ag := range sess.Agents() {
 				agentIDs = append(agentIDs, ag.ID)
 				a.closingAgents[ag.ID] = true
 			}
@@ -1688,84 +1665,93 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			dashboardTopY++
 		}
 		a.confirmQuit = false
-		if msg.Button == tea.MouseLeft {
-			// focusLaunch tab bar click — handled before list/preview panel checks
-			// because focusLaunch is fullscreen and occupies all columns.
-			if a.dashboard.panelFocus == focusLaunch && a.focusLaunchSession != nil {
-				tabBarY := dashboardTopY + 1
-				if msg.Y == tabBarY {
-					if idx := a.focusLaunchTabIndexAt(msg.X); idx >= 0 {
-						agents := a.focusLaunchSession.Agents()
-						a.focusLaunchAgent = agents[idx]
-						a.dashboard.scrollOffset = 0
-						a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+		if msg.Button != tea.MouseLeft {
+			return a, nil
+		}
+
+		// focusLaunch: tab bar click switches the active agent; clicks inside
+		// the agent terminal seed a text selection.
+		if a.dashboard.panelFocus == focusLaunch && a.focusLaunchSession != nil {
+			tabBarY := dashboardTopY + 1
+			if msg.Y == tabBarY {
+				if idx := a.focusLaunchTabIndexAt(msg.X); idx >= 0 {
+					agents := a.focusLaunchSession.Agents()
+					a.focusLaunchAgent = agents[idx]
+					a.dashboard.scrollOffset = 0
+					a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+				}
+				return a, nil
+			}
+			if a.focusLaunchAgent != nil {
+				if termX, termY, inVP := a.screenToTermCellFocusLaunch(msg.X, msg.Y); inVP {
+					a.dashboard.selection = selection{
+						anchorX: termX,
+						anchorY: termY,
+						cursorX: termX,
+						cursorY: termY,
+						active:  true,
+						agentID: a.focusLaunchAgent.ID,
 					}
-					return a, nil
+				} else {
+					a.dashboard.clearSelection()
 				}
 			}
-			if msg.X < 31 {
-				// List panel click — map Y to item index.
-				// Subtract 2 for the SESSIONS title row and separator row.
-				itemIndex := msg.Y - dashboardTopY - 2
-				contentY := itemIndex // content-relative, same space as prSectionY
-				if a.dashboard.prSectionY >= 0 && contentY >= a.dashboard.prSectionY {
-					// Click in the PR checks summary section — open PR in browser.
-					sess := a.dashboard.selectedSession()
-					if sess != nil {
-						if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
-							if err := openURL(entry.pr.URL); err != nil {
-								a.setError(err.Error())
-							}
+			return a, nil
+		}
+
+		// Pipeline view: click on a session card moves the cursor; double-click
+		// activates (focusLaunch for active sessions, review panel for queue).
+		// PR-indicator click on a queue row opens the PR in the browser.
+		section, idx, hit := a.pipelineHitTest(msg.Y - dashboardTopY)
+		if !hit {
+			return a, nil
+		}
+		// Detect a PR-indicator click on review-queue rows: the prIndicator is
+		// right-aligned on the card; the X-column check below narrows the hit
+		// region without needing per-row Y granularity from pipelineHitTest.
+		if section == focusSectionReview {
+			reviewSessions := a.dashboard.reviewQueueSessions()
+			if idx < len(reviewSessions) {
+				sess := reviewSessions[idx].session
+				if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
+					indicatorWidth := prIndicatorWidth(entry)
+					if indicatorWidth > 0 && msg.X >= a.width-indicatorWidth-2 {
+						if err := openURL(entry.pr.URL); err != nil {
+							a.setError(err.Error())
 						}
-					}
-				} else if itemIndex >= 0 && itemIndex < len(a.dashboard.items) {
-					a.dashboard.selected = itemIndex
-					a.dashboard.clampToAgent()
-					a.dashboard.panelFocus = focusList
-					a.dashboard.scrollOffset = 0
-				}
-			} else if msg.X >= 32 {
-				// Preview panel click — enter focusTerminal if an agent is selected.
-				// X==31 is the list panel's right border and is intentionally ignored.
-				if a.dashboard.panelFocus == focusList && a.dashboard.selectedAgent() != nil {
-					a.dashboard.panelFocus = focusTerminal
-				}
-				// Seed a fresh selection if the click landed inside the agent's
-				// VT viewport. dragSeen=false until a subsequent motion event
-				// confirms an actual drag — a click without drag should not
-				// produce a 1-cell selection.
-				if a.dashboard.panelFocus == focusTerminal {
-					if ag := a.dashboard.selectedAgent(); ag != nil {
-						if termX, termY, inVP := a.screenToTermCell(msg.X, msg.Y); inVP {
-							a.dashboard.selection = selection{
-								anchorX: termX,
-								anchorY: termY,
-								cursorX: termX,
-								cursorY: termY,
-								active:  true,
-								agentID: ag.ID,
-							}
-						} else {
-							// Click outside the viewport (e.g., on the border)
-							// drops any prior selection — matches what the user
-							// expects from "click somewhere else".
-							a.dashboard.clearSelection()
-						}
-					}
-				} else if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
-					if termX, termY, inVP := a.screenToTermCellFocusLaunch(msg.X, msg.Y); inVP {
-						a.dashboard.selection = selection{
-							anchorX: termX,
-							anchorY: termY,
-							cursorX: termX,
-							cursorY: termY,
-							active:  true,
-							agentID: a.focusLaunchAgent.ID,
-						}
-					} else {
-						a.dashboard.clearSelection()
+						// Reset double-click bookkeeping: this click was a PR
+						// activation, not a card selection. Without this, a
+						// quick follow-up card click on the same section/idx
+						// could read a stale lastPipelineClick and fire a
+						// phantom double-click into the review panel.
+						a.lastPipelineClick = time.Time{}
+						return a, nil
 					}
 				}
+			}
+		}
+		// Move the cursor to the clicked session.
+		now := time.Now()
+		isDoubleClick := !a.lastPipelineClick.IsZero() &&
+			now.Sub(a.lastPipelineClick) < 500*time.Millisecond &&
+			a.lastPipelineClickSec == section &&
+			a.lastPipelineClickIdx == idx
+		a.lastPipelineClick = now
+		a.lastPipelineClickSec = section
+		a.lastPipelineClickIdx = idx
+
+		a.focusCursorSection = section
+		switch section {
+		case focusSectionActive:
+			a.focusActiveIdx = idx
+		case focusSectionReview:
+			a.focusQueueIndex = idx
+		}
+		a.syncFocusCursorToDashboard()
+
+		if isDoubleClick {
+			if cmd, ok := a.activateFocusCursor(); ok {
+				return a, cmd
 			}
 		}
 		return a, nil
@@ -1934,7 +1920,6 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.dashboard, cmd = a.dashboard.Update(msg)
 	// On selection change, update diff stats from cache (or trigger refresh).
 	if a.dashboard.selected != prevSelected {
-		a.recomputePRSectionY()
 		a.updateDashboardDiffStats()
 		if sess := a.dashboard.selectedSession(); sess != nil {
 			entry := a.diffStatsCache[sess.ID]
@@ -2221,9 +2206,7 @@ func (a App) updateGlobalConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.dashboard.sidebarWidth = newResolved.SidebarWidth
 			a.resizeAllForDashboard()
 		}
-		// Refresh wellness settings from updated global config. FocusModeEnabled
-		// is the startup default; saving the form must not override the live
-		// runtime toggle state — only `f` controls that.
+		// Refresh wellness settings from updated global config.
 		a.focusSessionMinutes = newResolved.FocusSessionMinutes
 		a.focusBreakMinutes = newResolved.FocusBreakMinutes
 		a.view = ViewDashboard
@@ -2236,20 +2219,6 @@ func (a App) updateGlobalConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	a.globalConfig, cmd = a.globalConfig.Update(msg)
 	return a, cmd
-}
-
-// resizeSelectedForDashboard resizes the currently selected agent's VT and PTY
-// to match the dashboard preview panel dimensions.
-func (a *App) resizeSelectedForDashboard() {
-	ag := a.dashboard.selectedAgent()
-	if ag == nil {
-		return
-	}
-	w := a.dashboard.fixedTermWidth()
-	h := a.dashboard.fixedTermHeight()
-	if w > 0 && h > 0 {
-		ag.Resize(h, w)
-	}
 }
 
 // resizeAgentForDashboard resizes a specific agent to the dashboard preview dimensions.
@@ -2409,7 +2378,6 @@ func (a *App) forwardWheelToAgent(ag *agent.Agent, msg tea.MouseWheelMsg) {
 func (a *App) refreshAgentList() {
 	a.dashboard.closingAgents = a.closingAgents
 	a.dashboard.closingSessions = a.closingSessions
-	a.dashboard.focusModeActive = a.focusModeActive
 	a.dashboard.sessionElapsed = time.Since(a.sessionStart)
 	a.dashboard.lastReviewAt = a.lastReviewAt
 	a.dashboard.focusSessionMinutes = a.focusSessionMinutes
@@ -2503,32 +2471,143 @@ func (a *App) refreshAgentList() {
 		a.dashboard.selected = len(items) - 1
 	}
 	a.dashboard.items = items
-	if a.focusModeActive {
-		a.dashboard.clampToRepo()
-	} else {
-		a.dashboard.clampToAgent()
-	}
+	a.dashboard.clampToRepo()
 
 	// If the selection landed in a different repo, search backward for the
-	// nearest item in the original repo (an agent or the repo header).
+	// nearest repo header in the original repo so the dashboard's items
+	// `selected` row stays anchored to the right repo for things like
+	// activeRepoPath and the cross-repo summary.
 	if prevRepo != "" && len(items) > 0 && items[a.dashboard.selected].repoPath != prevRepo {
 		for i := a.dashboard.selected; i >= 0; i-- {
-			if items[i].repoPath == prevRepo && items[i].kind != listItemSession {
-				if !a.focusModeActive || items[i].kind == listItemRepo {
-					a.dashboard.selected = i
-					break
-				}
+			if items[i].repoPath == prevRepo && items[i].kind == listItemRepo {
+				a.dashboard.selected = i
+				break
 			}
 		}
 	}
 	a.clampFocusCursor()
-	a.recomputePRSectionY()
 }
 
 // focusSectionCounts returns the number of rows in each fullscreen-focus section.
 func (a *App) focusSectionCounts() (active, review int) {
 	return len(a.dashboard.allInProgressSessions()),
 		len(a.dashboard.reviewQueueSessions())
+}
+
+// pipelineHitTest maps a mouse-click Y coordinate (relative to the dashboard
+// content origin, not screen) to the session under the click. Mirrors the
+// vertical layout in dashboardModel.renderFullscreenFocus:
+//
+//	row 0:                 header line
+//	row 1:                 separator
+//	rows 2..5:             pipeline widget (4 rows)
+//	row 6:                 blank
+//	row 7:                 "SESSIONS" label (only if active sessions exist)
+//	row 8..11:             card 0 (4 rows)
+//	row 12:                blank between cards
+//	row 13..16:            card 1
+//	... etc
+//	row N:                 blank
+//	row N+1:               "REVIEW QUEUE" label (only if queue is non-empty)
+//	row N+2..3:            review row 0 (2 rows)
+//	row N+4:               blank
+//	... etc
+//
+// Returns (section, index, true) when the click landed on a session card,
+// otherwise ok=false. dashboardContentY is the click's Y relative to the
+// dashboard content origin (i.e. screenY - dashboardTopY).
+func (a *App) pipelineHitTest(dashboardContentY int) (focusSection, int, bool) {
+	const (
+		headerRows   = 1
+		sepRows      = 1
+		pipelineRows = 4
+		blankRows    = 1
+		labelRows    = 1
+		cardRows     = 4
+		reviewRows   = 2
+	)
+	activeSessions := a.dashboard.allInProgressSessions()
+	reviewSessions := a.dashboard.reviewQueueSessions()
+
+	cursor := headerRows + sepRows + pipelineRows + blankRows
+	if len(activeSessions) > 0 {
+		cursor += labelRows
+		for i := range activeSessions {
+			start := cursor
+			end := start + cardRows
+			if dashboardContentY >= start && dashboardContentY < end {
+				return focusSectionActive, i, true
+			}
+			cursor = end
+			if i < len(activeSessions)-1 {
+				cursor += blankRows
+			}
+		}
+		cursor += blankRows
+	}
+	if len(reviewSessions) > 0 {
+		cursor += labelRows
+		for i := range reviewSessions {
+			start := cursor
+			end := start + reviewRows
+			if dashboardContentY >= start && dashboardContentY < end {
+				return focusSectionReview, i, true
+			}
+			cursor = end
+			if i < len(reviewSessions)-1 {
+				cursor += blankRows
+			}
+		}
+	}
+	return focusSectionActive, 0, false
+}
+
+// cursorSelectedSession returns the session under the pipeline cursor, or nil
+// when the cursor's section is empty. Workflow keys (c, x, X, t, e, p, d) use
+// this rather than dashboard.selectedSession() because the pipeline addresses
+// sessions by section + index, not by a `selected` row in the items list.
+func (a *App) cursorSelectedSession() *agent.Session {
+	switch a.focusCursorSection {
+	case focusSectionActive:
+		sessions := a.dashboard.allInProgressSessions()
+		if len(sessions) == 0 {
+			return nil
+		}
+		idx := a.focusActiveIdx
+		if idx < 0 || idx >= len(sessions) {
+			idx = 0
+		}
+		return sessions[idx].session
+	case focusSectionReview:
+		sessions := a.dashboard.reviewQueueSessions()
+		if len(sessions) == 0 {
+			return nil
+		}
+		idx := a.focusQueueIndex
+		if idx < 0 || idx >= len(sessions) {
+			idx = 0
+		}
+		return sessions[idx].session
+	}
+	return nil
+}
+
+// cursorSelectedRepoPath returns the repo path of the session under the
+// pipeline cursor, or the active repo when no session is selected.
+func (a *App) cursorSelectedRepoPath() string {
+	sess := a.cursorSelectedSession()
+	if sess != nil {
+		// Find the repo that owns this session.
+		for _, item := range a.dashboard.items {
+			if item.kind == listItemSession && item.session == sess {
+				return item.repoPath
+			}
+			if item.kind == listItemAgent && item.session == sess {
+				return item.repoPath
+			}
+		}
+	}
+	return a.activeRepo
 }
 
 // clampFocusCursor keeps the per-section indices and the cursor section in
@@ -2636,8 +2715,9 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 }
 
 // openSessionInFocusLaunch picks the most-active agent in sess and opens it
-// fullscreen in focusLaunch. Priority: Active > Waiting > Idle > Starting >
-// Done/Error. Falls back to agents[0] when all have equal priority.
+// fullscreen in focusLaunch. Priority is shared with Session.PrimaryAgent via
+// agent.AgentStatusPriority. Falls back to agents[0] when all have equal
+// priority.
 func (a *App) openSessionInFocusLaunch(sess *agent.Session) bool {
 	if sess == nil {
 		return false
@@ -2646,24 +2726,10 @@ func (a *App) openSessionInFocusLaunch(sess *agent.Session) bool {
 	if len(agents) == 0 {
 		return false
 	}
-	statusPriority := func(ag *agent.Agent) int {
-		switch ag.Status() {
-		case agent.StatusActive:
-			return 5
-		case agent.StatusWaiting:
-			return 4
-		case agent.StatusIdle:
-			return 3
-		case agent.StatusStarting:
-			return 2
-		default:
-			return 1
-		}
-	}
 	target := agents[0]
-	bestPri := statusPriority(agents[0])
+	bestPri := agent.AgentStatusPriority(agents[0])
 	for _, ag := range agents[1:] {
-		if pri := statusPriority(ag); pri > bestPri {
+		if pri := agent.AgentStatusPriority(ag); pri > bestPri {
 			bestPri = pri
 			target = ag
 		}
@@ -2711,9 +2777,6 @@ func (a App) View() tea.View {
 		}
 		body := a.dashboard.View()
 		hints := dashboardHints
-		if a.focusModeActive && a.dashboard.panelFocus != focusReview {
-			hints = focusModeHints
-		}
 		switch a.dashboard.panelFocus {
 		case focusTerminal:
 			hints = focusTerminalHints
@@ -2724,7 +2787,7 @@ func (a App) View() tea.View {
 		}
 		// Break mode hint or work-mode break suggestion.
 		// Skip when in focusLaunch: b routes to the agent terminal there, not to break control.
-		if a.focusModeActive && a.dashboard.panelFocus != focusLaunch {
+		if a.dashboard.panelFocus != focusLaunch {
 			if a.focusBreakMode {
 				if a.focusBreakTimerUp {
 					hints = []keyHint{{key: "b", desc: "resume focus"}}
@@ -2901,7 +2964,6 @@ func (a *App) updateDashboardDiffStats() {
 func (a *App) updateDashboardPRCache() {
 	a.dashboard.prCache = a.prCache
 	a.dashboard.prPollStates = a.prPollStates
-	a.recomputePRSectionY()
 }
 
 // repoPathForSession returns the repo path containing the given session, or "" if not found.
@@ -3207,7 +3269,6 @@ type wellnessLogEntry struct {
 	DurationMin     int    `json:"duration_min"`
 	AgentsCreated   int    `json:"agents_created"`
 	SessionsCreated int    `json:"sessions_created"`
-	FocusSwitches   int    `json:"focus_switches"`
 	BlocksCompleted int    `json:"blocks_completed"`
 }
 
@@ -3233,7 +3294,6 @@ func (a *App) writeWellnessLog() {
 		DurationMin:     int(elapsed.Minutes()),
 		AgentsCreated:   a.agentsCreatedCount,
 		SessionsCreated: a.sessionsCreatedCount,
-		FocusSwitches:   a.focusModeSwitches,
 		BlocksCompleted: a.focusBlockCount,
 	}
 	data, err := json.Marshal(entry)
@@ -3266,7 +3326,14 @@ type reviewDiffMsg struct {
 func (a App) fetchReviewDiffCmd(sess *agent.Session) tea.Cmd {
 	sessID := sess.ID
 	wt := sess.Worktree
-	repoPath := a.activeRepo
+	// Use the session's owning repo, not a.activeRepo: with cursor-based
+	// selection the targeted session can live in any registered repo. Falling
+	// back to activeRepo only when the lookup fails keeps single-repo flows
+	// working as before.
+	repoPath := a.repoPathForSession(sessID)
+	if repoPath == "" {
+		repoPath = a.activeRepo
+	}
 	return func() tea.Msg {
 		files, agg, err := git.GetPerFileDiffStats(repoPath, wt)
 		if err != nil {
@@ -3320,54 +3387,4 @@ func openURL(url string) error {
 		cmd = exec.Command("xdg-open", url)
 	}
 	return cmd.Start()
-}
-
-// recomputePRSectionY updates d.prSectionY with the content-relative row index
-// (0-indexed, after the AGENTS title and separator) where the PR checks section
-// begins, or -1 when no PR section is rendered. Call after any layout change.
-// Must mirror the truncation logic in dashboardModel.renderList so mouse clicks
-// map to the correct visual rows.
-func (a *App) recomputePRSectionY() {
-	d := &a.dashboard
-	d.prSectionY = -1
-
-	sess := d.selectedSession()
-	if sess == nil {
-		return
-	}
-	entry := a.prCache[sess.ID]
-	if entry == nil || entry.pr == nil {
-		return
-	}
-
-	contentH := d.contentHeight()
-	// Budget for the PR panel, matching renderList.
-	prBudget := 6
-	if half := contentH / 2; prBudget > half {
-		prBudget = half
-	}
-	if prBudget < 2 {
-		return
-	}
-
-	agentListHeight := len(d.items)
-	// Apply the same list truncation renderList performs, so availCheckHeight
-	// reflects the post-truncation list length.
-	if agentListHeight > contentH-prBudget {
-		maxList := contentH - prBudget
-		if maxList < 1 {
-			maxList = 1
-		}
-		agentListHeight = maxList
-	}
-	maxCheckHeight := contentH / 3
-	availCheckHeight := contentH - agentListHeight
-	if availCheckHeight > maxCheckHeight && maxCheckHeight >= prBudget {
-		availCheckHeight = maxCheckHeight
-	}
-	if availCheckHeight < 2 {
-		return
-	}
-
-	d.prSectionY = contentH - availCheckHeight
 }

@@ -30,7 +30,6 @@ func TestRenderFocusActiveCursor(t *testing.T) {
 	d := newDashboardModel()
 	d.width = 120
 	d.height = 39
-	d.focusModeActive = true
 	d.focusCursorSection = focusSectionActive
 	d.focusActiveIdx = 1
 	d.items = []listItem{

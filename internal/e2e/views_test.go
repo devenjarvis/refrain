@@ -19,7 +19,7 @@ func TestSettingsOverlay(t *testing.T) {
 	s := newSession(t)
 	s.Start()
 
-	s.WaitForText("AGENTS", 10000)
+	s.WaitForText("FOCUS", 10000)
 
 	// Press "s" to open global settings overlay; wait for a known field label.
 	s.Press("s")
@@ -29,14 +29,14 @@ func TestSettingsOverlay(t *testing.T) {
 	// Press Escape to return to dashboard.
 	s.Press("Escape")
 	s.WaitForText(dashboardAnchor, 5000)
-	s.AssertScreenContains("AGENTS")
+	s.AssertScreenContains("FOCUS")
 }
 
 func TestDiffView(t *testing.T) {
 	s := newSession(t)
 	s.Start()
 
-	s.WaitForText("AGENTS", 10000)
+	s.WaitForText("FOCUS", 10000)
 
 	// Create a new session — "n" key auto-focuses the terminal.
 	s.Press("n")
@@ -59,14 +59,14 @@ func TestDiffView(t *testing.T) {
 	// Exit diff view.
 	s.Press("Escape")
 	s.WaitForText(dashboardAnchor, 5000)
-	s.AssertScreenContains("AGENTS")
+	s.AssertScreenContains("FOCUS")
 }
 
 func TestFileBrowser(t *testing.T) {
 	s := newSession(t)
 	s.Start()
 
-	s.WaitForText("AGENTS", 10000)
+	s.WaitForText("FOCUS", 10000)
 
 	// Press "a" to open file browser overlay; wait for a header that's unique
 	// to the browser.
@@ -77,5 +77,5 @@ func TestFileBrowser(t *testing.T) {
 	// Press Escape to close.
 	s.Press("Escape")
 	s.WaitForText(dashboardAnchor, 5000)
-	s.AssertScreenContains("AGENTS")
+	s.AssertScreenContains("FOCUS")
 }

@@ -12,10 +12,10 @@ func TestDashboardRendersOnStartup(t *testing.T) {
 	s.Start()
 
 	// Wait for the dashboard to render.
-	s.WaitForText("AGENTS", 10000)
+	s.WaitForText("FOCUS", 10000)
 
-	// Verify: "AGENTS" header appears in sidebar.
-	s.AssertScreenContains("AGENTS")
+	// Verify: "FOCUS" header appears in sidebar.
+	s.AssertScreenContains("FOCUS")
 
 	// Verify: status bar hints render.
 	s.AssertScreenContains("navigate")
@@ -33,7 +33,7 @@ func TestNavigationJK(t *testing.T) {
 	s.Start()
 
 	// Wait for the dashboard to render.
-	s.WaitForText("AGENTS", 10000)
+	s.WaitForText("FOCUS", 10000)
 
 	// Create first session: press "n" which creates a session and auto-focuses terminal.
 	// Wait for the status bar to show terminal-focus hints (e.g., "back" for esc).
