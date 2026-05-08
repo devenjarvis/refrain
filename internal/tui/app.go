@@ -1202,9 +1202,12 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 							sess.SetLifecyclePhase(agent.LifecycleInProgress)
 							a.clampFocusCursor()
 							a.syncFocusCursorToDashboard()
-							return a, nil
 						}
 					}
+					// Cursor is on Planning — even if the section was empty in
+					// a fast-tick race window, swallow the press here so we
+					// don't accidentally trigger the wellness break.
+					return a, nil
 				}
 				// Fall through to the global break handler below.
 			case "m":
@@ -2404,7 +2407,9 @@ func (a *App) focusSectionCounts() [4]int {
 
 // focusSectionIdx returns a pointer to the per-section cursor index field for
 // the given section, so navigation/clamp logic can move and bound-check them
-// without a fan-out switch in every caller.
+// without a fan-out switch in every caller. Panics on an unknown section so a
+// future focusSection constant added without updating this switch surfaces as
+// a clear test failure rather than silently corrupting focusBuildingIdx.
 func (a *App) focusSectionIdx(s focusSection) *int {
 	switch s {
 	case focusSectionPlanning:
@@ -2416,10 +2421,12 @@ func (a *App) focusSectionIdx(s focusSection) *int {
 	case focusSectionShipping:
 		return &a.focusShippingIdx
 	}
-	return &a.focusBuildingIdx
+	panic(fmt.Sprintf("focusSectionIdx: unknown focusSection %d", s))
 }
 
 // focusSectionItems returns the listItem slice that backs the given section.
+// Panics on an unknown section, matching focusSectionIdx, so a missing case
+// fails fast in tests instead of silently rendering an empty section.
 func (a *App) focusSectionItems(s focusSection) []listItem {
 	switch s {
 	case focusSectionPlanning:
@@ -2431,7 +2438,7 @@ func (a *App) focusSectionItems(s focusSection) []listItem {
 	case focusSectionShipping:
 		return a.dashboard.shippingSessions()
 	}
-	return nil
+	panic(fmt.Sprintf("focusSectionItems: unknown focusSection %d", s))
 }
 
 // pipelineHitTest maps a mouse-click Y coordinate (relative to the dashboard
@@ -2698,8 +2705,6 @@ func (a *App) openSessionInFocusLaunch(sess *agent.Session) bool {
 	return true
 }
 
-// moveFocusCursorDown moves the fullscreen-focus cursor down one row. When at
-// the bottom of the current section, it transitions to the next non-empty section.
 func (a App) View() tea.View {
 	var content string
 

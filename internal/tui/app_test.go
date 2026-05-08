@@ -454,8 +454,8 @@ func TestShiftEscForwardsEscapeToAgent(t *testing.T) {
 }
 
 // TestPipelineClickMovesCursor verifies that a left click on a session card in
-// the SESSIONS section moves focusBuildingIdx to the clicked session, and a click
-// on a REVIEW QUEUE row sets the cursor section + index accordingly. Single
+// the BUILDING section moves focusBuildingIdx to the clicked session, and a
+// click on a REVIEWING row sets the cursor section + index accordingly. Single
 // click does not activate; double-click within 500ms does.
 func TestPipelineClickMovesCursor(t *testing.T) {
 	sessA := agent.NewSessionForTest("a", "active-a")
@@ -479,17 +479,18 @@ func TestPipelineClickMovesCursor(t *testing.T) {
 	app.focusCursorSection = focusSectionBuilding
 	app.focusBuildingIdx = 0
 
-	// Pipeline layout: header(0) + sep(1) + pipeline widget(2..5) + blank(6)
-	// + "SESSIONS"(7) + card0(8..11) + blank(12) + card1(13..16) + blank(17)
-	// + "REVIEW QUEUE"(18) + queue0(19..20).
-	// Click on card 1 (active session B) at Y=14.
+	// Pipeline layout (Planning is empty so its label/rows are skipped):
+	// header(0) + sep(1) + pipeline widget(2..5) + blank(6)
+	// + "BUILDING"(7) + card0(8..11) + blank(12) + card1(13..16) + blank(17)
+	// + "REVIEWING"(18) + queue0(19..20).
+	// Click on card 1 (building session B) at Y=14.
 	model, _ := app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 14})
 	app = model.(App)
 	if app.focusCursorSection != focusSectionBuilding || app.focusBuildingIdx != 1 {
-		t.Fatalf("expected cursor on active[1] after click on sessB card, got section=%v idx=%d", app.focusCursorSection, app.focusBuildingIdx)
+		t.Fatalf("expected cursor on building[1] after click on sessB card, got section=%v idx=%d", app.focusCursorSection, app.focusBuildingIdx)
 	}
 
-	// Click on the review queue row at Y=19.
+	// Click on the reviewing row at Y=19.
 	model, _ = app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 19})
 	app = model.(App)
 	if app.focusCursorSection != focusSectionReview || app.focusReviewIdx != 0 {
@@ -503,6 +504,49 @@ func TestPipelineClickMovesCursor(t *testing.T) {
 	app = model.(App)
 	if app.focusCursorSection != focusSectionBuilding || app.focusBuildingIdx != 0 {
 		t.Errorf("right-click should not move cursor")
+	}
+}
+
+// TestPipelineClickMovesCursor_PlanningAndShipping covers the two new sections
+// added in the four-phase refactor. The hit-test uses the same pointer-
+// assignment path (*focusSectionIdx(section) = idx) for every section, so a
+// click on a Planning card must set focusPlanningIdx and a click on a Shipping
+// row must set focusShippingIdx.
+func TestPipelineClickMovesCursor_PlanningAndShipping(t *testing.T) {
+	sessP := agent.NewSessionForTest("p", "planning-p")
+	sessP.SetLifecyclePhase(agent.LifecyclePlanning)
+	sessS := agent.NewSessionForTest("s", "shipping-s")
+	sessS.SetLifecyclePhase(agent.LifecycleShipping)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.dashboard.items = []listItem{
+		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
+		{kind: listItemSession, repoPath: "/r", session: sessP},
+		{kind: listItemSession, repoPath: "/r", session: sessS},
+	}
+	// Start the cursor on Building so a successful click has somewhere to move
+	// the selection FROM (Building is empty here, but the cursor is held there
+	// until the first click).
+	app.focusCursorSection = focusSectionBuilding
+
+	// Pipeline layout (Building + Reviewing are empty so their rows are
+	// skipped): header(0) + sep(1) + pipeline widget(2..5) + blank(6)
+	// + "PLANNING"(7) + card0(8..11) + blank(12)
+	// + "SHIPPING"(13) + ship0(14..15).
+	model, _ := app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 9})
+	app = model.(App)
+	if app.focusCursorSection != focusSectionPlanning || app.focusPlanningIdx != 0 {
+		t.Fatalf("expected cursor on planning[0] after click on planning card, got section=%v idx=%d", app.focusCursorSection, app.focusPlanningIdx)
+	}
+
+	model, _ = app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 14})
+	app = model.(App)
+	if app.focusCursorSection != focusSectionShipping || app.focusShippingIdx != 0 {
+		t.Fatalf("expected cursor on shipping[0] after click on shipping row, got section=%v idx=%d", app.focusCursorSection, app.focusShippingIdx)
 	}
 }
 
@@ -1414,7 +1458,7 @@ func TestClampToRepo(t *testing.T) {
 
 // makeFocusModeApp wires up an App in focus mode with two in-progress sessions
 // and one ready-for-review session. Used by the tests below to exercise unified
-// cursor navigation across the Active and Review sections.
+// cursor navigation across the Building and Reviewing sections.
 func makeFocusModeApp(t *testing.T) (App, *agent.Session) {
 	t.Helper()
 	sessA := &agent.Session{Name: "active-a"}
@@ -2386,5 +2430,74 @@ func TestBKey_OutsidePlanning_FallsThroughToBreak(t *testing.T) {
 	}
 	if sessB.LifecyclePhase() != agent.LifecycleInProgress {
 		t.Errorf("Building session phase changed unexpectedly: %v", sessB.LifecyclePhase())
+	}
+}
+
+// TestActivateFocusCursor_Shipping_OpensPRWhenURLCached verifies that pressing
+// enter (or double-clicking) a Shipping row with a cached PR URL takes the
+// PR-open branch: it returns ok=true without dropping the user into
+// focusLaunch, so they end up in the browser rather than back-to-back agent
+// terminal + browser tab. openURL itself fires fire-and-forget and may launch
+// a real browser in the test environment — the existing review-queue PR-click
+// tests rely on the same pattern, so we stay consistent.
+func TestActivateFocusCursor_Shipping_OpensPRWhenURLCached(t *testing.T) {
+	sessS := agent.NewSessionForTest("s", "ship-s")
+	sessS.SetLifecyclePhase(agent.LifecycleShipping)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.dashboard.items = []listItem{
+		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
+		{kind: listItemSession, repoPath: "/r", session: sessS},
+	}
+	app.prCache = map[string]*prCacheEntry{
+		sessS.ID: {pr: &github.PRState{Number: 7, URL: "https://example/pr/7"}},
+	}
+	app.focusCursorSection = focusSectionShipping
+	app.focusShippingIdx = 0
+
+	_, ok := app.activateFocusCursor()
+	if !ok {
+		t.Fatal("expected activateFocusCursor on Shipping with cached URL to return ok=true")
+	}
+	if app.dashboard.panelFocus == focusLaunch {
+		t.Fatalf("expected panelFocus to stay out of focusLaunch when PR URL was opened, got %v", app.dashboard.panelFocus)
+	}
+}
+
+// TestActivateFocusCursor_Shipping_FallsBackToTerminalWithoutURL verifies that
+// activating a Shipping row whose PR isn't cached yet (or has no URL) falls
+// through to openSessionInFocusLaunch instead of silently no-op'ing — so the
+// user can still drive the agent (e.g. run gh pr create manually). With a test
+// session that has zero agents, openSessionInFocusLaunch returns false; we
+// only need to assert that the PR-open early return is NOT taken (panelFocus
+// would stay out of focusLaunch in either case, but ok=false distinguishes
+// "no agents to open" from the URL-present "ok=true and skipped focusLaunch"
+// path above).
+func TestActivateFocusCursor_Shipping_FallsBackToTerminalWithoutURL(t *testing.T) {
+	sessS := agent.NewSessionForTest("s", "ship-s")
+	sessS.SetLifecyclePhase(agent.LifecycleShipping)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.dashboard.items = []listItem{
+		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
+		{kind: listItemSession, repoPath: "/r", session: sessS},
+	}
+	// No prCache entry: the URL branch is unreachable so activate falls
+	// through to openSessionInFocusLaunch, which returns false because the
+	// test session has no agents — exactly the dispatch we want to pin.
+	app.focusCursorSection = focusSectionShipping
+	app.focusShippingIdx = 0
+
+	_, ok := app.activateFocusCursor()
+	if ok {
+		t.Fatalf("expected ok=false from openSessionInFocusLaunch fallback (no agents), got ok=true")
 	}
 }
