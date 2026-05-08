@@ -34,7 +34,10 @@ type Session struct {
 	summarizing    bool   // true while an async task-summary goroutine is in flight; gates double-dispatch
 }
 
-// newSession creates a session with the given worktree.
+// newSession creates a session with the given worktree. New sessions land in
+// LifecyclePlanning; the user advances to LifecycleInProgress (Building) with
+// the 'b' key once they're done scoping the work. Restored sessions overwrite
+// this default via SetLifecyclePhase from the persisted state.
 func newSession(id, name string, wt *git.WorktreeInfo) *Session {
 	return &Session{
 		ID:             id,
@@ -42,7 +45,7 @@ func newSession(id, name string, wt *git.WorktreeInfo) *Session {
 		Worktree:       wt,
 		CreatedAt:      time.Now(),
 		agents:         make(map[string]*Agent),
-		lifecyclePhase: LifecycleInProgress,
+		lifecyclePhase: LifecyclePlanning,
 	}
 }
 

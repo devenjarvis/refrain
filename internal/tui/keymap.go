@@ -23,11 +23,25 @@ const (
 )
 
 // focusSection identifies which row group the fullscreen focus-mode cursor is
-// currently on. The cursor traverses Active → Review Queue in render order,
-// with j/k transitioning between sections at the boundaries.
+// currently on. The cursor traverses Planning → Building → Reviewing → Shipping
+// in render order, with j/k transitioning between sections at the boundaries.
 type focusSection int
 
 const (
-	focusSectionActive focusSection = iota // in-progress sessions
-	focusSectionReview                     // ready-for-review sessions
+	focusSectionPlanning focusSection = iota // sessions the user is still scoping (LifecyclePlanning)
+	focusSectionBuilding                     // sessions actively running (LifecycleInProgress)
+	focusSectionReview                       // ReadyForReview + InReview
+	focusSectionShipping                     // PR open, awaiting CI/merge (LifecycleShipping)
 )
+
+// focusSectionsInOrder lists the sections in the order they render on the
+// pipeline. Navigation, hit-testing, and clamp logic walk this list rather
+// than hard-coding section transitions.
+func focusSectionsInOrder() []focusSection {
+	return []focusSection{
+		focusSectionPlanning,
+		focusSectionBuilding,
+		focusSectionReview,
+		focusSectionShipping,
+	}
+}

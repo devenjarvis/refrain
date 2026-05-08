@@ -124,8 +124,10 @@ type dashboardModel struct {
 	focusBreakAnimFrame    int
 	focusBreakShortWarning bool
 	focusBreakTimerUp      bool
-	focusActiveIdx         int            // index of highlighted in-progress session row
-	focusQueueIndex        int            // index into ReadyForReview sessions in fullscreen focus mode
+	focusPlanningIdx       int            // index into planningSessions()
+	focusBuildingIdx       int            // index into buildingSessions() (was the in-progress list)
+	focusReviewIdx         int            // index into reviewQueueSessions()
+	focusShippingIdx       int            // index into shippingSessions()
 	focusCursorSection     focusSection   // which fullscreen-focus section the cursor is on
 	activeRepoName         string         // display name of the active repo
 	activeRepoPath         string         // canonical path of the active repo (for pipeline filtering)
@@ -341,38 +343,58 @@ func (d dashboardModel) emptyView() string {
 	return lipgloss.Place(d.width, d.contentHeight(), lipgloss.Center, lipgloss.Center, content)
 }
 
-// reviewQueueSessions returns listItems for sessions in ReadyForReview or
-// InReview phase. InReview sessions are kept in the queue so that an ESC out
-// of the review panel never orphans them — without this, a session whose user
-// peeked at the review panel and backed out (or hit "open PR" with no PR
-// cached) would disappear from both SESSIONS (InProgress only) and the queue,
-// even though the pipeline IN REVIEW count showed it was still there.
-func (d dashboardModel) reviewQueueSessions() []listItem {
+// sessionsInPhase returns listItems for sessions whose lifecycle phase matches
+// any of the given phases. Repo filtering is intentionally NOT applied here
+// because the pipeline shows cross-repo work; callers that want a per-repo
+// view should filter the result themselves.
+func (d dashboardModel) sessionsInPhase(phases ...agent.LifecyclePhase) []listItem {
 	var result []listItem
 	for _, item := range d.items {
 		if item.kind != listItemSession || item.session == nil {
 			continue
 		}
 		phase := item.session.LifecyclePhase()
-		if phase == agent.LifecycleReadyForReview || phase == agent.LifecycleInReview {
-			result = append(result, item)
+		for _, p := range phases {
+			if phase == p {
+				result = append(result, item)
+				break
+			}
 		}
 	}
 	return result
 }
 
-// allInProgressSessions returns listItems for all sessions in InProgress phase,
+// planningSessions returns the sessions the user is still scoping. Planning is
+// the entry point for new work — sessions advance to Building (InProgress) once
+// the user presses 'b'.
+func (d dashboardModel) planningSessions() []listItem {
+	return d.sessionsInPhase(agent.LifecyclePlanning)
+}
+
+// reviewQueueSessions returns listItems for sessions in ReadyForReview or
+// InReview phase. InReview sessions are kept in the queue so that an ESC out
+// of the review panel never orphans them — without this, a session whose user
+// peeked at the review panel and backed out (or hit "open PR" with no PR
+// cached) would disappear from both BUILDING (InProgress only) and the queue,
+// even though the pipeline IN REVIEW count showed it was still there.
+func (d dashboardModel) reviewQueueSessions() []listItem {
+	return d.sessionsInPhase(agent.LifecycleReadyForReview, agent.LifecycleInReview)
+}
+
+// shippingSessions returns sessions whose PR is open and awaiting CI/merge.
+// They leave this list automatically when polling detects a merge (transition
+// to LifecycleComplete) or when the user presses 'c' in the review panel.
+func (d dashboardModel) shippingSessions() []listItem {
+	return d.sessionsInPhase(agent.LifecycleShipping)
+}
+
+// buildingSessions returns listItems for all sessions in InProgress phase,
 // including those whose process has finished (DoneAt set) but have not yet been
-// moved to ReadyForReview. This merges what was previously the active list and
-// the nudge-row source into a single unified list.
-func (d dashboardModel) allInProgressSessions() []listItem {
-	var result []listItem
-	for _, item := range d.items {
-		if item.kind == listItemSession && item.session != nil &&
-			item.session.LifecyclePhase() == agent.LifecycleInProgress {
-			result = append(result, item)
-		}
-	}
+// moved to ReadyForReview. This is the "active work" section — agents are
+// running, the user is interacting with them, and the work has moved past the
+// scoping done in Planning.
+func (d dashboardModel) buildingSessions() []listItem {
+	result := d.sessionsInPhase(agent.LifecycleInProgress)
 	sort.SliceStable(result, func(i, j int) bool {
 		pi := d.sessionFocusPriority(result[i].session)
 		pj := d.sessionFocusPriority(result[j].session)
@@ -689,9 +711,10 @@ func rightAlign(left, right string, width int) string {
 	return left + strings.Repeat(" ", pad) + right
 }
 
-// renderPipelineWidget renders the 4-cell pipeline row.
+// renderPipelineWidget renders the 4-cell pipeline row, one cell per phase:
+// PLANNING → BUILDING → REVIEWING → SHIPPING. Counts mirror the section lists.
 func (d dashboardModel) renderPipelineWidget(width int) string {
-	var inProgress, readyForReview, inReview, shipping int
+	var planning, building, reviewing, shipping int
 	for _, item := range d.items {
 		if item.kind != listItemSession || item.session == nil {
 			continue
@@ -700,12 +723,12 @@ func (d dashboardModel) renderPipelineWidget(width int) string {
 			continue
 		}
 		switch item.session.LifecyclePhase() {
+		case agent.LifecyclePlanning:
+			planning++
 		case agent.LifecycleInProgress:
-			inProgress++
-		case agent.LifecycleReadyForReview:
-			readyForReview++
-		case agent.LifecycleInReview:
-			inReview++
+			building++
+		case agent.LifecycleReadyForReview, agent.LifecycleInReview:
+			reviewing++
 		case agent.LifecycleShipping:
 			shipping++
 		}
@@ -729,9 +752,9 @@ func (d dashboardModel) renderPipelineWidget(width int) string {
 
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		cell("IN PROGRESS", inProgress, lipgloss.Color("#7ec8e3"), false),
-		cell("READY TO REVIEW", readyForReview, ColorWarning, readyForReview > 0),
-		cell("IN REVIEW", inReview, lipgloss.Color("#9b7fdb"), false),
+		cell("PLANNING", planning, ColorMuted, false),
+		cell("BUILDING", building, lipgloss.Color("#7ec8e3"), false),
+		cell("REVIEWING", reviewing, ColorWarning, reviewing > 0),
 		cell("SHIPPING", shipping, lipgloss.Color("#5ab58a"), false),
 	)
 }
@@ -1207,77 +1230,43 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 	lines = append(lines, d.renderPipelineWidget(width))
 	lines = append(lines, "")
 
-	// Unified sessions list
-	allSessions := d.allInProgressSessions()
-	if len(allSessions) > 0 {
-		lines = append(lines, StyleSubtle.Render("SESSIONS"))
-		for i, item := range allSessions {
-			sess := item.session
-			selected := d.focusCursorSection == focusSectionActive && i == d.focusActiveIdx
-			card := d.renderFocusSessionCard(sess, selected, width)
+	// Section render order matches focusSectionsInOrder() so navigation walks
+	// the same sequence the user reads top-to-bottom.
+	planningItems := d.planningSessions()
+	if len(planningItems) > 0 {
+		lines = append(lines, StyleSubtle.Render("PLANNING"))
+		for i, item := range planningItems {
+			selected := d.focusCursorSection == focusSectionPlanning && i == d.focusPlanningIdx
+			card := d.renderFocusSessionCard(item.session, selected, width)
 			lines = append(lines, card...)
-			if i < len(allSessions)-1 {
+			if i < len(planningItems)-1 {
 				lines = append(lines, "")
 			}
 		}
 		lines = append(lines, "")
 	}
 
-	// Review queue
+	buildingItems := d.buildingSessions()
+	if len(buildingItems) > 0 {
+		lines = append(lines, StyleSubtle.Render("BUILDING"))
+		for i, item := range buildingItems {
+			selected := d.focusCursorSection == focusSectionBuilding && i == d.focusBuildingIdx
+			card := d.renderFocusSessionCard(item.session, selected, width)
+			lines = append(lines, card...)
+			if i < len(buildingItems)-1 {
+				lines = append(lines, "")
+			}
+		}
+		lines = append(lines, "")
+	}
+
 	reviewSessions := d.reviewQueueSessions()
 	if len(reviewSessions) > 0 {
-		lines = append(lines, StyleSubtle.Render("REVIEW QUEUE"))
+		lines = append(lines, StyleSubtle.Render("REVIEWING"))
 		for i, item := range reviewSessions {
-			sess := item.session
-			selected := d.focusCursorSection == focusSectionReview && i == d.focusQueueIndex
-			name := sess.GetDisplayName()
-			age := ""
-			if !sess.DoneAt().IsZero() {
-				mins := int(time.Since(sess.DoneAt()).Minutes())
-				age = fmt.Sprintf("done %dm ago", mins)
-			}
-			var cardStyle lipgloss.Style
-			if selected {
-				cardStyle = lipgloss.NewStyle().Foreground(ColorWarning)
-			} else {
-				cardStyle = StyleSubtle
-			}
-			prefix := "  "
-			if selected {
-				prefix = cardStyle.Render("> ")
-			}
-
-			// Line 1: prefix + name (+ optional reviewing tag) (left) + prIndicator (right-aligned)
-			nameRendered := cardStyle.Render(name)
-			if sess.LifecyclePhase() == agent.LifecycleInReview {
-				tag := lipgloss.NewStyle().Foreground(lipgloss.Color("#9b7fdb")).Render(" (reviewing)")
-				nameRendered += tag
-			}
-			line1 := prefix + nameRendered
-			if prEntry := d.prCache[sess.ID]; prEntry != nil {
-				if prInd := prIndicator(prEntry); prInd != "" {
-					line1 = rightAlign(prefix+nameRendered, prInd, width)
-				}
-			}
-
-			// Line 2: task display (left) + age (right-aligned)
-			var taskDisplay string
-			origPrompt := sess.OriginalPrompt()
-			switch {
-			case sess.HasTaskSummary() && sess.TaskSummary() != "":
-				taskDisplay = cardStyle.Render(truncateVisible(sess.TaskSummary(), width-30))
-			case origPrompt != "":
-				taskDisplay = cardStyle.Render(truncateVisible(origPrompt, width-30))
-			default:
-				taskDisplay = cardStyle.Render("…")
-			}
-			left2 := "  " + taskDisplay
-			line2 := left2
-			if age != "" {
-				line2 = rightAlign(left2, StyleSubtle.Render(age), width)
-			}
-
-			lines = append(lines, line1, line2)
+			selected := d.focusCursorSection == focusSectionReview && i == d.focusReviewIdx
+			row := d.renderQueueRow(item.session, selected, ColorWarning, width)
+			lines = append(lines, row...)
 			if i < len(reviewSessions)-1 {
 				lines = append(lines, "")
 			}
@@ -1285,7 +1274,76 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		lines = append(lines, "")
 	}
 
+	shippingItems := d.shippingSessions()
+	if len(shippingItems) > 0 {
+		lines = append(lines, StyleSubtle.Render("SHIPPING"))
+		for i, item := range shippingItems {
+			selected := d.focusCursorSection == focusSectionShipping && i == d.focusShippingIdx
+			row := d.renderQueueRow(item.session, selected, lipgloss.Color("#5ab58a"), width)
+			lines = append(lines, row...)
+			if i < len(shippingItems)-1 {
+				lines = append(lines, "")
+			}
+		}
+		lines = append(lines, "")
+	}
+
 	return lipgloss.Place(width, height, lipgloss.Left, lipgloss.Top, strings.Join(lines, "\n"))
+}
+
+// renderQueueRow renders a 2-line review/shipping row. selectedColor is the
+// accent for the cursor stripe and prefix when selected (warning for review,
+// success for shipping). Used by both the REVIEWING and SHIPPING sections so
+// they share layout/age/prIndicator handling.
+func (d dashboardModel) renderQueueRow(sess *agent.Session, selected bool, selectedColor lipgloss.Color, width int) []string {
+	name := sess.GetDisplayName()
+	age := ""
+	if !sess.DoneAt().IsZero() {
+		mins := int(time.Since(sess.DoneAt()).Minutes())
+		age = fmt.Sprintf("done %dm ago", mins)
+	}
+	var cardStyle lipgloss.Style
+	if selected {
+		cardStyle = lipgloss.NewStyle().Foreground(selectedColor)
+	} else {
+		cardStyle = StyleSubtle
+	}
+	prefix := "  "
+	if selected {
+		prefix = cardStyle.Render("> ")
+	}
+
+	nameRendered := cardStyle.Render(name)
+	// The (reviewing) tag distinguishes InReview rows in the merged Reviewing
+	// section so the user can tell which session is open in the panel.
+	if sess.LifecyclePhase() == agent.LifecycleInReview {
+		tag := lipgloss.NewStyle().Foreground(lipgloss.Color("#9b7fdb")).Render(" (reviewing)")
+		nameRendered += tag
+	}
+	line1 := prefix + nameRendered
+	if prEntry := d.prCache[sess.ID]; prEntry != nil {
+		if prInd := prIndicator(prEntry); prInd != "" {
+			line1 = rightAlign(prefix+nameRendered, prInd, width)
+		}
+	}
+
+	var taskDisplay string
+	origPrompt := sess.OriginalPrompt()
+	switch {
+	case sess.HasTaskSummary() && sess.TaskSummary() != "":
+		taskDisplay = cardStyle.Render(truncateVisible(sess.TaskSummary(), width-30))
+	case origPrompt != "":
+		taskDisplay = cardStyle.Render(truncateVisible(origPrompt, width-30))
+	default:
+		taskDisplay = cardStyle.Render("…")
+	}
+	left2 := "  " + taskDisplay
+	line2 := left2
+	if age != "" {
+		line2 = rightAlign(left2, StyleSubtle.Render(age), width)
+	}
+
+	return []string{line1, line2}
 }
 
 // applySelectionHighlight inserts reverse-video SGR codes around selected column

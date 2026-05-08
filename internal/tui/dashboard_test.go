@@ -339,7 +339,7 @@ func TestAllInProgressSessions_SortOrder(t *testing.T) {
 		{kind: listItemAgent, session: sessActive, agent: agActive},
 	}
 
-	sessions := d.allInProgressSessions()
+	sessions := d.buildingSessions()
 	if len(sessions) != 2 {
 		t.Fatalf("expected 2 sessions, got %d", len(sessions))
 	}
@@ -375,7 +375,7 @@ func TestAllInProgressSessions_StableWithinPriority(t *testing.T) {
 	}
 
 	for i := 0; i < 5; i++ {
-		sessions := d.allInProgressSessions()
+		sessions := d.buildingSessions()
 		if len(sessions) != 2 {
 			t.Fatalf("iter %d: expected 2 sessions, got %d", i, len(sessions))
 		}
@@ -422,5 +422,64 @@ func TestReviewQueueSessions_IncludesInReview(t *testing.T) {
 	}
 	if got["in-progress"] {
 		t.Error("InProgress session must not appear in review queue")
+	}
+}
+
+// TestPlanningSessions_OnlyPlanningPhase pins the planning section to
+// LifecyclePlanning so a session that has advanced to Building doesn't
+// double-show on the dashboard.
+func TestPlanningSessions_OnlyPlanningPhase(t *testing.T) {
+	sessPlanning := &agent.Session{ID: "sp", Name: "planning"}
+	// LifecyclePlanning is the zero value; explicit for clarity.
+	sessPlanning.SetLifecyclePhase(agent.LifecyclePlanning)
+
+	sessBuilding := &agent.Session{ID: "sb", Name: "building"}
+	sessBuilding.SetLifecyclePhase(agent.LifecycleInProgress)
+
+	sessReady := &agent.Session{ID: "sr", Name: "ready"}
+	sessReady.SetLifecyclePhase(agent.LifecycleReadyForReview)
+
+	sessShipping := &agent.Session{ID: "ss", Name: "shipping"}
+	sessShipping.SetLifecyclePhase(agent.LifecycleShipping)
+
+	d := newDashboardModel()
+	d.prCache = make(map[string]*prCacheEntry)
+	d.items = []listItem{
+		{kind: listItemSession, session: sessPlanning},
+		{kind: listItemSession, session: sessBuilding},
+		{kind: listItemSession, session: sessReady},
+		{kind: listItemSession, session: sessShipping},
+	}
+
+	planning := d.planningSessions()
+	if len(planning) != 1 || planning[0].session != sessPlanning {
+		t.Fatalf("expected exactly the planning session, got %d entries", len(planning))
+	}
+}
+
+// TestShippingSessions_OnlyShippingPhase mirrors planningSessions but for the
+// Shipping section: only LifecycleShipping rows appear, so a session that has
+// already merged (LifecycleComplete) leaves the dashboard.
+func TestShippingSessions_OnlyShippingPhase(t *testing.T) {
+	sessShipping := &agent.Session{ID: "ss", Name: "shipping"}
+	sessShipping.SetLifecyclePhase(agent.LifecycleShipping)
+
+	sessComplete := &agent.Session{ID: "sc", Name: "merged"}
+	sessComplete.SetLifecyclePhase(agent.LifecycleComplete)
+
+	sessReady := &agent.Session{ID: "sr", Name: "ready"}
+	sessReady.SetLifecyclePhase(agent.LifecycleReadyForReview)
+
+	d := newDashboardModel()
+	d.prCache = make(map[string]*prCacheEntry)
+	d.items = []listItem{
+		{kind: listItemSession, session: sessShipping},
+		{kind: listItemSession, session: sessComplete},
+		{kind: listItemSession, session: sessReady},
+	}
+
+	shipping := d.shippingSessions()
+	if len(shipping) != 1 || shipping[0].session != sessShipping {
+		t.Fatalf("expected exactly the shipping session, got %d entries", len(shipping))
 	}
 }

@@ -454,7 +454,7 @@ func TestShiftEscForwardsEscapeToAgent(t *testing.T) {
 }
 
 // TestPipelineClickMovesCursor verifies that a left click on a session card in
-// the SESSIONS section moves focusActiveIdx to the clicked session, and a click
+// the SESSIONS section moves focusBuildingIdx to the clicked session, and a click
 // on a REVIEW QUEUE row sets the cursor section + index accordingly. Single
 // click does not activate; double-click within 500ms does.
 func TestPipelineClickMovesCursor(t *testing.T) {
@@ -476,8 +476,8 @@ func TestPipelineClickMovesCursor(t *testing.T) {
 		{kind: listItemSession, repoPath: "/r", session: sessB},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
 	}
-	app.focusCursorSection = focusSectionActive
-	app.focusActiveIdx = 0
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 0
 
 	// Pipeline layout: header(0) + sep(1) + pipeline widget(2..5) + blank(6)
 	// + "SESSIONS"(7) + card0(8..11) + blank(12) + card1(13..16) + blank(17)
@@ -485,23 +485,23 @@ func TestPipelineClickMovesCursor(t *testing.T) {
 	// Click on card 1 (active session B) at Y=14.
 	model, _ := app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 14})
 	app = model.(App)
-	if app.focusCursorSection != focusSectionActive || app.focusActiveIdx != 1 {
-		t.Fatalf("expected cursor on active[1] after click on sessB card, got section=%v idx=%d", app.focusCursorSection, app.focusActiveIdx)
+	if app.focusCursorSection != focusSectionBuilding || app.focusBuildingIdx != 1 {
+		t.Fatalf("expected cursor on active[1] after click on sessB card, got section=%v idx=%d", app.focusCursorSection, app.focusBuildingIdx)
 	}
 
 	// Click on the review queue row at Y=19.
 	model, _ = app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 19})
 	app = model.(App)
-	if app.focusCursorSection != focusSectionReview || app.focusQueueIndex != 0 {
-		t.Fatalf("expected cursor on review[0] after click on queue row, got section=%v idx=%d", app.focusCursorSection, app.focusQueueIndex)
+	if app.focusCursorSection != focusSectionReview || app.focusReviewIdx != 0 {
+		t.Fatalf("expected cursor on review[0] after click on queue row, got section=%v idx=%d", app.focusCursorSection, app.focusReviewIdx)
 	}
 
 	// Right-click does nothing.
-	app.focusActiveIdx = 0
-	app.focusCursorSection = focusSectionActive
+	app.focusBuildingIdx = 0
+	app.focusCursorSection = focusSectionBuilding
 	model, _ = app.Update(tea.MouseClickMsg{Button: tea.MouseRight, X: 30, Y: 14})
 	app = model.(App)
-	if app.focusCursorSection != focusSectionActive || app.focusActiveIdx != 0 {
+	if app.focusCursorSection != focusSectionBuilding || app.focusBuildingIdx != 0 {
 		t.Errorf("right-click should not move cursor")
 	}
 }
@@ -1247,8 +1247,8 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 	// Any other key press should dismiss the modal without spawning and without
 	// performing its normal action (e.g. 'j' must not move the focus cursor).
 	app.agentLimitModalActive = true
-	beforeIdx := app.focusActiveIdx
-	beforeQueue := app.focusQueueIndex
+	beforeIdx := app.focusBuildingIdx
+	beforeQueue := app.focusReviewIdx
 	beforeSection := app.focusCursorSection
 	model, dismissCmd := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
@@ -1265,9 +1265,9 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 	if v := app.View(); strings.Contains(v.Content, "Focus limit reached") {
 		t.Fatal("Expected rendered View to NOT contain 'Focus limit reached' after cancel")
 	}
-	if app.focusActiveIdx != beforeIdx || app.focusQueueIndex != beforeQueue || app.focusCursorSection != beforeSection {
+	if app.focusBuildingIdx != beforeIdx || app.focusReviewIdx != beforeQueue || app.focusCursorSection != beforeSection {
 		t.Fatalf("Expected focus cursor unchanged after dismiss key; before=(idx=%d,q=%d,sec=%v) after=(idx=%d,q=%d,sec=%v)",
-			beforeIdx, beforeQueue, beforeSection, app.focusActiveIdx, app.focusQueueIndex, app.focusCursorSection)
+			beforeIdx, beforeQueue, beforeSection, app.focusBuildingIdx, app.focusReviewIdx, app.focusCursorSection)
 	}
 }
 
@@ -1443,48 +1443,48 @@ func makeFocusModeApp(t *testing.T) (App, *agent.Session) {
 // the boundaries instead of bouncing two indices in lockstep.
 func TestFocusModeNavigationCrossesSections(t *testing.T) {
 	app, _ := makeFocusModeApp(t)
-	if app.focusCursorSection != focusSectionActive {
+	if app.focusCursorSection != focusSectionBuilding {
 		// clampFocusCursor only runs from refreshAgentList; here we drive the
 		// state directly. Make the starting condition explicit.
-		app.focusCursorSection = focusSectionActive
+		app.focusCursorSection = focusSectionBuilding
 	}
 
 	// Start at active[0].
-	if app.focusActiveIdx != 0 || app.focusCursorSection != focusSectionActive {
-		t.Fatalf("expected start at active[0], got section=%v active=%d", app.focusCursorSection, app.focusActiveIdx)
+	if app.focusBuildingIdx != 0 || app.focusCursorSection != focusSectionBuilding {
+		t.Fatalf("expected start at active[0], got section=%v active=%d", app.focusCursorSection, app.focusBuildingIdx)
 	}
 
 	// j: active[0] → active[1].
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.focusCursorSection != focusSectionActive || app.focusActiveIdx != 1 {
-		t.Fatalf("after 1st j: expected active[1], got section=%v active=%d", app.focusCursorSection, app.focusActiveIdx)
+	if app.focusCursorSection != focusSectionBuilding || app.focusBuildingIdx != 1 {
+		t.Fatalf("after 1st j: expected active[1], got section=%v active=%d", app.focusCursorSection, app.focusBuildingIdx)
 	}
 
 	// j: active[1] (last) → review[0].
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.focusCursorSection != focusSectionReview || app.focusQueueIndex != 0 {
-		t.Fatalf("after 2nd j: expected review[0], got section=%v review=%d", app.focusCursorSection, app.focusQueueIndex)
+	if app.focusCursorSection != focusSectionReview || app.focusReviewIdx != 0 {
+		t.Fatalf("after 2nd j: expected review[0], got section=%v review=%d", app.focusCursorSection, app.focusReviewIdx)
 	}
 
 	// j: review[0] (last review, no further section) → no-op.
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.focusCursorSection != focusSectionReview || app.focusQueueIndex != 0 {
-		t.Fatalf("after 3rd j: expected review[0] (no-op), got section=%v review=%d", app.focusCursorSection, app.focusQueueIndex)
+	if app.focusCursorSection != focusSectionReview || app.focusReviewIdx != 0 {
+		t.Fatalf("after 3rd j: expected review[0] (no-op), got section=%v review=%d", app.focusCursorSection, app.focusReviewIdx)
 	}
 
 	// k: review[0] → active[1].
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	app = model.(App)
-	if app.focusCursorSection != focusSectionActive || app.focusActiveIdx != 1 {
-		t.Fatalf("after k from review: expected active[1], got section=%v active=%d", app.focusCursorSection, app.focusActiveIdx)
+	if app.focusCursorSection != focusSectionBuilding || app.focusBuildingIdx != 1 {
+		t.Fatalf("after k from review: expected active[1], got section=%v active=%d", app.focusCursorSection, app.focusBuildingIdx)
 	}
 
 	// Verify the dashboard model received the synced state immediately.
-	if app.dashboard.focusCursorSection != focusSectionActive || app.dashboard.focusActiveIdx != 1 {
-		t.Fatalf("dashboard not synced: section=%v active=%d", app.dashboard.focusCursorSection, app.dashboard.focusActiveIdx)
+	if app.dashboard.focusCursorSection != focusSectionBuilding || app.dashboard.focusBuildingIdx != 1 {
+		t.Fatalf("dashboard not synced: section=%v active=%d", app.dashboard.focusCursorSection, app.dashboard.focusBuildingIdx)
 	}
 }
 
@@ -1521,6 +1521,9 @@ func TestFocusModeEnterOnActiveOpensFocusLaunch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// New sessions land in Planning by default; this test wants the row in the
+	// Building section so the focusSectionBuilding cursor lands on it.
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 
 	app := NewApp()
 	app.width = 120
@@ -1534,8 +1537,8 @@ func TestFocusModeEnterOnActiveOpensFocusLaunch(t *testing.T) {
 		{kind: listItemSession, repoPath: dir, session: sess},
 		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
 	}
-	app.focusCursorSection = focusSectionActive
-	app.focusActiveIdx = 0
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 0
 
 	// Press enter on the active section: should jump into focusLaunch on ag.
 	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: ""})
@@ -1550,7 +1553,7 @@ func TestFocusModeEnterOnActiveOpensFocusLaunch(t *testing.T) {
 
 // TestFocusModeNavigationVisibleOnActiveOnly verifies that when only Active
 // rows exist (no review queue), j/k still move within the active section and
-// the dashboard sees the updated focusActiveIdx so the selection marker can
+// the dashboard sees the updated focusBuildingIdx so the selection marker can
 // render. This is the bug the user reported: an invisible cursor.
 func TestFocusModeNavigationVisibleOnActiveOnly(t *testing.T) {
 	sessA := &agent.Session{Name: "active-a"}
@@ -1568,27 +1571,27 @@ func TestFocusModeNavigationVisibleOnActiveOnly(t *testing.T) {
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessB},
 	}
-	app.focusCursorSection = focusSectionActive
+	app.focusCursorSection = focusSectionBuilding
 
 	// j moves within active (active is the only non-empty section).
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.dashboard.focusActiveIdx != 1 {
-		t.Fatalf("expected dashboard.focusActiveIdx=1 after j, got %d", app.dashboard.focusActiveIdx)
+	if app.dashboard.focusBuildingIdx != 1 {
+		t.Fatalf("expected dashboard.focusBuildingIdx=1 after j, got %d", app.dashboard.focusBuildingIdx)
 	}
 
 	// j again at the bottom: no-op (no other section to fall through to).
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.dashboard.focusActiveIdx != 1 {
-		t.Fatalf("expected dashboard.focusActiveIdx=1 (no-op at end), got %d", app.dashboard.focusActiveIdx)
+	if app.dashboard.focusBuildingIdx != 1 {
+		t.Fatalf("expected dashboard.focusBuildingIdx=1 (no-op at end), got %d", app.dashboard.focusBuildingIdx)
 	}
 
 	// k moves back up.
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	app = model.(App)
-	if app.dashboard.focusActiveIdx != 0 {
-		t.Fatalf("expected dashboard.focusActiveIdx=0 after k, got %d", app.dashboard.focusActiveIdx)
+	if app.dashboard.focusBuildingIdx != 0 {
+		t.Fatalf("expected dashboard.focusBuildingIdx=0 after k, got %d", app.dashboard.focusBuildingIdx)
 	}
 }
 
@@ -1609,15 +1612,15 @@ func TestClampFocusCursorHopsToNonEmptySection(t *testing.T) {
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
 	}
-	app.focusCursorSection = focusSectionActive
-	app.focusActiveIdx = 0
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 0
 
 	app.clampFocusCursor()
 	if app.focusCursorSection != focusSectionReview {
 		t.Fatalf("expected hop to review section, got %v", app.focusCursorSection)
 	}
-	if app.focusQueueIndex != 0 {
-		t.Fatalf("expected review index 0, got %d", app.focusQueueIndex)
+	if app.focusReviewIdx != 0 {
+		t.Fatalf("expected review index 0, got %d", app.focusReviewIdx)
 	}
 }
 
@@ -1705,7 +1708,7 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 }
 
 // TestFocusMode_MKey_IsCursorAware verifies that pressing "m" in focus pipeline
-// view marks the session under the cursor (focusActiveIdx), not the first matching
+// view marks the session under the cursor (focusBuildingIdx), not the first matching
 // session in the list.
 func TestFocusMode_MKey_IsCursorAware(t *testing.T) {
 	sessA := agent.NewSessionForTest("a", "active-a")
@@ -1725,8 +1728,8 @@ func TestFocusMode_MKey_IsCursorAware(t *testing.T) {
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessB},
 	}
-	app.focusCursorSection = focusSectionActive
-	app.focusActiveIdx = 1 // cursor on sessB, not sessA
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 1 // cursor on sessB, not sessA
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 	app = model.(App)
@@ -1769,7 +1772,7 @@ func TestFocusMode_MKey_CursorOnReviewSection_ShowsError(t *testing.T) {
 	app, sessA, _ := makeFocusModeMRApp(t)
 	sessA.AddTestAgent("a-1", false, agent.StatusIdle)
 	app.focusCursorSection = focusSectionReview
-	app.focusQueueIndex = 0
+	app.focusReviewIdx = 0
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 	app = model.(App)
@@ -1777,8 +1780,8 @@ func TestFocusMode_MKey_CursorOnReviewSection_ShowsError(t *testing.T) {
 	if app.err == "" {
 		t.Fatal("expected error message when pressing m with cursor on review section")
 	}
-	if !strings.Contains(app.err, "review queue") {
-		t.Errorf("expected error to mention review queue, got %q", app.err)
+	if !strings.Contains(app.err, "Building") {
+		t.Errorf("expected error to mention Building, got %q", app.err)
 	}
 	// sessA must NOT have transitioned phase.
 	if sessA.LifecyclePhase() != agent.LifecycleInProgress {
@@ -1792,8 +1795,8 @@ func TestFocusMode_MKey_CursorOnReviewSection_ShowsError(t *testing.T) {
 func TestFocusMode_MKey_ActiveSession_ShowsRunningError(t *testing.T) {
 	app, sessA, _ := makeFocusModeMRApp(t)
 	sessA.AddTestAgent("a-1", false, agent.StatusActive)
-	app.focusCursorSection = focusSectionActive
-	app.focusActiveIdx = 0
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 0
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 	app = model.(App)
@@ -1815,8 +1818,8 @@ func TestFocusMode_MKey_ActiveSession_ShowsRunningError(t *testing.T) {
 func TestFocusMode_MKey_IdleSession_TransitionsToReady(t *testing.T) {
 	app, sessA, _ := makeFocusModeMRApp(t)
 	sessA.AddTestAgent("a-1", false, agent.StatusIdle)
-	app.focusCursorSection = focusSectionActive
-	app.focusActiveIdx = 0
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 0
 
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 	app = model.(App)
@@ -1824,8 +1827,8 @@ func TestFocusMode_MKey_IdleSession_TransitionsToReady(t *testing.T) {
 	if sessA.LifecyclePhase() != agent.LifecycleReadyForReview {
 		t.Errorf("expected sessA phase=ReadyForReview, got %v", sessA.LifecyclePhase())
 	}
-	if app.focusQueueIndex != 0 {
-		t.Errorf("expected focusQueueIndex reset to 0, got %d", app.focusQueueIndex)
+	if app.focusReviewIdx != 0 {
+		t.Errorf("expected focusReviewIdx reset to 0, got %d", app.focusReviewIdx)
 	}
 	if cmd == nil {
 		t.Error("expected a diff-fetch Cmd, got nil")
@@ -1851,8 +1854,8 @@ func TestFocusMode_RKey_EmptyQueue_ShowsError(t *testing.T) {
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 	}
-	app.focusCursorSection = focusSectionActive
-	app.focusActiveIdx = 0
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 0
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	app = model.(App)
@@ -1873,11 +1876,11 @@ func TestFocusMode_RKey_EmptyQueue_ShowsError(t *testing.T) {
 
 // TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel verifies that pressing "r"
 // with at least one review-phase session opens the review panel and selects the
-// session at focusQueueIndex.
+// session at focusReviewIdx.
 func TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	app.focusCursorSection = focusSectionReview
-	app.focusQueueIndex = 0
+	app.focusReviewIdx = 0
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	app = model.(App)
@@ -2037,8 +2040,8 @@ func TestPipeline_DKey_OpensDiffViewer(t *testing.T) {
 		{kind: listItemRepo, repoPath: dir, repoName: "repo"},
 		{kind: listItemSession, repoPath: dir, session: sess},
 	}
-	app.focusCursorSection = focusSectionActive
-	app.focusActiveIdx = 0
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 0
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	app = model.(App)
@@ -2111,8 +2114,8 @@ func TestPipeline_PKey_NoPRSilent(t *testing.T) {
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sess},
 	}
-	app.focusCursorSection = focusSectionActive
-	app.focusActiveIdx = 0
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 0
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	app = model.(App)
@@ -2235,5 +2238,128 @@ func TestRepoPathForSession_FindsSessionsAcrossMultiRepo(t *testing.T) {
 	// Unknown session ID returns "" so call sites can fall back to activeRepo.
 	if got := app.repoPathForSession("does-not-exist"); got != "" {
 		t.Errorf("repoPathForSession(unknown) = %q, want \"\"", got)
+	}
+}
+
+// makeFourPhaseApp wires up an app with one session in each of the four
+// pipeline phases so tests can exercise navigation across all sections without
+// requiring a real manager / process.
+func makeFourPhaseApp(t *testing.T) (App, *agent.Session, *agent.Session, *agent.Session, *agent.Session) {
+	t.Helper()
+	sessP := &agent.Session{Name: "planning"}
+	sessP.SetLifecyclePhase(agent.LifecyclePlanning)
+	sessB := &agent.Session{Name: "building"}
+	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
+	sessR := &agent.Session{Name: "review"}
+	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
+	sessS := &agent.Session{Name: "shipping"}
+	sessS.SetLifecyclePhase(agent.LifecycleShipping)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.dashboard.items = []listItem{
+		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
+		{kind: listItemSession, repoPath: "/r", session: sessP},
+		{kind: listItemSession, repoPath: "/r", session: sessB},
+		{kind: listItemSession, repoPath: "/r", session: sessR},
+		{kind: listItemSession, repoPath: "/r", session: sessS},
+	}
+	app.focusCursorSection = focusSectionPlanning
+	return app, sessP, sessB, sessR, sessS
+}
+
+// TestFourPhaseNavigation_JKWalksAllSections verifies that j moves through the
+// pipeline in render order Planning → Building → Reviewing → Shipping with one
+// keystroke per row, and k walks back the same path.
+func TestFourPhaseNavigation_JKWalksAllSections(t *testing.T) {
+	app, _, _, _, _ := makeFourPhaseApp(t)
+
+	want := []focusSection{
+		focusSectionBuilding,
+		focusSectionReview,
+		focusSectionShipping,
+	}
+	for i, section := range want {
+		model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		app = model.(App)
+		if app.focusCursorSection != section {
+			t.Fatalf("after %d j-presses: expected section %v, got %v", i+1, section, app.focusCursorSection)
+		}
+	}
+	// k walks back: shipping → review → building → planning.
+	wantBack := []focusSection{
+		focusSectionReview,
+		focusSectionBuilding,
+		focusSectionPlanning,
+	}
+	for i, section := range wantBack {
+		model, _ := app.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		app = model.(App)
+		if app.focusCursorSection != section {
+			t.Fatalf("after %d k-presses: expected section %v, got %v", i+1, section, app.focusCursorSection)
+		}
+	}
+}
+
+// TestFourPhaseNavigation_SkipsEmptySections verifies that with an empty
+// Building section, j moves directly Planning → Reviewing instead of stopping
+// on an empty Building cursor.
+func TestFourPhaseNavigation_SkipsEmptySections(t *testing.T) {
+	app, _, sessB, _, _ := makeFourPhaseApp(t)
+	// Demote the Building session into Planning so Building is empty; the
+	// cursor should still skip across to Reviewing on j.
+	sessB.SetLifecyclePhase(agent.LifecyclePlanning)
+
+	// Cursor starts on Planning section; press j to move past Planning's two
+	// rows (the original planning session + the demoted one).
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	app = model.(App)
+	if app.focusCursorSection != focusSectionPlanning || app.focusPlanningIdx != 1 {
+		t.Fatalf("first j: expected planning[1], got section=%v idx=%d", app.focusCursorSection, app.focusPlanningIdx)
+	}
+	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	app = model.(App)
+	if app.focusCursorSection != focusSectionReview {
+		t.Fatalf("second j (past empty Building): expected Reviewing, got %v", app.focusCursorSection)
+	}
+}
+
+// TestBKey_AdvancesPlanningToBuilding verifies that pressing 'b' on a Planning
+// row transitions it to LifecycleInProgress and the cursor lands on a still-
+// non-empty section after clamp.
+func TestBKey_AdvancesPlanningToBuilding(t *testing.T) {
+	app, sessP, _, _, _ := makeFourPhaseApp(t)
+	app.focusCursorSection = focusSectionPlanning
+	app.focusPlanningIdx = 0
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	app = model.(App)
+	if sessP.LifecyclePhase() != agent.LifecycleInProgress {
+		t.Fatalf("expected Planning → InProgress on 'b', got %v", sessP.LifecyclePhase())
+	}
+	// Planning had only one row, so the cursor should clamp to a non-empty
+	// section (Building, where the row just moved).
+	if app.focusCursorSection != focusSectionBuilding {
+		t.Fatalf("after 'b': expected cursor on Building, got %v", app.focusCursorSection)
+	}
+}
+
+// TestBKey_NoOpOutsidePlanning verifies that 'b' on a non-Planning section is
+// a no-op that surfaces an error rather than moving an unrelated session.
+func TestBKey_NoOpOutsidePlanning(t *testing.T) {
+	app, _, sessB, _, _ := makeFourPhaseApp(t)
+	app.focusCursorSection = focusSectionBuilding
+	app.focusBuildingIdx = 0
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	app = model.(App)
+	if app.err == "" {
+		t.Fatal("expected error when pressing 'b' outside Planning section")
+	}
+	if sessB.LifecyclePhase() != agent.LifecycleInProgress {
+		t.Errorf("Building session phase changed unexpectedly: %v", sessB.LifecyclePhase())
 	}
 }

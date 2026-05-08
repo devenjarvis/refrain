@@ -5,8 +5,8 @@ package agent
 type LifecyclePhase int
 
 const (
-	LifecyclePlanning       LifecyclePhase = iota // reserved — no UI yet
-	LifecycleInProgress                           // default; agent running or done, not yet marked ready
+	LifecyclePlanning       LifecyclePhase = iota // default for new sessions; user is scoping the work, advances to Building with 'b'
+	LifecycleInProgress                           // Building: agent running or done, not yet marked ready
 	LifecycleReadyForReview                       // developer marked it ready
 	LifecycleInReview                             // developer committed to reviewing
 	LifecycleShipping                             // PR open, waiting for CI/team

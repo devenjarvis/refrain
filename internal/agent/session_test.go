@@ -636,10 +636,10 @@ func TestAddAgentDefaultAssignsUniqueName(t *testing.T) {
 	}
 }
 
-func TestSession_LifecyclePhase_DefaultIsInProgress(t *testing.T) {
+func TestSession_LifecyclePhase_DefaultIsPlanning(t *testing.T) {
 	s := newSession("id", "name", &git.WorktreeInfo{})
-	if got := s.LifecyclePhase(); got != LifecycleInProgress {
-		t.Errorf("default LifecyclePhase = %v, want LifecycleInProgress", got)
+	if got := s.LifecyclePhase(); got != LifecyclePlanning {
+		t.Errorf("default LifecyclePhase = %v, want LifecyclePlanning", got)
 	}
 }
 
