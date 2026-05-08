@@ -13,6 +13,7 @@ import (
 	"github.com/devenjarvis/baton/internal/agent"
 	"github.com/devenjarvis/baton/internal/audio"
 	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/baton/internal/github"
 )
 
 func requireClaude(t *testing.T) {
@@ -2135,4 +2136,120 @@ func TestPrimaryAgent_PrefersActiveOverIdle(t *testing.T) {
 		t.Errorf("PrimaryAgent should prefer Active over Idle: got=%v want=%v", got, activeAgent)
 	}
 	_ = idleAgent
+}
+
+// TestPipelinePRClickResetsDoubleClick guards against a phantom double-click:
+// when the user clicks the PR-indicator on a review row and then quickly
+// clicks the same review card, the second click must NOT be interpreted as a
+// double-click that opens the review panel. The fix is to reset
+// lastPipelineClick after the PR-activation early return.
+func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
+	sessR := agent.NewSessionForTest("r", "review-r")
+	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.dashboard.items = []listItem{
+		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
+		{kind: listItemSession, repoPath: "/r", session: sessR},
+	}
+	// Seed a PR cache entry so the indicator shows up and the early-return path is reachable.
+	app.prCache = map[string]*prCacheEntry{
+		sessR.ID: {pr: &github.PRState{Number: 42, URL: ""}},
+	}
+
+	// First click on the right edge of the review row triggers the PR
+	// early-return path. URL is empty so openURL is skipped, but the early
+	// return runs.
+	app.dashboard.prCache = app.prCache
+	prClick := tea.MouseClickMsg{Button: tea.MouseLeft, X: app.width - 2, Y: 8}
+	model, _ := app.Update(prClick)
+	app = model.(App)
+	if !app.lastPipelineClick.IsZero() {
+		// Empty URL skipped the early return — set a URL and try again so
+		// the test exercises the path we actually care about.
+		app.prCache[sessR.ID].pr.URL = "https://example/pr/42"
+		app.dashboard.prCache = app.prCache
+		model, _ = app.Update(prClick)
+		app = model.(App)
+	}
+
+	// Second click within the double-click window on the same card. With the
+	// fix, lastPipelineClick was zeroed by the PR-click early return, so this
+	// is a fresh single click — not a double-click — and panelFocus stays out
+	// of focusReview.
+	cardClick := tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 8}
+	model, _ = app.Update(cardClick)
+	app = model.(App)
+
+	if app.dashboard.panelFocus == focusReview {
+		t.Fatalf("expected card click after PR click to single-click only, but it triggered focusReview (phantom double-click)")
+	}
+}
+
+// TestFetchReviewDiffCmd_UsesSessionRepoNotActiveRepo verifies that
+// fetchReviewDiffCmd targets the session's owning repo rather than
+// a.activeRepo. The bug was reachable via the multi-repo pipeline cursor: a
+// session in a non-active repo would have its diff fetched against the wrong
+// worktree root.
+func TestFetchReviewDiffCmd_UsesSessionRepoNotActiveRepo(t *testing.T) {
+	dir, err := os.MkdirTemp("", "baton-fetchreview-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cmd %v: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "commit.gpgsign", "false")
+	run("git", "commit", "--allow-empty", "-m", "init")
+
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+
+	sess, _, err := mgr.CreateSessionWithCommand(agent.Config{
+		Name: "diff-fetch", Task: "test", RepoPath: dir, Rows: 24, Cols: 80,
+	}, func(_ string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 30") })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	// activeRepo points at a *different* repo to prove the cmd uses the
+	// session's owning repo rather than activeRepo.
+	app.activeRepo = "/nonexistent/wrong-repo"
+	app.dashboard.items = []listItem{
+		{kind: listItemRepo, repoPath: dir, repoName: "diff-fetch"},
+		{kind: listItemSession, repoPath: dir, session: sess},
+	}
+
+	cmd := app.fetchReviewDiffCmd(sess)
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd")
+	}
+	msg, ok := cmd().(reviewDiffMsg)
+	if !ok {
+		t.Fatalf("expected reviewDiffMsg, got %T", cmd())
+	}
+	// The cmd should succeed against the session's repo. Pre-fix this would
+	// fail or return wrong stats because activeRepo=/nonexistent/wrong-repo.
+	if msg.err != nil {
+		t.Errorf("expected nil err using session's repo, got %v", msg.err)
+	}
+	if msg.entry == nil {
+		t.Errorf("expected non-nil entry, got nil")
+	}
 }

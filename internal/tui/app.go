@@ -1116,7 +1116,13 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Open in editor — same pattern as the existing "i" key handler.
 				sess := a.reviewSession
 				if sess != nil && sess.Worktree != nil {
-					repoPath := a.activeRepo
+					// Resolve the IDE command from the session's owning repo
+					// rather than a.activeRepo: pipeline cursor selection lets
+					// the user reach a session in any registered repo.
+					repoPath := a.repoPathForSession(sess.ID)
+					if repoPath == "" {
+						repoPath = a.activeRepo
+					}
 					ideCmd := strings.TrimSpace(a.resolvedCache[repoPath].IDECommand)
 					if ideCmd == "" {
 						a.setError("No IDE configured (set 'IDE Command' in settings)")
@@ -1700,25 +1706,25 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !hit {
 			return a, nil
 		}
-		// Detect a PR-indicator click on review queue rows: the prIndicator is
-		// right-aligned on the first row of each card. We approximate by
-		// checking if the click x lies in the right-edge band where the
-		// indicator is drawn.
+		// Detect a PR-indicator click on review-queue rows: the prIndicator is
+		// right-aligned on the card; the X-column check below narrows the hit
+		// region without needing per-row Y granularity from pipelineHitTest.
 		if section == focusSectionReview {
 			reviewSessions := a.dashboard.reviewQueueSessions()
 			if idx < len(reviewSessions) {
 				sess := reviewSessions[idx].session
-				// The review row's first line is the row at the start of the
-				// card (header line). Only treat clicks on that line as PR
-				// clicks; the second line (task/age) is not interactive.
-				const reviewCardRows = 2
-				_ = reviewCardRows
 				if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
 					indicatorWidth := prIndicatorWidth(entry)
 					if indicatorWidth > 0 && msg.X >= a.width-indicatorWidth-2 {
 						if err := openURL(entry.pr.URL); err != nil {
 							a.setError(err.Error())
 						}
+						// Reset double-click bookkeeping: this click was a PR
+						// activation, not a card selection. Without this, a
+						// quick follow-up card click on the same section/idx
+						// could read a stale lastPipelineClick and fire a
+						// phantom double-click into the review panel.
+						a.lastPipelineClick = time.Time{}
 						return a, nil
 					}
 				}
@@ -2709,8 +2715,9 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 }
 
 // openSessionInFocusLaunch picks the most-active agent in sess and opens it
-// fullscreen in focusLaunch. Priority: Active > Waiting > Idle > Starting >
-// Done/Error. Falls back to agents[0] when all have equal priority.
+// fullscreen in focusLaunch. Priority is shared with Session.PrimaryAgent via
+// agent.AgentStatusPriority. Falls back to agents[0] when all have equal
+// priority.
 func (a *App) openSessionInFocusLaunch(sess *agent.Session) bool {
 	if sess == nil {
 		return false
@@ -2719,24 +2726,10 @@ func (a *App) openSessionInFocusLaunch(sess *agent.Session) bool {
 	if len(agents) == 0 {
 		return false
 	}
-	statusPriority := func(ag *agent.Agent) int {
-		switch ag.Status() {
-		case agent.StatusActive:
-			return 5
-		case agent.StatusWaiting:
-			return 4
-		case agent.StatusIdle:
-			return 3
-		case agent.StatusStarting:
-			return 2
-		default:
-			return 1
-		}
-	}
 	target := agents[0]
-	bestPri := statusPriority(agents[0])
+	bestPri := agent.AgentStatusPriority(agents[0])
 	for _, ag := range agents[1:] {
-		if pri := statusPriority(ag); pri > bestPri {
+		if pri := agent.AgentStatusPriority(ag); pri > bestPri {
 			bestPri = pri
 			target = ag
 		}
@@ -3333,7 +3326,14 @@ type reviewDiffMsg struct {
 func (a App) fetchReviewDiffCmd(sess *agent.Session) tea.Cmd {
 	sessID := sess.ID
 	wt := sess.Worktree
-	repoPath := a.activeRepo
+	// Use the session's owning repo, not a.activeRepo: with cursor-based
+	// selection the targeted session can live in any registered repo. Falling
+	// back to activeRepo only when the lookup fails keeps single-repo flows
+	// working as before.
+	repoPath := a.repoPathForSession(sessID)
+	if repoPath == "" {
+		repoPath = a.activeRepo
+	}
 	return func() tea.Msg {
 		files, agg, err := git.GetPerFileDiffStats(repoPath, wt)
 		if err != nil {
