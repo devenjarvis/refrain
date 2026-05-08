@@ -8,8 +8,7 @@ import "testing"
 //
 //   - dashboardAnchor: only appears in the dashboard status bar (not in any
 //     overlay's hint set, all of which use "navigate" too).
-//   - listFocusAnchor: dashboard text shown only when focus is on the list
-//     panel (terminal focus uses focusTerminalHints, which omits this).
+//   - listFocusAnchor: dashboard text shown only when focus is on the list.
 const (
 	dashboardAnchor = "new session"
 	listFocusAnchor = "new session"

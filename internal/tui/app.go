@@ -857,8 +857,6 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.PasteMsg:
-		// focusLaunch: forward paste to the launch agent. Other panels fall through
-		// to dashboard.Update, which handles paste for focusTerminal.
 		if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
 			a.focusLaunchAgent.Paste(msg.Content)
 			return a, nil
@@ -1036,8 +1034,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// When the terminal or config panel has focus, skip all app-level bindings.
-		if a.dashboard.panelFocus == focusTerminal || a.dashboard.panelFocus == focusConfig {
+		// When the config panel has focus, skip all app-level bindings.
+		if a.dashboard.panelFocus == focusConfig {
 			a.confirmQuit = false
 			break
 		}
@@ -1758,39 +1756,16 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg, ok := msg.(tea.MouseMotionMsg); ok {
-		// Drag updates the cursor end of an in-flight selection. A motion
-		// event with the left button still held is the only signal we have
-		// that the user is dragging — bubbletea's MouseModeCellMotion gives
-		// us these while a button is down.
-		if a.dashboard.selection.active && msg.Button == tea.MouseLeft {
-			if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
-				tx, ty, inVP := a.screenToTermCellFocusLaunch(msg.X, msg.Y)
-				if inVP {
-					a.dashboard.selection.cursorX = tx
-					a.dashboard.selection.cursorY = ty
-					a.dashboard.selection.dragSeen = true
-				}
-			} else {
-				termX, termY, _ := a.screenToTermCell(msg.X, msg.Y)
-				if w := a.dashboard.fixedTermWidth(); w > 0 {
-					if termX < 0 {
-						termX = 0
-					} else if termX >= w {
-						termX = w - 1
-					}
-				}
-				if h := a.dashboard.fixedTermHeight(); h > 0 {
-					if termY < 0 {
-						termY = 0
-					} else if termY >= h {
-						termY = h - 1
-					}
-				}
-				a.dashboard.selection.cursorX = termX
-				a.dashboard.selection.cursorY = termY
-				if termX != a.dashboard.selection.anchorX || termY != a.dashboard.selection.anchorY {
-					a.dashboard.selection.dragSeen = true
-				}
+		// Drag updates the cursor end of an in-flight selection. Selections
+		// only seed in focusLaunch (see MouseClickMsg), so any motion outside
+		// focusLaunch can be ignored here.
+		if a.dashboard.selection.active && msg.Button == tea.MouseLeft &&
+			a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
+			tx, ty, inVP := a.screenToTermCellFocusLaunch(msg.X, msg.Y)
+			if inVP {
+				a.dashboard.selection.cursorX = tx
+				a.dashboard.selection.cursorY = ty
+				a.dashboard.selection.dragSeen = true
 			}
 		}
 		return a, nil
@@ -1799,26 +1774,9 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.MouseReleaseMsg); ok {
 		if a.dashboard.selection.active {
 			if a.dashboard.selection.dragSeen {
-				// Real drag — copy the highlighted region. The highlight
-				// stays on screen until the next click clears or replaces it.
-				if ag := a.dashboard.selectedAgent(); ag != nil && ag.ID == a.dashboard.selection.agentID {
-					if sx, sy, ex, ey, ok := a.dashboard.selectionRect(); ok {
-						rect := vt.SelectionRect{
-							StartX: sx, StartY: sy, EndX: ex, EndY: ey, Active: true,
-						}
-						var text string
-						if a.dashboard.scrollOffset > 0 {
-							vpWidth := a.dashboard.previewTermWidth()
-							vpHeight := a.dashboard.previewTermHeight()
-							text = ag.ExtractTextFromSnapshot(vpWidth, vpHeight, a.dashboard.scrollOffset, rect)
-						} else {
-							text = ag.ExtractText(rect)
-						}
-						if text != "" {
-							return a, tea.SetClipboard(text)
-						}
-					}
-				} else if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil && a.focusLaunchAgent.ID == a.dashboard.selection.agentID {
+				// Real drag — copy the highlighted region. Selections only seed
+				// in focusLaunch (see MouseClickMsg), so this is the only path.
+				if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil && a.focusLaunchAgent.ID == a.dashboard.selection.agentID {
 					if sx, sy, ex, ey, ok := a.dashboard.selectionRect(); ok {
 						rect := vt.SelectionRect{
 							StartX: sx, StartY: sy, EndX: ex, EndY: ey, Active: true,
@@ -1885,33 +1843,6 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		if a.dashboard.panelFocus == focusTerminal {
-			ag := a.dashboard.selectedAgent()
-			if ag != nil {
-				// Alt-screen apps (Claude's /tui fullscreen, vim, less) redraw
-				// the viewport instead of scrolling — baton's scrollback is
-				// inert for them. Forward the wheel event so the app can drive
-				// its own scrollback. SendMouse is a no-op unless the app has
-				// enabled mouse reporting.
-				if ag.IsAltScreen() {
-					a.forwardWheelToAgent(ag, msg)
-					return a, nil
-				}
-				switch msg.Button {
-				case tea.MouseWheelUp:
-					a.dashboard.scrollOffset += 3
-					maxOffset := len(ag.ScrollbackLines())
-					if a.dashboard.scrollOffset > maxOffset {
-						a.dashboard.scrollOffset = maxOffset
-					}
-				case tea.MouseWheelDown:
-					a.dashboard.scrollOffset -= 3
-					if a.dashboard.scrollOffset < 0 {
-						a.dashboard.scrollOffset = 0
-					}
-				}
-			}
-		}
 		return a, nil
 	}
 
@@ -1930,12 +1861,10 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	// Maintain the invariant: a text selection only persists while the user
-	// remains focused on the same agent's terminal. Any focus or agent change
-	// (sidebar nav, esc, click on the list, etc.) drops it.
+	// remains in focusLaunch viewing the same agent. Any focus or agent
+	// change (esc back to pipeline, tab switch, etc.) drops it.
 	if a.dashboard.selection.active {
-		ag := a.dashboard.selectedAgent()
-		if (a.dashboard.panelFocus != focusTerminal || ag == nil || ag.ID != a.dashboard.selection.agentID) &&
-			(a.dashboard.panelFocus != focusLaunch || a.focusLaunchAgent == nil || a.focusLaunchAgent.ID != a.dashboard.selection.agentID) {
+		if a.dashboard.panelFocus != focusLaunch || a.focusLaunchAgent == nil || a.focusLaunchAgent.ID != a.dashboard.selection.agentID {
 			a.dashboard.clearSelection()
 		}
 	}
@@ -2146,10 +2075,10 @@ func (a *App) initRepoConfigForm(repoPath string) {
 	fields = addTextInput(fields, "Default Branch", defaultBranch, "auto-detect", inputWidth)
 	fields = addTextInput(fields, "Branch Prefix", branchPrefix, config.DefaultBranchPrefix, inputWidth)
 	fields = addTextInput(fields, "Agent Program", agentProgram, config.DefaultAgentProgram, inputWidth)
-	fields = addEditorFields(fields, ideCommand, inputWidth)
+	fields = addEditorFields(fields, ideCommand)
 	fields = addTextInput(fields, "Worktree Directory", worktreeDir, config.DefaultWorktreeDir, inputWidth)
 
-	form := newConfigForm(fields, a.dashboard.previewTermWidth())
+	form := newConfigForm(fields, a.dashboard.fixedTermWidth())
 	a.dashboard.repoConfigForm = &form
 	a.dashboard.configRepoPath = repoPath
 	a.dashboard.panelFocus = focusConfig
@@ -2270,40 +2199,6 @@ func (a App) activeRepoDisplayName() string {
 	return filepath.Base(a.activeRepo)
 }
 
-// screenToTermCell converts a screen-space mouse coordinate to a VT cell
-// coordinate inside the agent preview viewport. inViewport is false when the
-// point lies outside the viewport rectangle — callers that want clamping
-// should clamp to [0, fixedTermWidth) × [0, fixedTermHeight) themselves.
-//
-// The translation mirrors the dashboard layout: an optional error/confirm-quit
-// banner pushes content down, the list panel and its border occupy columns
-// 0..30 (the preview's left border lives at column 31), and the preview's
-// lipgloss frame plus the metadata rows above the VT viewport offset the
-// top-left cell.
-func (a *App) screenToTermCell(screenX, screenY int) (termX, termY int, inViewport bool) {
-	dashboardTopY := 0
-	if a.err != "" {
-		dashboardTopY++
-	}
-	if a.confirmQuit {
-		dashboardTopY++
-	}
-	const (
-		// previewColOffset is the screen column of the preview's left border
-		// (= listWidth + list-panel right border = 30 + 1). The preview's left
-		// border occupies that column; VT cell 0 sits at previewColOffset + 1.
-		previewColOffset  = 31
-		previewLeftBorder = 1
-		previewTopBorder  = 1
-	)
-	w := a.dashboard.fixedTermWidth()
-	h := a.dashboard.fixedTermHeight()
-	termX = screenX - previewColOffset - previewLeftBorder
-	termY = screenY - dashboardTopY - previewTopBorder - a.dashboard.previewMetadataRows()
-	inViewport = w > 0 && h > 0 && termX >= 0 && termX < w && termY >= 0 && termY < h
-	return termX, termY, inViewport
-}
-
 // focusLaunchTermHeight returns the terminal height for the focusLaunch view,
 // accounting for the header row and the tab bar row.
 func (a *App) focusLaunchTermHeight() int {
@@ -2345,34 +2240,7 @@ func (a *App) screenToTermCellFocusLaunch(screenX, screenY int) (termX, termY in
 	w := a.dashboard.width
 	h := a.dashboard.height - 2
 	inViewport = termX >= 0 && termX < w && termY >= 0 && termY < h
-	return
-}
-
-// forwardWheelToAgent encodes a mouse wheel event and feeds it to the agent's
-// terminal. Coordinates are translated from dashboard-screen space to cells
-// relative to the agent's PTY viewport and clamped to [0,W)×[0,H). The
-// emulator only emits bytes when the running program has enabled mouse
-// reporting (DECSET 1000/1002/1003 + SGR 1006).
-func (a *App) forwardWheelToAgent(ag *agent.Agent, msg tea.MouseWheelMsg) {
-	termX, termY, _ := a.screenToTermCell(msg.X, msg.Y)
-	if termX < 0 {
-		termX = 0
-	}
-	if w := a.dashboard.fixedTermWidth(); w > 0 && termX >= w {
-		termX = w - 1
-	}
-	if termY < 0 {
-		termY = 0
-	}
-	if h := a.dashboard.fixedTermHeight(); h > 0 && termY >= h {
-		termY = h - 1
-	}
-	ag.SendMouse(xvt.MouseWheel{
-		X:      termX,
-		Y:      termY,
-		Button: xvt.MouseButton(msg.Button),
-		Mod:    xvt.KeyMod(msg.Mod),
-	})
+	return termX, termY, inViewport
 }
 
 func (a *App) refreshAgentList() {
@@ -2771,15 +2639,13 @@ func (a App) View() tea.View {
 	case ViewDashboard:
 		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
 			entry := a.reviewDiffCache[a.reviewSession.ID]
-			v := tea.NewView(renderReviewPanel(a.reviewSession, entry, a.width, a.height))
+			v := tea.NewView(renderReviewPanel(a.reviewSession, entry, a.width))
 			v.AltScreen = true
 			return v
 		}
 		body := a.dashboard.View()
 		hints := dashboardHints
 		switch a.dashboard.panelFocus {
-		case focusTerminal:
-			hints = focusTerminalHints
 		case focusConfig:
 			hints = repoConfigHints
 		case focusLaunch:
@@ -2866,25 +2732,7 @@ func (a App) View() tea.View {
 	v.AltScreen = true
 	if a.view == ViewDashboard {
 		v.MouseMode = tea.MouseModeCellMotion
-		if a.dashboard.panelFocus == focusTerminal && a.dashboard.scrollOffset == 0 {
-			if item := a.dashboard.selectedItem(); item != nil && item.kind == listItemAgent && item.agent != nil && item.agent.CursorVisible() {
-				cursorX, cursorY := item.agent.CursorPosition()
-				dashboardTopY := 0
-				if a.err != "" {
-					dashboardTopY++
-				}
-				if a.confirmQuit {
-					dashboardTopY++
-				}
-				// previewColOffset is the column of the preview's left border;
-				// VT cell 0 lives one column to its right. Mirrors the constant
-				// in screenToTermCell — the two formulas must move in lockstep.
-				const previewColOffset = 31
-				screenX := cursorX + previewColOffset + 1
-				screenY := cursorY + dashboardTopY + 1 + a.dashboard.previewMetadataRows()
-				v.Cursor = tea.NewCursor(screenX, screenY)
-			}
-		} else if a.dashboard.panelFocus == focusLaunch && a.dashboard.scrollOffset == 0 && a.focusLaunchAgent != nil {
+		if a.dashboard.panelFocus == focusLaunch && a.dashboard.scrollOffset == 0 && a.focusLaunchAgent != nil {
 			ag := a.focusLaunchAgent
 			if !ag.IsAltScreen() && ag.CursorVisible() {
 				cursorX, cursorY := ag.CursorPosition()

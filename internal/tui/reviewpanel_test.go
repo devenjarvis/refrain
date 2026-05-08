@@ -21,7 +21,7 @@ func TestRenderReviewPanel_ShowsOriginalPrompt(t *testing.T) {
 		aggregate: &git.DiffStats{Files: 2, Insertions: 213, Deletions: 34},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40)
+	output := renderReviewPanel(sess, entry, 120)
 
 	if !strings.Contains(output, "Fix the auth bug") {
 		t.Error("review panel must show the original prompt")
@@ -36,7 +36,7 @@ func TestRenderReviewPanel_NilDiffEntry(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 
 	// nil entry — should not panic
-	output := renderReviewPanel(sess, nil, 120, 40)
+	output := renderReviewPanel(sess, nil, 120)
 	if !strings.Contains(output, "Fix the auth bug") {
 		t.Error("must still show prompt even with nil diff entry")
 	}
@@ -82,7 +82,7 @@ func TestRenderReviewPanel_FooterAdvertisesAllActions(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40)
+	output := renderReviewPanel(sess, nil, 120)
 
 	for _, want := range []string{
 		"open PR",

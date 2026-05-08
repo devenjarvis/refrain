@@ -19,7 +19,8 @@ const (
 // a form. stored is the raw IDE command currently saved (may be empty). The
 // select is pre-selected to match stored if it corresponds to a detected
 // editor, otherwise "Custom" with stored placed in the text field.
-func addEditorFields(fields []formField, stored string, inputWidth int) []formField {
+func addEditorFields(fields []formField, stored string) []formField {
+	const inputWidth = 30
 	detected := editor.Detect()
 	options := make([]string, 0, len(detected)+1)
 	for _, e := range detected {

@@ -69,12 +69,12 @@ func TestHaikuLog_ConcurrentWritesNoInterleaving(t *testing.T) {
 	var wg sync.WaitGroup
 	for g := 0; g < goroutines; g++ {
 		wg.Add(1)
-		go func(g int) {
+		go func() {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
 				haikuLog(repo, "tag-XYZ-marker")
 			}
-		}(g)
+		}()
 	}
 	wg.Wait()
 

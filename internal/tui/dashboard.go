@@ -13,7 +13,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	xvt "github.com/charmbracelet/x/vt"
 	"github.com/devenjarvis/baton/internal/agent"
 	"github.com/devenjarvis/baton/internal/config"
 	"github.com/devenjarvis/baton/internal/vt"
@@ -229,79 +228,14 @@ func (d *dashboardModel) advanceTickers(now time.Time) {
 }
 
 func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.PasteMsg:
-		if d.panelFocus == focusTerminal {
-			if ag := d.selectedAgent(); ag != nil {
-				ag.Paste(msg.Content)
-			}
-		}
-		return d, nil
-	case tea.KeyPressMsg:
-		// Config panel focus: delegate to form.
+	if msg, ok := msg.(tea.KeyPressMsg); ok {
+		// Config overlay: delegate to the form. Pipeline navigation (j/k/enter)
+		// is handled at the app level via moveFocusCursorUp/Down and
+		// activateFocusCursor; nothing else needs to reach the dashboard here.
 		if d.panelFocus == focusConfig && d.repoConfigForm != nil {
 			cmd := d.repoConfigForm.Update(msg)
 			return d, cmd
 		}
-
-		if d.panelFocus == focusTerminal {
-			ag := d.selectedAgent()
-			switch msg.String() {
-			case "ctrl+e", "esc":
-				d.panelFocus = focusList
-				d.scrollOffset = 0
-			case "shift+esc":
-				if ag != nil {
-					ag.SendKey(xvt.KeyPressEvent{Code: tea.KeyEscape})
-				}
-			case "enter":
-				if ag != nil {
-					ag.SendKey(xvt.KeyPressEvent(msg))
-				}
-			case "pgup":
-				if ag != nil {
-					sbLen := len(ag.ScrollbackLines())
-					vpHeight := d.previewTermHeight()
-					step := vpHeight / 2
-					if step < 1 {
-						step = 1
-					}
-					d.scrollOffset += step
-					maxOffset := sbLen + vpHeight - vpHeight
-					if maxOffset < 0 {
-						maxOffset = 0
-					}
-					if d.scrollOffset > maxOffset {
-						d.scrollOffset = maxOffset
-					}
-				}
-			case "pgdown":
-				step := d.previewTermHeight() / 2
-				if step < 1 {
-					step = 1
-				}
-				d.scrollOffset -= step
-				if d.scrollOffset < 0 {
-					d.scrollOffset = 0
-				}
-			case "home":
-				d.scrollOffset = 0
-			default:
-				if ag != nil {
-					if msg.Text != "" {
-						ag.SendText(msg.Text)
-					} else {
-						ag.SendKey(xvt.KeyPressEvent(msg))
-					}
-				}
-			}
-			return d, nil
-		}
-
-		// focusList: pipeline navigation (j/k/enter) is handled at the app
-		// level via moveFocusCursorUp/Down and activateFocusCursor. The only
-		// thing reaching here is the residual right-arrow path used by repo
-		// header config entry, which the app layer translates first.
 	}
 	return d, nil
 }
@@ -340,50 +274,18 @@ func (d dashboardModel) contentHeight() int {
 }
 
 // fixedTermWidth returns the terminal column count that all agents should use.
-// This is always the focusTerminal width (deducting the border) regardless of
-// the current panelFocus, so that focus switches never trigger a resize.
+// Held constant across panel focus changes so transitions never trigger a
+// resize.
 func (d dashboardModel) fixedTermWidth() int {
-	return d.width - d.listWidth() - 1 - 2 // list border + focusTerminal border
+	return d.width - d.listWidth() - 1 - 2 // list border + preview border
 }
 
 // fixedTermHeight returns the terminal row count that all agents should use.
-// This is always the focusTerminal height (deducting the border) regardless of
-// the current panelFocus. It intentionally does NOT deduct the PR line —
-// accepting 1 row of clipping when PR is visible is better than per-session
-// resize churn.
+// Held constant across panel focus changes. It intentionally does NOT deduct
+// the PR line — accepting 1 row of clipping when PR is visible is better than
+// per-session resize churn.
 func (d dashboardModel) fixedTermHeight() int {
 	return d.contentHeight() - 2 - 2 // 2 metadata rows (sessionInfo + blank) + 2 border rows
-}
-
-// previewMetadataRows returns the number of non-VT rows rendered above the
-// terminal viewport in the preview panel: sessionInfo and the blank separator
-// — plus one row for the PR info line when the selected session has an open
-// PR. Mouse coordinate translation in app.go consumes this via screenToTermCell
-// so wheel/click/drag stay aligned with the viewport when the PR row appears
-// or disappears.
-func (d dashboardModel) previewMetadataRows() int {
-	rows := 2 // sessionInfo + blank; assumes agents always have a non-nil session
-	if sess := d.selectedSession(); sess != nil {
-		if entry := d.prCache[sess.ID]; entry != nil && entry.pr != nil {
-			rows++ // head PR line
-			for _, base := range entry.stack {
-				if base != nil && base.pr != nil {
-					rows++ // one row per valid base PR
-				}
-			}
-		}
-	}
-	return rows
-}
-
-// previewTermWidth returns the terminal column count for the preview panel.
-func (d dashboardModel) previewTermWidth() int {
-	return d.fixedTermWidth()
-}
-
-// previewTermHeight returns the terminal row count for the preview panel.
-func (d dashboardModel) previewTermHeight() int {
-	return d.fixedTermHeight()
 }
 
 // renderRepoConfigOverlay renders the per-repo settings form full-screen. It's

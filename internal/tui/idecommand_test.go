@@ -9,7 +9,7 @@ import (
 
 func TestAddEditorFields_EmptyStoredShape(t *testing.T) {
 	var fields []formField
-	fields = addEditorFields(fields, "", 30)
+	fields = addEditorFields(fields, "")
 	form := newConfigForm(fields, 30)
 
 	got := form.selectValue(editorFieldLabel)
@@ -28,7 +28,7 @@ func TestAddEditorFields_EmptyStoredShape(t *testing.T) {
 
 func TestAddEditorFields_LegacyCustomLoad(t *testing.T) {
 	var fields []formField
-	fields = addEditorFields(fields, "code -n --foo", 30)
+	fields = addEditorFields(fields, "code -n --foo")
 	form := newConfigForm(fields, 30)
 	if got := form.selectValue(editorFieldLabel); got != editorCustomOption {
 		t.Fatalf("expected Custom, got %q", got)

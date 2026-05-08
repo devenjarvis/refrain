@@ -156,13 +156,13 @@ func (r *Renderer) renderUnified(width int) string {
 		b.WriteString(styleHunkBan.Render(truncateVisible(h.Header, width)))
 		b.WriteByte('\n')
 		for _, l := range h.Lines {
-			r.writeUnifiedLine(&b, l, width, gutter, content)
+			r.writeUnifiedLine(&b, l, gutter, content)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (r *Renderer) writeUnifiedLine(b *strings.Builder, l diffmodel.Line, width, gutter, content int) {
+func (r *Renderer) writeUnifiedLine(b *strings.Builder, l diffmodel.Line, gutter, content int) {
 	var num int
 	var mark string
 	var rowStyle, markStyle lipgloss.Style

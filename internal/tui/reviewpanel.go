@@ -16,7 +16,7 @@ import (
 
 // renderReviewPanel renders the fullscreen review panel for a session.
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height int) string {
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width int) string {
 	var lines []string
 
 	// Header

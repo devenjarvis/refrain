@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/github"
 	"github.com/devenjarvis/baton/internal/hook"
 )
 
@@ -111,10 +110,11 @@ func TestClearSelection(t *testing.T) {
 	}
 }
 
-// tickerDashboard builds a minimal dashboardModel for ticker tests.
-func tickerDashboard(sidebarW int, sessions ...*agent.Session) dashboardModel {
+// tickerDashboard builds a minimal dashboardModel for ticker tests with
+// sidebarWidth=30 (yielding maxNameLen=20 in the ticker tests below).
+func tickerDashboard(sessions ...*agent.Session) dashboardModel {
 	d := newDashboardModel()
-	d.sidebarWidth = sidebarW
+	d.sidebarWidth = 30
 	d.prCache = make(map[string]*prCacheEntry)
 	d.closingSessions = make(map[string]bool)
 	for _, s := range sessions {
@@ -158,7 +158,7 @@ func TestTickerSlice_MultibyteRunes(t *testing.T) {
 func TestAdvanceTickers_NameFits_NoTickerCreated(t *testing.T) {
 	// sidebarW=30 → maxNameLen=20; "short" (5 chars) fits easily.
 	sess := &agent.Session{ID: "s1", Name: "short"}
-	d := tickerDashboard(30, sess)
+	d := tickerDashboard(sess)
 	d.advanceTickers(time.Now())
 	if _, exists := d.tickers["s1"]; exists {
 		t.Error("ticker should not be created for a name that fits")
@@ -168,7 +168,7 @@ func TestAdvanceTickers_NameFits_NoTickerCreated(t *testing.T) {
 func TestAdvanceTickers_NameFits_ClearsStale(t *testing.T) {
 	// Stale ticker entry from a previous long name should be removed.
 	sess := &agent.Session{ID: "s1", Name: "short"}
-	d := tickerDashboard(30, sess)
+	d := tickerDashboard(sess)
 	d.tickers["s1"] = &sessionTicker{offset: 5}
 	d.advanceTickers(time.Now())
 	if _, exists := d.tickers["s1"]; exists {
@@ -180,7 +180,7 @@ func TestAdvanceTickers_OverflowCreatesTickerWithPause(t *testing.T) {
 	// sidebarW=30 → maxNameLen=20; long name (26 chars) overflows.
 	longName := "abcdefghijklmnopqrstuvwxyz"
 	sess := &agent.Session{ID: "s1", Name: longName}
-	d := tickerDashboard(30, sess)
+	d := tickerDashboard(sess)
 	now := time.Now()
 	d.advanceTickers(now)
 	tk := d.tickers["s1"]
@@ -198,7 +198,7 @@ func TestAdvanceTickers_OverflowCreatesTickerWithPause(t *testing.T) {
 func TestAdvanceTickers_AdvancePastPause_IncrementsOffset(t *testing.T) {
 	longName := "abcdefghijklmnopqrstuvwxyz"
 	sess := &agent.Session{ID: "s1", Name: longName}
-	d := tickerDashboard(30, sess)
+	d := tickerDashboard(sess)
 	// Pre-seed expired ticker so initial pause is already over.
 	d.tickers["s1"] = &sessionTicker{pauseUntil: past(), nextAdvance: past()}
 	d.advanceTickers(time.Now())
@@ -214,7 +214,7 @@ func TestAdvanceTickers_WideCharName_ScrollsNotStuck(t *testing.T) {
 	// offset=0 (0+20=20 >= 14), preventing the name from ever scrolling.
 	wideName := strings.Repeat("日", 12)
 	sess := &agent.Session{ID: "s1", Name: wideName}
-	d := tickerDashboard(30, sess)
+	d := tickerDashboard(sess)
 	d.tickers["s1"] = &sessionTicker{pauseUntil: past(), nextAdvance: past()}
 	d.advanceTickers(time.Now())
 	tk := d.tickers["s1"]
@@ -226,83 +226,13 @@ func TestAdvanceTickers_WideCharName_ScrollsNotStuck(t *testing.T) {
 	}
 }
 
-// TestPreviewMetadataRows verifies the row count used for mouse coordinate
-// mapping: 2 baseline (sessionInfo + blank), +1 for a single PR, +N for stack.
-func TestPreviewMetadataRows(t *testing.T) {
-	makeSession := func(id string) *agent.Session {
-		return &agent.Session{ID: id, Name: id}
-	}
-
-	tests := []struct {
-		name       string
-		cacheEntry *prCacheEntry
-		want       int
-	}{
-		{
-			name:       "no PR",
-			cacheEntry: nil,
-			want:       2,
-		},
-		{
-			name:       "single PR, no stack",
-			cacheEntry: &prCacheEntry{pr: &github.PRState{Number: 1}},
-			want:       3,
-		},
-		{
-			name: "stacked 2-deep",
-			cacheEntry: &prCacheEntry{
-				pr: &github.PRState{Number: 2},
-				stack: []*prCacheEntry{
-					{pr: &github.PRState{Number: 1}},
-				},
-			},
-			want: 4,
-		},
-		{
-			name: "stacked 3-deep",
-			cacheEntry: &prCacheEntry{
-				pr: &github.PRState{Number: 3},
-				stack: []*prCacheEntry{
-					{pr: &github.PRState{Number: 2}},
-					{pr: &github.PRState{Number: 1}},
-				},
-			},
-			want: 5,
-		},
-		{
-			name: "stack with nil entry is skipped",
-			cacheEntry: &prCacheEntry{
-				pr:    &github.PRState{Number: 2},
-				stack: []*prCacheEntry{nil},
-			},
-			want: 3, // nil stack entry not counted
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			sess := makeSession("s1")
-			d := newDashboardModel()
-			d.prCache = make(map[string]*prCacheEntry)
-			d.items = []listItem{{kind: listItemSession, session: sess}}
-			d.selected = 0
-			if tc.cacheEntry != nil {
-				d.prCache["s1"] = tc.cacheEntry
-			}
-			if got := d.previewMetadataRows(); got != tc.want {
-				t.Errorf("previewMetadataRows() = %d, want %d", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestAdvanceTickers_EndReached_SnapsBack(t *testing.T) {
 	// sidebarW=30 → maxNameLen=20
 	// longName=26 chars → fullName "…" + " ·" = 28 runes
 	// end condition: offset+20 >= 28 → offset >= 8
 	longName := "12345678901234567890123456"
 	sess := &agent.Session{ID: "s1", Name: longName}
-	d := tickerDashboard(30, sess)
+	d := tickerDashboard(sess)
 
 	// Set offset to 7 (one step before end); advance once → hits 8 → atEnd=true.
 	d.tickers["s1"] = &sessionTicker{offset: 7, pauseUntil: past(), nextAdvance: past()}

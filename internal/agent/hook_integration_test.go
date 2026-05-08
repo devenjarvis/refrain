@@ -55,7 +55,7 @@ func TestManagerDispatchesHookEventsToAgent(t *testing.T) {
 	}
 
 	// Manager emits EventStatusChanged on each hook-driven status mutation.
-	if !waitForStatus(t, ag, StatusActive, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusActive) {
 		t.Fatalf("expected Active after SessionStart, got %s", ag.Status())
 	}
 	if got := ag.ClaudeSessionID(); got != "claude-uuid-42" {
@@ -70,7 +70,7 @@ func TestManagerDispatchesHookEventsToAgent(t *testing.T) {
 		t.Fatalf("SendEvent Stop: %v", err)
 	}
 
-	if !waitForStatus(t, ag, StatusIdle, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusIdle) {
 		t.Fatalf("expected Idle after Stop, got %s", ag.Status())
 	}
 }
@@ -140,7 +140,7 @@ func TestManagerDispatchesNotificationAndStop(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent SessionStart: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusActive, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusActive) {
 		t.Fatalf("expected Active after SessionStart, got %s", ag.Status())
 	}
 
@@ -152,7 +152,7 @@ func TestManagerDispatchesNotificationAndStop(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent Notification: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusWaiting, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusWaiting) {
 		t.Fatalf("expected Waiting after Notification, got %s", ag.Status())
 	}
 
@@ -163,7 +163,7 @@ func TestManagerDispatchesNotificationAndStop(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent Stop: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusIdle, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusIdle) {
 		t.Fatalf("expected Idle after Stop, got %s", ag.Status())
 	}
 }
@@ -201,7 +201,7 @@ func TestManagerUserPromptSubmitRearmsChime(t *testing.T) {
 		t.Fatalf("SendEvent UserPromptSubmit: %v", err)
 	}
 
-	if !waitForStatus(t, ag, StatusActive, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusActive) {
 		t.Fatalf("expected Active after UserPromptSubmit, got %s", ag.Status())
 	}
 	if ag.ChimedForTurn() {
@@ -354,7 +354,7 @@ func TestNotificationIgnoredWhenIdle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent SessionStart: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusActive, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusActive) {
 		t.Fatalf("expected Active after SessionStart, got %s", ag.Status())
 	}
 	if err := hook.SendEvent(mgr.HookSocketPath(), hook.Event{
@@ -363,7 +363,7 @@ func TestNotificationIgnoredWhenIdle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent Stop: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusIdle, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusIdle) {
 		t.Fatalf("expected Idle after Stop, got %s", ag.Status())
 	}
 
@@ -498,7 +498,7 @@ func TestManagerPreToolUseClearsWaiting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent SessionStart: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusActive, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusActive) {
 		t.Fatalf("expected Active after SessionStart, got %s", ag.Status())
 	}
 
@@ -510,7 +510,7 @@ func TestManagerPreToolUseClearsWaiting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent Notification: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusWaiting, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusWaiting) {
 		t.Fatalf("expected Waiting after Notification, got %s", ag.Status())
 	}
 
@@ -527,7 +527,7 @@ func TestManagerPreToolUseClearsWaiting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent PreToolUse: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusActive, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusActive) {
 		t.Fatalf("expected Active after PreToolUse, got %s", ag.Status())
 	}
 	if !ag.ChimedForTurn() {
@@ -633,7 +633,7 @@ func TestUserPromptSubmitRenamesBranch(t *testing.T) {
 		t.Fatalf("SendEvent prompt: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/add-dark-mode-to-dashboard", 2*time.Second)
+	got := waitForBranch(t, sess, "baton/add-dark-mode-to-dashboard")
 	if got != "baton/add-dark-mode-to-dashboard" {
 		t.Errorf("expected branch baton/add-dark-mode-to-dashboard, got %q", got)
 	}
@@ -695,7 +695,7 @@ func TestUserPromptSubmitSlashWithArgRenamesBranch(t *testing.T) {
 		t.Fatalf("SendEvent slash+arg: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/add-dark-mode", 2*time.Second)
+	got := waitForBranch(t, sess, "baton/add-dark-mode")
 	if got != "baton/add-dark-mode" {
 		t.Errorf("expected branch baton/add-dark-mode, got %q", got)
 	}
@@ -734,7 +734,7 @@ func TestWaitingReasonStoredAndCleared(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent SessionStart: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusActive, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusActive) {
 		t.Fatalf("expected Active after SessionStart, got %s", ag.Status())
 	}
 
@@ -747,7 +747,7 @@ func TestWaitingReasonStoredAndCleared(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent Notification: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusWaiting, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusWaiting) {
 		t.Fatalf("expected Waiting after Notification, got %s", ag.Status())
 	}
 	if got := ag.WaitingReason(); got != wantReason {
@@ -761,7 +761,7 @@ func TestWaitingReasonStoredAndCleared(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent PreToolUse: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusActive, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusActive) {
 		t.Fatalf("expected Active after PreToolUse, got %s", ag.Status())
 	}
 	if got := ag.WaitingReason(); got != "" {
@@ -769,10 +769,10 @@ func TestWaitingReasonStoredAndCleared(t *testing.T) {
 	}
 }
 
-// waitForStatus polls the agent status up to d for the desired value.
-func waitForStatus(t *testing.T, a *Agent, want Status, d time.Duration) bool {
+// waitForStatus polls the agent status up to 2s for the desired value.
+func waitForStatus(t *testing.T, a *Agent, want Status) bool {
 	t.Helper()
-	deadline := time.Now().Add(d)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if a.Status() == want {
 			return true
@@ -915,7 +915,7 @@ func TestManagerSecondUserPromptSubmitDoesNotRename(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SendEvent: %v", err)
 	}
-	if !waitForStatus(t, ag, StatusActive, 2*time.Second) {
+	if !waitForStatus(t, ag, StatusActive) {
 		t.Fatalf("expected Active after second UserPromptSubmit")
 	}
 
@@ -988,7 +988,7 @@ func TestManagerEmptyPromptDoesNotConsumeGate(t *testing.T) {
 
 	// Follow-up actionable prompt: gate is still open, rename succeeds.
 	sendUserPromptSubmit(t, mgr, ag, "the real prompt")
-	if got := waitForBranch(t, sess, "baton/real-prompt-result", 2*time.Second); got != "baton/real-prompt-result" {
+	if got := waitForBranch(t, sess, "baton/real-prompt-result"); got != "baton/real-prompt-result" {
 		t.Errorf("retry rename: branch = %q, want baton/real-prompt-result", got)
 	}
 }
@@ -1098,11 +1098,11 @@ func TestManagerNamerErrorLeavesNamesUnchanged(t *testing.T) {
 	}
 }
 
-// waitForBranch polls Session.Branch() until it matches want or the deadline
-// elapses. Returns the last-observed branch on timeout for useful error output.
-func waitForBranch(t *testing.T, sess *Session, want string, d time.Duration) string {
+// waitForBranch polls Session.Branch() until it matches want or 2s elapses.
+// Returns the last-observed branch on timeout for useful error output.
+func waitForBranch(t *testing.T, sess *Session, want string) string {
 	t.Helper()
-	deadline := time.Now().Add(d)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if got := sess.Branch(); got == want {
 			return got
@@ -1282,7 +1282,7 @@ func TestSmartBranchRename_NamerErrorRetriesNextPrompt(t *testing.T) {
 		t.Fatalf("SendEvent retry: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/second-attempt", 2*time.Second)
+	got := waitForBranch(t, sess, "baton/second-attempt")
 	if got != "baton/second-attempt" {
 		t.Errorf("retry branch = %q, want baton/second-attempt", got)
 	}
@@ -1345,7 +1345,7 @@ func TestSmartBranchRename_SlashOnlyDoesNotInvokeNamer(t *testing.T) {
 		t.Fatalf("SendEvent retry: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/real-result", 2*time.Second)
+	got := waitForBranch(t, sess, "baton/real-result")
 	if got != "baton/real-result" {
 		t.Errorf("retry branch = %q, want baton/real-result", got)
 	}
@@ -1414,7 +1414,7 @@ func TestSmartBranchRename_DoubleDispatchGated(t *testing.T) {
 	// Release the first call and ensure the rename completes.
 	close(release)
 
-	got := waitForBranch(t, sess, "baton/slow-result", 2*time.Second)
+	got := waitForBranch(t, sess, "baton/slow-result")
 	if got != "baton/slow-result" {
 		t.Errorf("branch = %q, want baton/slow-result", got)
 	}
@@ -1576,7 +1576,7 @@ func TestSmartBranchRename_CustomTemplateRendered(t *testing.T) {
 		t.Fatalf("SendEvent: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/fix-login", 2*time.Second)
+	got := waitForBranch(t, sess, "baton/fix-login")
 	if got != "baton/fix-login" {
 		t.Fatalf("branch = %q, want baton/fix-login", got)
 	}
@@ -1694,7 +1694,7 @@ func TestSmartBranchRename_TemplateWithoutPlaceholderAppendsPrompt(t *testing.T)
 		t.Fatalf("SendEvent: %v", err)
 	}
 
-	if got := waitForBranch(t, sess, "baton/ok", 2*time.Second); got != "baton/ok" {
+	if got := waitForBranch(t, sess, "baton/ok"); got != "baton/ok" {
 		t.Fatalf("branch = %q, want baton/ok", got)
 	}
 
@@ -2055,7 +2055,7 @@ func TestSmartBranchRename_RetryUsesOriginalPrompt(t *testing.T) {
 		t.Fatalf("SendEvent retry: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/focus-mode-pomodoro", 2*time.Second)
+	got := waitForBranch(t, sess, "baton/focus-mode-pomodoro")
 	if got != "baton/focus-mode-pomodoro" {
 		t.Errorf("retry branch = %q, want baton/focus-mode-pomodoro", got)
 	}

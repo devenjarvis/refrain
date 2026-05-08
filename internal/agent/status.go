@@ -30,23 +30,3 @@ func (s Status) String() string {
 		return "Unknown"
 	}
 }
-
-// Symbol returns a single-character symbol for the status.
-func (s Status) Symbol() string {
-	switch s {
-	case StatusStarting:
-		return "▷"
-	case StatusActive:
-		return "▶"
-	case StatusWaiting:
-		return "⏺"
-	case StatusIdle:
-		return "⏸"
-	case StatusDone:
-		return "⏭"
-	case StatusError:
-		return "⏹"
-	default:
-		return "?"
-	}
-}

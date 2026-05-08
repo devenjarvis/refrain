@@ -90,7 +90,7 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 	fields = addTextInput(fields, "Default Branch", defaultBranch, "auto-detect", inputWidth)
 	fields = addTextInput(fields, "Branch Prefix", branchPrefix, config.DefaultBranchPrefix, inputWidth)
 	fields = addTextInput(fields, "Agent Program", agentProgram, config.DefaultAgentProgram, inputWidth)
-	fields = addEditorFields(fields, ideCommand, inputWidth)
+	fields = addEditorFields(fields, ideCommand)
 	fields = addTextInput(fields, "Sidebar Width", sidebarWidth, strconv.Itoa(config.DefaultSidebarWidth), inputWidth)
 	fields = addTextInput(fields, fieldFocusSession, focusSessionMinutes, strconv.Itoa(config.DefaultFocusSessionMinutes), inputWidth)
 	fields = addTextInput(fields, fieldFocusBreak, focusBreakMinutes, strconv.Itoa(config.DefaultFocusBreakMinutes), inputWidth)

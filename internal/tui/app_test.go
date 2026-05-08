@@ -23,23 +23,19 @@ func requireClaude(t *testing.T) {
 	}
 }
 
-// createAgent presses 'n' and executes the async create cmd, returning the updated app.
-// returnToList exits any panel where keys are forwarded to the agent
-// (focusTerminal or focusLaunch) so app-level key handlers can fire.
+// returnToList exits the focusLaunch overlay (where keys forward to the agent
+// terminal) so app-level key handlers can fire.
 func returnToList(app App) App {
-	switch app.dashboard.panelFocus {
-	case focusTerminal:
-		model, _ := app.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
-		return model.(App)
-	case focusLaunch:
+	if app.dashboard.panelFocus == focusLaunch {
 		model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 		return model.(App)
 	}
 	return app
 }
 
-// If the terminal panel is already focused it presses Ctrl+E first so the 'n' key isn't
-// forwarded to the agent.
+// createAgent presses 'n' and executes the async create cmd, returning the
+// updated app. If the focusLaunch overlay is active it escapes back first so
+// the 'n' key isn't forwarded to the agent.
 func createAgent(t *testing.T, app App) App {
 	t.Helper()
 
@@ -185,7 +181,7 @@ func TestCreateMultipleAgentsViaTUI(t *testing.T) {
 		t.Fatalf("Expected 1 agent, got %d", mgr.AgentCount())
 	}
 
-	// Create second session+agent (createAgent presses Ctrl+E first to exit focusTerminal)
+	// Create second session+agent (createAgent escapes any focusLaunch overlay first)
 	t.Log("=== Creating session 2 ===")
 	app = createAgent(t, app)
 	t.Logf("After session2: view=%v, err=%q, agents=%d, dashboard=%d",
@@ -1136,7 +1132,7 @@ func TestRKey_NoopWithEmptyQueue(t *testing.T) {
 // frame and the user sees nothing change — which is the "r doesn't do anything"
 // bug this guards against.
 func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
-	app, _, _, sessR := makeFocusModeApp(t)
+	app, sessR := makeFocusModeApp(t)
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	app = model.(App)
@@ -1419,7 +1415,7 @@ func TestClampToRepo(t *testing.T) {
 // makeFocusModeApp wires up an App in focus mode with two in-progress sessions
 // and one ready-for-review session. Used by the tests below to exercise unified
 // cursor navigation across the Active and Review sections.
-func makeFocusModeApp(t *testing.T) (App, *agent.Session, *agent.Session, *agent.Session) {
+func makeFocusModeApp(t *testing.T) (App, *agent.Session) {
 	t.Helper()
 	sessA := &agent.Session{Name: "active-a"}
 	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
@@ -1439,14 +1435,14 @@ func makeFocusModeApp(t *testing.T) (App, *agent.Session, *agent.Session, *agent
 		{kind: listItemSession, repoPath: "/r", session: sessB},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
 	}
-	return app, sessA, sessB, sessR
+	return app, sessR
 }
 
 // TestFocusModeNavigationCrossesSections verifies that j/k in focus mode
 // traverses Active → Review in render order, transitioning between sections at
 // the boundaries instead of bouncing two indices in lockstep.
 func TestFocusModeNavigationCrossesSections(t *testing.T) {
-	app, _, _, _ := makeFocusModeApp(t)
+	app, _ := makeFocusModeApp(t)
 	if app.focusCursorSection != focusSectionActive {
 		// clampFocusCursor only runs from refreshAgentList; here we drive the
 		// state directly. Make the starting condition explicit.

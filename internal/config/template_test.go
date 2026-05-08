@@ -36,13 +36,12 @@ func TestExpandBranchPrefix_Date(t *testing.T) {
 // or mutate the developer's real ~/.gitconfig. HOME + XDG_CONFIG_HOME handle
 // most setups; GIT_CONFIG_GLOBAL=/dev/null is a belt-and-braces override in
 // case the caller's env already set it to a non-default path.
-func sandboxGitConfig(t *testing.T) string {
+func sandboxGitConfig(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	return dir
 }
 
 func TestExpandBranchPrefix_User(t *testing.T) {

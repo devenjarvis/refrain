@@ -30,14 +30,6 @@ var (
 		{"q", "quit"},
 	}
 
-	focusTerminalHints = []keyHint{
-		{"enter", "send"},
-		{"pgup/pgdn", "scroll"},
-		{"home", "live"},
-		{"esc", "back"},
-		{"⇧esc", "interrupt"},
-	}
-
 	diffHints = []keyHint{
 		{"j/k", "tree"},
 		{"h/l", "fold/open"},

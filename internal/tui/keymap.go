@@ -12,15 +12,14 @@ const (
 	ViewRepoPicker   // overlay: pick a registered repo to start a session in
 )
 
-// panelFocus tracks which dashboard panel has keyboard focus.
+// panelFocus tracks which dashboard surface has keyboard focus.
 type panelFocus int
 
 const (
-	focusList     panelFocus = iota // sidebar: j/k navigate agents
-	focusTerminal                   // preview: keys forwarded to agent
-	focusConfig                     // preview: repo config form
-	focusReview                     // preview: review panel (fullscreen focus mode)
-	focusLaunch                     // focus mode paused — viewing an agent terminal
+	focusList   panelFocus = iota // pipeline: j/k navigate sessions
+	focusConfig                   // overlay: per-repo config form
+	focusReview                   // overlay: review panel
+	focusLaunch                   // overlay: fullscreen agent terminal
 )
 
 // focusSection identifies which row group the fullscreen focus-mode cursor is
