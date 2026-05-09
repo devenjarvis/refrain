@@ -130,6 +130,13 @@ func (d *defaultPlanDrafter) Revise(ctx context.Context, req ReviseRequest) (str
 // one-shot planning subprocess. Mirrors buildClaudeHaikuArgs but uses Sonnet.
 // Tools stay disabled — the planner generates a markdown document, it does
 // not need to touch the filesystem or call MCP servers.
+//
+// The --mcp-config payload MUST be a JSON object containing an "mcpServers"
+// key (with an empty record as the value to declare zero servers). Claude's
+// strict schema validator rejects a bare "{}" with
+// `mcpServers: Invalid input: expected record, received undefined`, which
+// makes every planner subprocess exit 1 and surfaces as
+// `claude planner: exit status 1`. Do not simplify this back to "{}".
 func buildClaudePlannerArgs() []string {
 	args := []string{"-p", "--model", claudeSonnetModel}
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
@@ -137,7 +144,7 @@ func buildClaudePlannerArgs() []string {
 	}
 	args = append(
 		args,
-		"--strict-mcp-config", "--mcp-config", "{}",
+		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--tools", "",
