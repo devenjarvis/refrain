@@ -16,10 +16,11 @@ const (
 type panelFocus int
 
 const (
-	focusList   panelFocus = iota // pipeline: j/k navigate sessions
-	focusConfig                   // overlay: per-repo config form
-	focusReview                   // overlay: review panel
-	focusLaunch                   // overlay: fullscreen agent terminal
+	focusList       panelFocus = iota // pipeline: j/k navigate sessions
+	focusConfig                       // overlay: per-repo config form
+	focusReview                       // overlay: review panel
+	focusLaunch                       // overlay: fullscreen agent terminal
+	focusPlanEditor                   // overlay: full-page plan editor (.claude/plan.md)
 )
 
 // focusSection identifies which row group the fullscreen focus-mode cursor is

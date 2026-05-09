@@ -2501,3 +2501,75 @@ func TestActivateFocusCursor_Shipping_FallsBackToTerminalWithoutURL(t *testing.T
 		t.Fatalf("expected ok=false from openSessionInFocusLaunch fallback (no agents), got ok=true")
 	}
 }
+
+// TestNKeyOpensPromptModal_WhenPlanFirstEnabled verifies the new plan-first
+// gate: with PlanFirstEnabled=true, pressing `n` opens the prompt modal
+// instead of immediately creating a session. With the flag off (today's
+// default), `n` continues the legacy spawn path covered by
+// TestCreateAgentViaN.
+func TestNKeyOpensPromptModal_WhenPlanFirstEnabled(t *testing.T) {
+	dir, err := os.MkdirTemp("", "baton-tui-planfirst-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "t@t.com"},
+		{"git", "config", "user.name", "T"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup %v: %v\n%s", args, err, out)
+		}
+	}
+
+	enabled := true
+	resolved := config.Resolve(&config.GlobalSettings{PlanFirstEnabled: &enabled}, nil)
+	mgr := agent.NewManager(dir, resolved)
+	defer mgr.Shutdown()
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	app.promptModal.SetSize(app.width, app.height-1)
+
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	app = model.(App)
+	if !app.promptModal.Active() {
+		t.Fatal("PlanFirstEnabled n press should open the prompt modal")
+	}
+	if mgr.AgentCount() != 0 {
+		t.Errorf("no agent should spawn when modal is open, got %d", mgr.AgentCount())
+	}
+	// Drain the focus cmd if any (textarea blink scheduler).
+	if cmd != nil {
+		_ = cmd()
+	}
+
+	// Esc dismisses without side effects.
+	model, cmd = app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	app = model.(App)
+	if cmd != nil {
+		// Cancel cmd needs to flow through Update.
+		model, _ = app.Update(cmd())
+		app = model.(App)
+	}
+	if app.promptModal.Active() {
+		t.Error("modal should close on esc")
+	}
+	if mgr.AgentCount() != 0 {
+		t.Errorf("no agent should spawn after esc, got %d", mgr.AgentCount())
+	}
+	if len(mgr.ListSessions()) != 0 {
+		t.Errorf("no session should exist after esc, got %d", len(mgr.ListSessions()))
+	}
+}

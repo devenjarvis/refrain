@@ -536,3 +536,45 @@ func TestMaxReviewBacklog_GlobalOverride(t *testing.T) {
 		t.Errorf("MaxReviewBacklog = %d, want 2", resolved.MaxReviewBacklog)
 	}
 }
+
+func TestResolve_PlanFirst_Defaults(t *testing.T) {
+	r := config.Resolve(nil, nil)
+	if r.PlanFirstEnabled != config.DefaultPlanFirstEnabled {
+		t.Errorf("PlanFirstEnabled = %v, want %v", r.PlanFirstEnabled, config.DefaultPlanFirstEnabled)
+	}
+	if r.BuildFromPlanPrompt != config.DefaultBuildFromPlanPrompt {
+		t.Errorf("BuildFromPlanPrompt = %q, want default", r.BuildFromPlanPrompt)
+	}
+}
+
+func TestResolve_PlanFirst_GlobalOverride(t *testing.T) {
+	g := &config.GlobalSettings{
+		PlanFirstEnabled:    boolPtr(true),
+		BuildFromPlanPrompt: strPtr("custom plan prompt"),
+	}
+	r := config.Resolve(g, nil)
+	if !r.PlanFirstEnabled {
+		t.Error("PlanFirstEnabled should be true")
+	}
+	if r.BuildFromPlanPrompt != "custom plan prompt" {
+		t.Errorf("BuildFromPlanPrompt = %q, want %q", r.BuildFromPlanPrompt, "custom plan prompt")
+	}
+}
+
+func TestResolve_PlanFirst_RepoOverridesGlobal(t *testing.T) {
+	g := &config.GlobalSettings{
+		PlanFirstEnabled:    boolPtr(true),
+		BuildFromPlanPrompt: strPtr("global"),
+	}
+	repo := &config.RepoSettings{
+		PlanFirstEnabled:    boolPtr(false),
+		BuildFromPlanPrompt: strPtr("repo"),
+	}
+	r := config.Resolve(g, repo)
+	if r.PlanFirstEnabled {
+		t.Error("PlanFirstEnabled should be false (repo override)")
+	}
+	if r.BuildFromPlanPrompt != "repo" {
+		t.Errorf("BuildFromPlanPrompt = %q, want repo", r.BuildFromPlanPrompt)
+	}
+}

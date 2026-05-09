@@ -143,6 +143,8 @@ type App struct {
 	focusBreakAnimFrame    int
 	reviewDiffCache        map[string]*reviewDiffEntry // keyed by session ID
 	reviewSession          *agent.Session              // session currently open in review panel
+	planEditor             *planEditorModel            // non-nil while panelFocus == focusPlanEditor
+	promptModal            promptModalModel            // overlay for plan-first new-session prompt
 
 	// Wellness counters (written to log on quit).
 	agentsCreatedCount   int
@@ -182,6 +184,7 @@ func NewApp() App {
 		prPollStates:    make(map[string]*prSessionState),
 		closingAgents:   make(map[string]bool),
 		closingSessions: make(map[string]bool),
+		promptModal:     newPromptModal(),
 	}
 }
 
@@ -250,6 +253,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
 				a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 			}
+			if a.dashboard.panelFocus == focusPlanEditor && a.planEditor != nil {
+				a.planEditor.SetSize(msg.Width, msg.Height-1)
+			}
+			a.promptModal.SetSize(msg.Width, msg.Height-1)
 		}
 
 	case initAppMsg:
@@ -561,6 +568,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ps.lastRemoteSHA = ""
 			ps.lastSHACheck = time.Time{}
 		}
+		// If the editor is open on the session whose drafting just landed,
+		// refresh its content + drafting state so the placeholder swaps to
+		// the rendered plan without requiring a re-open.
+		if msg.event.Type == agent.EventStatusChanged && a.planEditor != nil &&
+			a.planEditor.sess != nil && a.planEditor.sess.ID == msg.event.SessionID {
+			drafting := a.planEditor.sess.IsDrafting()
+			a.planEditor.SetDrafting(drafting)
+			if !drafting {
+				a.planEditor.Reload()
+				if derr := a.planEditor.sess.DraftError(); derr != nil {
+					a.planEditor.SetError("draft failed: " + derr.Error())
+				}
+			}
+		}
+
 		// Refresh list on any agent event — all repos are visible in the dashboard.
 		a.refreshAgentList()
 		if mgr := a.managers[msg.repoPath]; mgr != nil {
@@ -658,6 +680,55 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.refreshAgentList()
 		a.updateDashboardDiffStats()
 		return a, nil
+
+	case planEditorCloseMsg:
+		a.dashboard.panelFocus = focusList
+		a.planEditor = nil
+		return a, nil
+
+	case planEditorSavedMsg:
+		// File-saved confirmation lives inside the editor itself; nothing to
+		// do at the App level beyond not propagating the message further.
+		return a, nil
+
+	case planEditorAbandonMsg:
+		// Tear down the session entirely — the user explicitly chose to walk
+		// away from this plan.
+		repoPath := a.repoPathForSession(msg.sessionID)
+		mgr := a.managers[repoPath]
+		a.dashboard.panelFocus = focusList
+		a.planEditor = nil
+		if mgr == nil {
+			return a, nil
+		}
+		sessID := msg.sessionID
+		a.closingSessions[sessID] = true
+		return a, func() tea.Msg {
+			err := mgr.KillSession(sessID)
+			return killResultMsg{
+				scope:     killScopeSession,
+				sessionID: sessID,
+				err:       err,
+			}
+		}
+
+	case planEditorReviseMsg:
+		// Revise loop ships in PR 3. Surface a clear placeholder so the
+		// editor's `r` keybind doesn't appear broken when used today.
+		if a.planEditor != nil {
+			a.planEditor.SetError("Revise lands in a follow-up PR.")
+		}
+		return a, nil
+
+	case planEditorApproveMsg:
+		return a.approvePlanAndSpawn(msg)
+
+	case promptModalCancelMsg:
+		// User dismissed the modal — nothing else to do.
+		return a, nil
+
+	case promptModalSubmitMsg:
+		return a.submitPromptModal(msg)
 
 	case diffStatsMsg:
 		a.diffRefreshInFlight = false
@@ -870,6 +941,12 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyPressMsg:
+		// Prompt modal consumes all keys while open (it's a modal overlay).
+		// Submit/cancel emit dedicated messages handled below.
+		if a.promptModal.Active() {
+			cmd := a.promptModal.Update(msg)
+			return a, cmd
+		}
 		// focusLaunch: forward all keys to the launch agent; esc/ctrl+e returns to focus pipeline.
 		if a.dashboard.panelFocus == focusLaunch {
 			a.confirmQuit = false
@@ -1064,6 +1141,14 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clear the break short-warning on any key that isn't b.
 		if a.focusBreakShortWarning && msg.String() != "b" {
 			a.focusBreakShortWarning = false
+		}
+
+		// Plan editor key handling. The editor has its own internal modes
+		// (scroll/edit/revise-input) and emits planEditor*Msg values handled
+		// by the App below. All keys are consumed by the editor while focused.
+		if a.dashboard.panelFocus == focusPlanEditor && a.planEditor != nil {
+			cmd := a.planEditor.Update(msg)
+			return a, cmd
 		}
 
 		// Review panel key handling.
@@ -1432,6 +1517,16 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if mgr == nil {
 				return a, nil
 			}
+
+			// Plan-first flow: open the prompt modal so the user can describe
+			// the task before any subprocess spawns. The modal's submit
+			// message routes through submitPromptModal which decides between
+			// the planning path (StartDraft + editor) and the skip path
+			// (today's flow).
+			if resolved.PlanFirstEnabled {
+				return a, a.promptModal.Open()
+			}
+
 			cfg := agent.Config{
 				Rows:              fixedH,
 				Cols:              fixedW,
@@ -2020,6 +2115,12 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mgr := a.managers[repoPath]
 		if mgr == nil {
 			return a, nil
+		}
+		// Plan-first flow: same gate as the single-repo `n` keybind. Without
+		// this branch, multi-repo users would silently bypass PlanFirstEnabled
+		// and spawn the real agent immediately.
+		if resolved.PlanFirstEnabled {
+			return a, a.promptModal.Open()
 		}
 		pickerCfg := agent.Config{
 			Rows:              fixedH,
@@ -2705,6 +2806,171 @@ func (a *App) openSessionInFocusLaunch(sess *agent.Session) bool {
 	return true
 }
 
+// submitPromptModal handles a promptModalSubmitMsg by creating a session
+// and dispatching to either the plan-drafting flow (default `enter`) or
+// today's immediate-spawn flow (`ctrl+enter` skip). The modal has already
+// closed itself by the time this fires.
+func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
+	prompt := strings.TrimSpace(msg.prompt)
+	if prompt == "" {
+		return a, nil
+	}
+	repoPath := a.dashboard.selectedRepoPath()
+	if repoPath == "" {
+		repoPath = a.activeRepo
+	}
+	if repoPath == "" {
+		a.setError("no repo selected")
+		return a, nil
+	}
+	mgr := a.managers[repoPath]
+	if mgr == nil {
+		a.setError("session manager not found")
+		return a, nil
+	}
+
+	resolved := a.resolvedCache[repoPath]
+	fixedW := a.dashboard.fixedTermWidth()
+	fixedH := a.dashboard.fixedTermHeight()
+	if fixedW <= 0 || fixedH <= 0 {
+		a.setError("Terminal size not yet known; try again")
+		return a, nil
+	}
+
+	if msg.skipPlanning {
+		// Skip path: identical to today's `n` flow — create the session and
+		// spawn the real agent immediately with the user's prompt as the
+		// initial Task. Lifecycle starts at LifecycleInProgress so the row
+		// shows up in BUILDING, not Planning.
+		cfg := agent.Config{
+			Rows:              fixedH,
+			Cols:              fixedW,
+			BypassPermissions: resolved.BypassPermissions,
+			AgentProgram:      resolved.AgentProgram,
+			Task:              prompt,
+		}
+		return a, func() tea.Msg {
+			sess, ag, err := mgr.CreateSession(cfg)
+			if err != nil {
+				return createResultMsg{err: err}
+			}
+			sess.SetLifecyclePhase(agent.LifecycleInProgress)
+			return createResultMsg{sessionID: sess.ID, agentID: ag.ID}
+		}
+	}
+
+	// Planning path: create the session worktree with no real agent yet,
+	// kick off the draft subprocess in the background, and open the editor
+	// with a "Drafting…" placeholder. The editor reloads itself when the
+	// draft lands (via the EventStatusChanged emitted by runDraft).
+	cfg := agent.Config{
+		Rows:              fixedH,
+		Cols:              fixedW,
+		BypassPermissions: resolved.BypassPermissions,
+		AgentProgram:      resolved.AgentProgram,
+	}
+	sess, err := mgr.CreateSessionForPlanning(cfg)
+	if err != nil {
+		a.setError(err.Error())
+		return a, nil
+	}
+	sess.SetOriginalPrompt(prompt)
+	if err := mgr.StartDraft(sess.ID, prompt); err != nil {
+		a.setError("start draft: " + err.Error())
+		// Fall through and open the editor anyway so the user can edit by
+		// hand or abandon the session.
+	}
+	a.sessionsCreatedCount++
+	a.refreshAgentList()
+	a.openPlanEditor(sess)
+	return a, nil
+}
+
+// openPlanEditor switches the dashboard into the plan-editor overlay for
+// sess. Caller is responsible for marking the session as drafting if a
+// background draft is in flight.
+func (a *App) openPlanEditor(sess *agent.Session) {
+	if sess == nil {
+		return
+	}
+	editorH := a.height - 1 // status row reserved
+	editor := newPlanEditor(sess, a.width, editorH)
+	if sess.IsDrafting() {
+		editor.SetDrafting(true)
+	}
+	a.planEditor = &editor
+	a.dashboard.panelFocus = focusPlanEditor
+	a.dashboard.scrollOffset = 0
+}
+
+// approvePlanAndSpawn handles a planEditorApproveMsg: closes the editor,
+// transitions the session to LifecycleInProgress, and spawns the real
+// agent with the configured BuildFromPlanPrompt. The plan text is already
+// on disk by the time this fires (the editor's `a` handler writes it).
+func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd) {
+	repoPath := a.repoPathForSession(msg.sessionID)
+	if repoPath == "" {
+		repoPath = a.activeRepo
+	}
+	mgr := a.managers[repoPath]
+	if mgr == nil {
+		a.dashboard.panelFocus = focusList
+		a.planEditor = nil
+		a.setError("session manager not found")
+		return a, nil
+	}
+
+	var sess *agent.Session
+	for _, s := range mgr.ListSessions() {
+		if s.ID == msg.sessionID {
+			sess = s
+			break
+		}
+	}
+	if sess == nil {
+		a.dashboard.panelFocus = focusList
+		a.planEditor = nil
+		a.setError("session not found")
+		return a, nil
+	}
+
+	resolved := a.resolvedCache[repoPath]
+	prompt := strings.TrimSpace(resolved.BuildFromPlanPrompt)
+	if prompt == "" {
+		prompt = config.DefaultBuildFromPlanPrompt
+	}
+
+	fixedW := a.dashboard.fixedTermWidth()
+	fixedH := a.dashboard.fixedTermHeight()
+	if fixedW <= 0 || fixedH <= 0 {
+		a.setError("Terminal size not yet known; try again")
+		return a, nil
+	}
+
+	cfg := agent.Config{
+		Rows:              fixedH,
+		Cols:              fixedW,
+		BypassPermissions: resolved.BypassPermissions,
+		AgentProgram:      resolved.AgentProgram,
+		Task:              prompt,
+	}
+
+	a.dashboard.panelFocus = focusList
+	a.planEditor = nil
+	sessID := sess.ID
+	// Phase transition is intentionally inside the closure: if AddAgent
+	// fails, the session stays in LifecyclePlanning so the user can retry
+	// from the plan editor instead of seeing an orphan row in BUILDING.
+	return a, func() tea.Msg {
+		ag, err := mgr.AddAgent(sessID, cfg)
+		if err != nil {
+			return createResultMsg{err: err}
+		}
+		sess.SetLifecyclePhase(agent.LifecycleInProgress)
+		return createResultMsg{sessionID: sessID, agentID: ag.ID}
+	}
+}
+
 func (a App) View() tea.View {
 	var content string
 
@@ -2713,6 +2979,11 @@ func (a App) View() tea.View {
 		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
 			entry := a.reviewDiffCache[a.reviewSession.ID]
 			v := tea.NewView(renderReviewPanel(a.reviewSession, entry, a.width))
+			v.AltScreen = true
+			return v
+		}
+		if a.dashboard.panelFocus == focusPlanEditor && a.planEditor != nil {
+			v := tea.NewView(a.planEditor.View())
 			v.AltScreen = true
 			return v
 		}
@@ -2748,6 +3019,12 @@ func (a App) View() tea.View {
 					}
 				}
 			}
+		}
+		// Prompt modal overlay (plan-first new-session input). Centered over
+		// the body, replaces it while active so the dashboard does not
+		// receive input.
+		if a.promptModal.Active() {
+			body = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.promptModal.View())
 		}
 		// Agent-limit modal overlay: replace body with centered modal when active.
 		if a.agentLimitModalActive {

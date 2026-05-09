@@ -30,6 +30,18 @@ const (
 	// branch_name_prompt key in global or per-repo config; the {prompt} token
 	// is substituted with the user's prompt before the call.
 	DefaultBranchNamePrompt = "Summarize this task into a 3-5 word git branch slug (lowercase, kebab-case, no prefix). Respond with ONLY the slug.\n\n{prompt}"
+
+	// DefaultPlanFirstEnabled gates the plan-first planning flow. When false
+	// (the default) the n keybind keeps today's behaviour: create a session
+	// and spawn the agent immediately. When true, n opens a prompt modal,
+	// drafts a plan via claude -p, and only spawns the agent after the user
+	// approves the plan.
+	DefaultPlanFirstEnabled = false
+
+	// DefaultBuildFromPlanPrompt is the initial prompt baton sends to the
+	// real agent when an approved plan is handed off. The agent is expected
+	// to read .claude/plan.md and execute it.
+	DefaultBuildFromPlanPrompt = "Read .claude/plan.md and execute the plan. Update task checkboxes as you complete them. Stop when all tasks are complete or when you need a decision."
 )
 
 // ClampSidebarWidth returns w constrained to [MinSidebarWidth, MaxSidebarWidth].
@@ -60,18 +72,24 @@ type GlobalSettings struct {
 	FocusBreakMinutes   *int `json:"focus_break_minutes,omitempty"`
 	MaxConcurrentAgents *int `json:"max_concurrent_agents,omitempty"`
 	MaxReviewBacklog    *int `json:"max_review_backlog,omitempty"`
+
+	// Plan-first planning. Both fields are also overridable per-repo.
+	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
+	BuildFromPlanPrompt *string `json:"build_from_plan_prompt,omitempty"`
 }
 
 // RepoSettings holds per-repo overrides stored at <repo>/.baton/config.json.
 // Fields here override the corresponding GlobalSettings value.
 type RepoSettings struct {
-	BypassPermissions *bool   `json:"bypass_permissions,omitempty"`
-	DefaultBranch     *string `json:"default_branch,omitempty"`
-	BranchPrefix      *string `json:"branch_prefix,omitempty"`
-	BranchNamePrompt  *string `json:"branch_name_prompt,omitempty"`
-	AgentProgram      *string `json:"agent_program,omitempty"`
-	IDECommand        *string `json:"ide_command,omitempty"`
-	WorktreeDir       *string `json:"worktree_dir,omitempty"`
+	BypassPermissions   *bool   `json:"bypass_permissions,omitempty"`
+	DefaultBranch       *string `json:"default_branch,omitempty"`
+	BranchPrefix        *string `json:"branch_prefix,omitempty"`
+	BranchNamePrompt    *string `json:"branch_name_prompt,omitempty"`
+	AgentProgram        *string `json:"agent_program,omitempty"`
+	IDECommand          *string `json:"ide_command,omitempty"`
+	WorktreeDir         *string `json:"worktree_dir,omitempty"`
+	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
+	BuildFromPlanPrompt *string `json:"build_from_plan_prompt,omitempty"`
 }
 
 // ResolvedSettings is the fully merged configuration with no nil pointers.
@@ -92,6 +110,10 @@ type ResolvedSettings struct {
 	FocusBreakMinutes   int
 	MaxConcurrentAgents int
 	MaxReviewBacklog    int
+
+	// Plan-first planning.
+	PlanFirstEnabled    bool
+	BuildFromPlanPrompt string
 }
 
 // Resolve merges global and repo settings over built-in defaults.
@@ -109,6 +131,8 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		FocusBreakMinutes:   DefaultFocusBreakMinutes,
 		MaxConcurrentAgents: DefaultMaxConcurrentAgents,
 		MaxReviewBacklog:    DefaultMaxReviewBacklog,
+		PlanFirstEnabled:    DefaultPlanFirstEnabled,
+		BuildFromPlanPrompt: DefaultBuildFromPlanPrompt,
 	}
 
 	if global != nil {
@@ -148,6 +172,12 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		if global.MaxReviewBacklog != nil {
 			r.MaxReviewBacklog = *global.MaxReviewBacklog
 		}
+		if global.PlanFirstEnabled != nil {
+			r.PlanFirstEnabled = *global.PlanFirstEnabled
+		}
+		if global.BuildFromPlanPrompt != nil {
+			r.BuildFromPlanPrompt = *global.BuildFromPlanPrompt
+		}
 	}
 
 	if repo != nil {
@@ -171,6 +201,12 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if repo.WorktreeDir != nil {
 			r.WorktreeDir = *repo.WorktreeDir
+		}
+		if repo.PlanFirstEnabled != nil {
+			r.PlanFirstEnabled = *repo.PlanFirstEnabled
+		}
+		if repo.BuildFromPlanPrompt != nil {
+			r.BuildFromPlanPrompt = *repo.BuildFromPlanPrompt
 		}
 	}
 

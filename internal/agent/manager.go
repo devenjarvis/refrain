@@ -942,6 +942,20 @@ func (m *Manager) createSessionWorktree(cfg Config) (*Session, error) {
 	return sess, nil
 }
 
+// CreateSessionForPlanning creates a session with a worktree but no agent
+// process. The session starts at LifecyclePlanning so it shows up in the
+// pipeline immediately; callers typically follow with StartDraft to kick
+// off plan generation, then AddAgent on approval. Used by the plan-first
+// flow where the user reviews/approves a plan before any real agent runs.
+func (m *Manager) CreateSessionForPlanning(cfg Config) (*Session, error) {
+	sess, err := m.createSessionWorktree(cfg)
+	if err != nil {
+		return nil, err
+	}
+	m.emit(Event{Type: EventCreated, SessionID: sess.ID})
+	return sess, nil
+}
+
 // AddAgent adds an agent to an existing session using the default claude command.
 func (m *Manager) AddAgent(sessionID string, cfg Config) (*Agent, error) {
 	m.mu.RLock()
