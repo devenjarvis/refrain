@@ -47,5 +47,12 @@ func TestMain(m *testing.M) {
 	haikuSummaryOverallTimeout = 3 * time.Second
 	haikuSummaryBackoff = []time.Duration{}
 
+	// Plan drafting is one-shot (no retry), so the production 60s ceiling is
+	// just the wall-clock budget a hung subprocess would burn in tests
+	// before surfacing. Shrink to 5s — long enough that legitimate stub
+	// drafters don't race the deadline, short enough that a regression
+	// causing Draft to block forever surfaces quickly.
+	PlanDraftTimeout = 5 * time.Second
+
 	os.Exit(m.Run())
 }

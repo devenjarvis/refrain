@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -757,6 +758,114 @@ func TestSession_SetTaskSummary_EmptyStringStillSetsHasSummary(t *testing.T) {
 	}
 }
 
+// --- Drafting state machine tests ---
+
+func TestSession_TryStartDraft_FirstCallReturnsTrue(t *testing.T) {
+	s := newSession("id", "name", &git.WorktreeInfo{})
+	cancelled := false
+	cancel := func() { cancelled = true }
+	if !s.TryStartDraft(cancel) {
+		t.Error("TryStartDraft() should return true on first call")
+	}
+	if !s.IsDrafting() {
+		t.Error("IsDrafting() should be true after TryStartDraft returns true")
+	}
+	if cancelled {
+		t.Error("cancel should not have fired yet — only on finishDraft / CancelDraft")
+	}
+}
+
+func TestSession_TryStartDraft_ReturnsFalseIfDrafting(t *testing.T) {
+	s := newSession("id", "name", &git.WorktreeInfo{})
+	if !s.TryStartDraft(func() {}) {
+		t.Fatal("expected true on first call")
+	}
+	if s.TryStartDraft(func() {}) {
+		t.Error("TryStartDraft() should return false while drafting is in flight")
+	}
+}
+
+func TestSession_FinishDraft_ClearsFlagAndCallsCancel(t *testing.T) {
+	s := newSession("id", "name", &git.WorktreeInfo{})
+
+	cancelCalls := 0
+	if !s.TryStartDraft(func() { cancelCalls++ }) {
+		t.Fatal("expected true on first call")
+	}
+
+	s.finishDraft()
+	if s.IsDrafting() {
+		t.Error("IsDrafting() should be false after finishDraft")
+	}
+	if cancelCalls != 1 {
+		t.Errorf("cancel calls = %d, want 1 (finishDraft must release the context)", cancelCalls)
+	}
+
+	// After finish, a fresh draft is allowed.
+	if !s.TryStartDraft(func() {}) {
+		t.Error("TryStartDraft should be allowed after finishDraft")
+	}
+}
+
+func TestSession_CancelDraft_NoOpWhenNotDrafting(t *testing.T) {
+	s := newSession("id", "name", &git.WorktreeInfo{})
+	// Should not panic; nothing to cancel.
+	s.CancelDraft()
+}
+
+func TestSession_CancelDraft_FiresStoredCancel(t *testing.T) {
+	s := newSession("id", "name", &git.WorktreeInfo{})
+
+	cancelCalls := 0
+	if !s.TryStartDraft(func() { cancelCalls++ }) {
+		t.Fatal("expected true on first call")
+	}
+
+	s.CancelDraft()
+	if cancelCalls != 1 {
+		t.Errorf("CancelDraft cancel calls = %d, want 1", cancelCalls)
+	}
+
+	// finishDraft after CancelDraft should still fire cancel — the stored
+	// cancel func has not been cleared yet because finishDraft owns the
+	// clearing, not CancelDraft. The runtime guarantees double-cancel is
+	// safe per the context package spec.
+	s.finishDraft()
+	if cancelCalls != 2 {
+		t.Errorf("after finishDraft, cancel calls = %d, want 2", cancelCalls)
+	}
+}
+
+func TestSession_DraftError_RoundTrip(t *testing.T) {
+	s := newSession("id", "name", &git.WorktreeInfo{})
+	if s.DraftError() != nil {
+		t.Errorf("DraftError() = %v, want nil initially", s.DraftError())
+	}
+	want := fmt.Errorf("boom")
+	s.SetDraftError(want)
+	if got := s.DraftError(); got != want {
+		t.Errorf("DraftError() = %v, want %v", got, want)
+	}
+	s.SetDraftError(nil)
+	if s.DraftError() != nil {
+		t.Error("DraftError() should be cleared after SetDraftError(nil)")
+	}
+}
+
+func TestSession_FinishDraft_DoesNotClearDraftError(t *testing.T) {
+	// finishDraft only clears the in-flight flag; the last error stays so
+	// the Planning card can render the failure even after the goroutine exits.
+	s := newSession("id", "name", &git.WorktreeInfo{})
+	if !s.TryStartDraft(func() {}) {
+		t.Fatal("expected true on first call")
+	}
+	s.SetDraftError(fmt.Errorf("subprocess died"))
+	s.finishDraft()
+	if s.DraftError() == nil {
+		t.Error("finishDraft should not clear DraftError")
+	}
+}
+
 // --- LastOutputTime tests ---
 
 func TestSession_LastOutputTime_ZeroWithNoAgents(t *testing.T) {
@@ -906,5 +1015,210 @@ func TestSession_IsReviewable_IgnoresShellWhenOtherAgentsReviewable(t *testing.T
 	s := makeReviewableSession(t, []Status{StatusIdle}, true)
 	if !s.IsReviewable() {
 		t.Error("IsReviewable() = false, want true (shell agent should be ignored)")
+	}
+}
+
+// --- Plan persistence tests ---
+
+func TestSession_PlanPath(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	want := filepath.Join(dir, ".claude", "plan.md")
+	if got := s.PlanPath(); got != want {
+		t.Errorf("PlanPath() = %q, want %q", got, want)
+	}
+}
+
+func TestSession_HasPlan_FalseInitially(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	if s.HasPlan() {
+		t.Error("HasPlan() should be false before any WritePlan")
+	}
+}
+
+func TestSession_ReadPlan_ReturnsEmptyWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	got, err := s.ReadPlan()
+	if err != nil {
+		t.Fatalf("ReadPlan: %v", err)
+	}
+	if got != "" {
+		t.Errorf("ReadPlan() = %q, want \"\" for missing plan file", got)
+	}
+}
+
+func TestSession_WritePlan_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	const body = "# Goal\nDo a thing\n\n## Tasks\n- [ ] one\n"
+	if err := s.WritePlan(body); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	if !s.HasPlan() {
+		t.Error("HasPlan() should report true after WritePlan")
+	}
+	got, err := s.ReadPlan()
+	if err != nil {
+		t.Fatalf("ReadPlan: %v", err)
+	}
+	if got != body {
+		t.Errorf("plan = %q, want %q", got, body)
+	}
+}
+
+func TestSession_WritePlan_CreatesClaudeDir(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	if err := s.WritePlan("# Goal\nx"); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	claudeDir := filepath.Join(dir, ".claude")
+	info, err := os.Stat(claudeDir)
+	if err != nil {
+		t.Fatalf("stat .claude: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error(".claude should be a directory")
+	}
+}
+
+func TestSession_WritePlan_AtomicReplace(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+
+	if err := s.WritePlan("v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WritePlan("v2"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ReadPlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "v2" {
+		t.Errorf("after second write, plan = %q, want v2", got)
+	}
+
+	// No .tmp files should be left behind.
+	entries, err := os.ReadDir(filepath.Join(dir, ".claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("leftover temp file: %s", e.Name())
+		}
+	}
+}
+
+func TestSession_WritePlan_AppendsToGitignoreWhenMissing(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(gitignorePath, []byte("node_modules\n.baton/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.WritePlan("body"); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+
+	got, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), ".claude/") {
+		t.Errorf(".gitignore missing .claude/ after WritePlan; got=%q", string(got))
+	}
+}
+
+func TestSession_WritePlan_GitignoreUntouchedWhenAlreadyCovered(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	const original = ".claude/\nnode_modules\n"
+	if err := os.WriteFile(gitignorePath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.WritePlan("body"); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+
+	got, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf(".gitignore was modified despite already covering .claude/\nbefore=%q\nafter=%q", original, string(got))
+	}
+}
+
+func TestSession_WritePlan_GitignoreCreatedWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+
+	if err := s.WritePlan("body"); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	got, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if !strings.Contains(string(got), ".claude/") {
+		t.Errorf("freshly-created .gitignore missing .claude/; got=%q", string(got))
+	}
+}
+
+func TestSession_WritePlan_NoTrailingNewlineInGitignore(t *testing.T) {
+	// Pre-existing .gitignore without a trailing newline must get one inserted
+	// before the ".claude/" line so it lands on its own line.
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(gitignorePath, []byte("node_modules"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.WritePlan("body"); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+
+	got, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "node_modules\n.claude/") {
+		t.Errorf(".gitignore should have .claude/ on its own line; got=%q", string(got))
+	}
+}
+
+func TestClaudeIgnoreCovered(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"empty", "", false},
+		{"unrelated", "node_modules\n.baton/\n", false},
+		{"with slash", ".claude/\n", true},
+		{"without slash", ".claude\n", true},
+		{"surrounded", "node_modules\n.claude/\nfoo\n", true},
+		{"comment matching", "# .claude/\n", false},
+		{"prefix match should not trigger", ".claudefoo\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := claudeIgnoreCovered(tc.body); got != tc.want {
+				t.Errorf("claudeIgnoreCovered(%q) = %v, want %v", tc.body, got, tc.want)
+			}
+		})
 	}
 }

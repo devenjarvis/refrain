@@ -13,6 +13,7 @@ func TestLifecyclePhase_String(t *testing.T) {
 		{LifecycleInReview, "in_review"},
 		{LifecycleShipping, "shipping"},
 		{LifecycleComplete, "complete"},
+		{LifecycleDrafting, "drafting"},
 	}
 	for _, tc := range cases {
 		if got := tc.phase.String(); got != tc.want {
@@ -32,6 +33,7 @@ func TestLifecyclePhaseFromString(t *testing.T) {
 		{"in_review", LifecycleInReview},
 		{"shipping", LifecycleShipping},
 		{"complete", LifecycleComplete},
+		{"drafting", LifecyclePlanning},  // drafting cannot survive detach; restore as Planning
 		{"", LifecycleInProgress},        // empty → default
 		{"unknown", LifecycleInProgress}, // unknown → default
 	}
