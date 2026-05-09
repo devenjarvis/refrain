@@ -1222,3 +1222,100 @@ func TestClaudeIgnoreCovered(t *testing.T) {
 		})
 	}
 }
+
+func TestSession_HasPrevPlan_FalseInitially(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	if s.HasPrevPlan() {
+		t.Error("HasPrevPlan() should be false before any snapshot")
+	}
+}
+
+func TestSession_RestorePrevPlan_NoSnapshotIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	prev, restored, err := s.RestorePrevPlan()
+	if err != nil {
+		t.Fatalf("RestorePrevPlan: %v", err)
+	}
+	if restored {
+		t.Error("RestorePrevPlan should report restored=false when no snapshot exists")
+	}
+	if prev != "" {
+		t.Errorf("RestorePrevPlan prev = %q, want empty", prev)
+	}
+}
+
+func TestSession_SnapshotAndRestoreRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	const v1 = "# Goal\nv1 plan\n\n## Tasks\n- [ ] step\n"
+	if err := s.WritePlan(v1); err != nil {
+		t.Fatalf("WritePlan v1: %v", err)
+	}
+	if err := s.snapshotPlanToPrev(); err != nil {
+		t.Fatalf("snapshotPlanToPrev: %v", err)
+	}
+	if !s.HasPrevPlan() {
+		t.Fatal("HasPrevPlan should be true after snapshot")
+	}
+	const v2 = "# Goal\nv2 plan\n"
+	if err := s.WritePlan(v2); err != nil {
+		t.Fatalf("WritePlan v2: %v", err)
+	}
+	prev, restored, err := s.RestorePrevPlan()
+	if err != nil {
+		t.Fatalf("RestorePrevPlan: %v", err)
+	}
+	if !restored {
+		t.Error("RestorePrevPlan should report restored=true")
+	}
+	if prev != v1 {
+		t.Errorf("RestorePrevPlan prev = %q, want %q", prev, v1)
+	}
+	got, err := s.ReadPlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != v1 {
+		t.Errorf("plan after restore = %q, want %q", got, v1)
+	}
+	if s.HasPrevPlan() {
+		t.Error("HasPrevPlan should be false after restore (single-step undo)")
+	}
+}
+
+func TestSession_SnapshotEmptyPlanIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	if err := s.snapshotPlanToPrev(); err != nil {
+		t.Fatalf("snapshotPlanToPrev with no plan: %v", err)
+	}
+	if s.HasPrevPlan() {
+		t.Error("HasPrevPlan should be false when no plan exists to snapshot")
+	}
+}
+
+func TestSession_ReviseGate_RejectsWhileDrafting(t *testing.T) {
+	s := newSession("id", "name", &git.WorktreeInfo{Path: t.TempDir()})
+	if !s.TryStartDraft(func() {}) {
+		t.Fatal("TryStartDraft should succeed initially")
+	}
+	if s.TryStartRevise(func() {}) {
+		t.Error("TryStartRevise should return false while drafting")
+	}
+}
+
+func TestSession_ReviseGate_DoubleDispatchRejected(t *testing.T) {
+	s := newSession("id", "name", &git.WorktreeInfo{Path: t.TempDir()})
+	if !s.TryStartRevise(func() {}) {
+		t.Fatal("first TryStartRevise should succeed")
+	}
+	if s.TryStartRevise(func() {}) {
+		t.Error("second TryStartRevise should return false while revising")
+	}
+	s.finishRevise()
+	if s.IsRevising() {
+		t.Error("IsRevising should be false after finishRevise")
+	}
+}

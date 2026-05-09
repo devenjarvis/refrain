@@ -40,6 +40,9 @@ type Session struct {
 	drafting       bool   // true while a plan-drafting subprocess is in flight; gates double-dispatch
 	draftCancel    context.CancelFunc
 	draftErr       error // last drafting error, surfaced by the Planning card; cleared on successful draft
+	revising       bool  // true while a plan-revising subprocess is in flight; gates double-dispatch
+	reviseCancel   context.CancelFunc
+	reviseErr      error // last revise error, surfaced by the editor; cleared on successful revise
 }
 
 // newSession creates a session with the given worktree. New sessions land in
@@ -611,6 +614,15 @@ func NewSessionForTest(id, name string) *Session {
 	return newSession(id, name, &git.WorktreeInfo{})
 }
 
+// NewSessionForTestWithPath creates a Session whose worktree path is set, so
+// callers can exercise plan-file helpers (WritePlan, ReadPlan, HasPlan,
+// HasPrevPlan, RestorePrevPlan) without spinning up a real git worktree.
+// Intended for tests outside the agent package; production code constructs
+// sessions through the manager.
+func NewSessionForTestWithPath(id, name, worktreePath string) *Session {
+	return newSession(id, name, &git.WorktreeInfo{Path: worktreePath})
+}
+
 // AddTestAgent injects a synthetic agent with the given id/shell flag/status
 // into the session for use in tests outside the agent package. It bypasses the
 // normal PTY-spawning path so callers don't need a real subprocess to exercise
@@ -740,11 +752,82 @@ func (s *Session) DraftError() error {
 	return s.draftErr
 }
 
+// IsRevising reports whether a plan-revising subprocess is currently in flight.
+func (s *Session) IsRevising() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.revising
+}
+
+// TryStartRevise atomically returns true if a plan-revising subprocess should
+// start now, or false if one is already in flight. Mirrors TryStartDraft.
+// Drafting and revising are mutually exclusive — you cannot revise while a
+// draft is still landing — so this also returns false during drafting.
+// Callers that receive true must call finishRevise when done.
+func (s *Session) TryStartRevise(cancel context.CancelFunc) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.revising || s.drafting {
+		return false
+	}
+	s.revising = true
+	s.reviseCancel = cancel
+	return true
+}
+
+// finishRevise clears the in-flight revise flag and releases the stored cancel
+// func by invoking it (idempotent). Does NOT clear reviseErr.
+func (s *Session) finishRevise() {
+	s.mu.Lock()
+	cancel := s.reviseCancel
+	s.revising = false
+	s.reviseCancel = nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// CancelRevise cancels the in-flight revising subprocess if any. Safe to call
+// when no revise is in flight (no-op). Used by KillSession and Shutdown to
+// abort the subprocess promptly so the goroutine can drain through finishRevise.
+func (s *Session) CancelRevise() {
+	s.mu.RLock()
+	cancel := s.reviseCancel
+	s.mu.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// SetReviseError stores the latest revise error (or nil to clear). Cleared
+// when a subsequent revise succeeds; finishRevise does NOT clear it.
+func (s *Session) SetReviseError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reviseErr = err
+}
+
+// ReviseError returns the last revise error, or nil if the most recent revise
+// attempt succeeded (or no revise has run).
+func (s *Session) ReviseError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.reviseErr
+}
+
 // PlanPath returns the absolute path to the session's plan markdown file
 // (<worktree>/.claude/plan.md). Always returns a path even if the file does
 // not exist — callers use HasPlan or ReadPlan to test for presence.
 func (s *Session) PlanPath() string {
 	return filepath.Join(s.Worktree.Path, ".claude", "plan.md")
+}
+
+// PrevPlanPath returns the absolute path to the session's previous-plan
+// snapshot (<worktree>/.claude/plan.prev.md). The file is written by
+// RevisePlan as a single-step undo target; RestorePrevPlan reads it back.
+func (s *Session) PrevPlanPath() string {
+	return filepath.Join(s.Worktree.Path, ".claude", "plan.prev.md")
 }
 
 // ReadPlan returns the contents of the session's plan file. Returns
@@ -810,6 +893,88 @@ func (s *Session) WritePlan(content string) error {
 func (s *Session) HasPlan() bool {
 	_, err := os.Stat(s.PlanPath())
 	return err == nil
+}
+
+// HasPrevPlan reports whether a previous-plan snapshot exists on disk.
+// Used by the editor to decide whether to render the `u` (undo) hint.
+func (s *Session) HasPrevPlan() bool {
+	_, err := os.Stat(s.PrevPlanPath())
+	return err == nil
+}
+
+// snapshotPlanToPrev reads the current plan.md and writes it to plan.prev.md
+// using a temp+rename so a concurrent reader never sees a partial write.
+// Used by Manager.RevisePlan before invoking the drafter so the user can
+// undo to the pre-revise version. Returns nil when no plan.md exists yet
+// (the revise path covers that case by falling through to "no undo target").
+func (s *Session) snapshotPlanToPrev() error {
+	current, err := s.ReadPlan()
+	if err != nil {
+		return err
+	}
+	if current == "" {
+		return nil
+	}
+	return s.writePrevPlan(current)
+}
+
+// writePrevPlan writes content to plan.prev.md atomically. Mirrors WritePlan
+// but does not touch .gitignore (the dir already exists by the time this is
+// called, since plan.md was just read).
+func (s *Session) writePrevPlan(content string) error {
+	planDir := filepath.Join(s.Worktree.Path, ".claude")
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		return fmt.Errorf("plan: creating %s: %w", planDir, err)
+	}
+	prevPath := s.PrevPlanPath()
+	tmp, err := os.CreateTemp(planDir, "plan-prev-*.md.tmp")
+	if err != nil {
+		return fmt.Errorf("plan: creating temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("plan: writing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("plan: closing temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, prevPath); err != nil {
+		return fmt.Errorf("plan: renaming temp file to %s: %w", prevPath, err)
+	}
+	committed = true
+	return nil
+}
+
+// RestorePrevPlan replaces plan.md with the contents of plan.prev.md and
+// removes the snapshot. Single-step undo only — after restore, the previous
+// plan is gone and a second `u` press is a no-op (HasPrevPlan returns false).
+// Returns ("", false, nil) when no snapshot exists, in which case the caller
+// renders the no-op hint. The restored plan content is returned so the editor
+// can refresh in-memory state without re-reading.
+func (s *Session) RestorePrevPlan() (string, bool, error) {
+	data, err := os.ReadFile(s.PrevPlanPath())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("plan: reading %s: %w", s.PrevPlanPath(), err)
+	}
+	prev := string(data)
+	if err := s.WritePlan(prev); err != nil {
+		return "", false, err
+	}
+	// Best effort: remove the snapshot so a second `u` doesn't loop. A failed
+	// remove leaves a stale snapshot but the next revise will overwrite it,
+	// so we surface the read/write success even if the cleanup misses.
+	_ = os.Remove(s.PrevPlanPath())
+	return prev, true, nil
 }
 
 // ensureClaudeIgnored appends ".claude/" to the worktree's root .gitignore

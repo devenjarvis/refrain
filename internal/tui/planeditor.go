@@ -76,6 +76,13 @@ type planEditorCloseMsg struct {
 	sessionID string
 }
 
+// planEditorRestoreMsg is emitted on `u` in scroll mode to restore the
+// previous plan from .claude/plan.prev.md (single-step undo). The App
+// handler delegates to Session.RestorePrevPlan and reloads the editor.
+type planEditorRestoreMsg struct {
+	sessionID string
+}
+
 // planEditorSavedMsg is emitted when ctrl+s completes; the App typically
 // just clears any pending error state.
 type planEditorSavedMsg struct {
@@ -258,6 +265,19 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 		m.mode = planEditorModeReviseInput
 		m.reviseInput.SetValue("")
 		return m.reviseInput.Focus()
+	case "u":
+		if m.revising || m.sess == nil {
+			return nil
+		}
+		// Surface a friendly inline message instead of routing through the
+		// App when there's nothing to undo — saves a round-trip and keeps
+		// the no-op key press from looking broken.
+		if !m.sess.HasPrevPlan() {
+			m.errMsg = "nothing to undo"
+			return nil
+		}
+		sessID := m.sess.ID
+		return func() tea.Msg { return planEditorRestoreMsg{sessionID: sessID} }
 	case "a":
 		if m.revising || m.drafting || m.sess == nil {
 			return nil
@@ -461,6 +481,27 @@ func (m *planEditorModel) renderBody() string {
 	if m.drafting {
 		return StyleSubtle.Render("Drafting plan with claude -p… (esc to cancel)")
 	}
+	if m.revising {
+		// Show the current plan greyed out so the user has context for the
+		// in-flight critique, plus a status line at the top. Cleaner than a
+		// blank "Revising…" screen and lets the user keep reading.
+		all := m.planLines()
+		body := m.bodyHeight() - 1
+		if body < 1 {
+			body = 1
+		}
+		end := m.scrollOff + body
+		if end > len(all) {
+			end = len(all)
+		}
+		var rendered string
+		if len(all) == 0 {
+			rendered = StyleSubtle.Render("(no plan content)")
+		} else {
+			rendered = strings.Join(all[m.scrollOff:end], "\n")
+		}
+		return StyleActive.Render("Revising plan with claude -p…") + "\n" + StyleSubtle.Render(rendered)
+	}
 	all := m.planLines()
 	if len(all) == 0 {
 		return StyleSubtle.Render("(no plan content yet — press i to start writing or r to revise)")
@@ -495,8 +536,11 @@ func (m *planEditorModel) renderFooter() string {
 			StyleActive.Render("esc") + StyleSubtle.Render(" cancel")
 	default:
 		hints = StyleActive.Render("i") + StyleSubtle.Render(" edit  ") +
-			StyleActive.Render("r") + StyleSubtle.Render(" revise  ") +
-			StyleActive.Render("a") + StyleSubtle.Render(" approve  ") +
+			StyleActive.Render("r") + StyleSubtle.Render(" revise  ")
+		if m.sess != nil && m.sess.HasPrevPlan() {
+			hints += StyleActive.Render("u") + StyleSubtle.Render(" undo  ")
+		}
+		hints += StyleActive.Render("a") + StyleSubtle.Render(" approve  ") +
 			StyleActive.Render("q") + StyleSubtle.Render(" abandon  ") +
 			StyleActive.Render("esc") + StyleSubtle.Render(" back")
 	}

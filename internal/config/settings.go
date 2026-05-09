@@ -31,12 +31,13 @@ const (
 	// is substituted with the user's prompt before the call.
 	DefaultBranchNamePrompt = "Summarize this task into a 3-5 word git branch slug (lowercase, kebab-case, no prefix). Respond with ONLY the slug.\n\n{prompt}"
 
-	// DefaultPlanFirstEnabled gates the plan-first planning flow. When false
-	// (the default) the n keybind keeps today's behaviour: create a session
-	// and spawn the agent immediately. When true, n opens a prompt modal,
-	// drafts a plan via claude -p, and only spawns the agent after the user
-	// approves the plan.
-	DefaultPlanFirstEnabled = false
+	// DefaultPlanFirstEnabled gates the plan-first planning flow. When true
+	// (the default) the n keybind opens a prompt modal, drafts a plan via
+	// claude -p, and only spawns the agent after the user approves the plan.
+	// Users who prefer today's behaviour (immediate spawn) can set
+	// "plan_first_enabled": false in global or per-repo config, or use
+	// ctrl+enter on the modal to skip the planning step on a per-session basis.
+	DefaultPlanFirstEnabled = true
 
 	// DefaultBuildFromPlanPrompt is the initial prompt baton sends to the
 	// real agent when an approved plan is handed off. The agent is expected
