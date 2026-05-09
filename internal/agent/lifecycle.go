@@ -11,8 +11,18 @@ const (
 	LifecycleInReview                             // developer committed to reviewing
 	LifecycleShipping                             // PR open, waiting for CI/team
 	LifecycleComplete                             // PR merged or manually marked done
-	LifecycleDrafting                             // claude -p plan subprocess is running; transitions to Planning on completion
 )
+
+// LifecycleDrafting is a transient pre-Planning sub-phase: a `claude -p`
+// plan subprocess is running and will transition the session to
+// LifecyclePlanning on completion. It is declared in a separate const
+// block with an explicit negative value so any future range check
+// (e.g. phase >= LifecycleComplete) classifies it as "earlier than
+// Planning", matching its position in the visual pipeline. Keeping it
+// outside the main iota block also preserves the 0..5 numeric ordering
+// of the forward phases. Serialization is string-based (see String /
+// LifecyclePhaseFromString) so the numeric value is never persisted.
+const LifecycleDrafting LifecyclePhase = -1
 
 func (p LifecyclePhase) String() string {
 	switch p {

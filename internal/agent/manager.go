@@ -1139,13 +1139,20 @@ func (m *Manager) KillSession(sessionID string) error {
 
 	sess.KillAll()
 
-	if err := sess.Cleanup(m.repoPath); err != nil {
-		return fmt.Errorf("cleanup session %s: %w", sessionID, err)
-	}
-
+	// Delete the session from the map BEFORE removing the worktree so
+	// runDraft's stillOpen guard observes the session as gone before any
+	// post-Cleanup WritePlan attempt. The previous order (Cleanup first,
+	// delete second) left a window where stillOpen=true while the worktree
+	// directory was already removed, relying on an implicit contract that
+	// PlanDrafter.Draft must return a non-nil error on context cancellation.
+	// Mirrors closeSession's delete-then-cleanup ordering.
 	m.mu.Lock()
 	delete(m.sessions, sessionID)
 	m.mu.Unlock()
+
+	if err := sess.Cleanup(m.repoPath); err != nil {
+		return fmt.Errorf("cleanup session %s: %w", sessionID, err)
+	}
 
 	return nil
 }
@@ -1437,6 +1444,13 @@ func (m *Manager) closeSession(sessionID string, sess *Session) {
 	delete(m.sessions, sessionID)
 	m.mu.Unlock()
 
+	// Cancel any in-flight plan-drafting subprocess for symmetry with
+	// KillSession. The current pipeline never reaches closeSession with a
+	// draft running (drafting precedes building), but StartDraft does not
+	// enforce that precondition — without this call, Shutdown could block
+	// on m.watchers for up to PlanDraftTimeout if the gap is ever reached.
+	// CancelDraft is a no-op when no draft is running.
+	sess.CancelDraft()
 	sess.KillAll()
 	_ = sess.Cleanup(m.repoPath)
 

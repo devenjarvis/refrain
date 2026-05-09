@@ -22,6 +22,25 @@ func TestLifecyclePhase_String(t *testing.T) {
 	}
 }
 
+func TestLifecycleDrafting_OrdersBeforeForwardPhases(t *testing.T) {
+	// Drafting must sort numerically before every forward phase so any
+	// future range check (`phase >= LifecycleComplete`, etc.) classifies
+	// it as "earlier than Planning". Locks in the explicit -1 assignment.
+	forward := []LifecyclePhase{
+		LifecyclePlanning,
+		LifecycleInProgress,
+		LifecycleReadyForReview,
+		LifecycleInReview,
+		LifecycleShipping,
+		LifecycleComplete,
+	}
+	for _, phase := range forward {
+		if LifecycleDrafting >= phase {
+			t.Errorf("LifecycleDrafting (%d) should be < %s (%d)", LifecycleDrafting, phase, phase)
+		}
+	}
+}
+
 func TestLifecyclePhaseFromString(t *testing.T) {
 	cases := []struct {
 		s    string
