@@ -110,6 +110,13 @@ func DefaultTaskSummarizer() TaskSummarizer {
 // which disables hooks, LSP, plugin sync, attribution, auto-memory,
 // background prefetches, keychain reads, and CLAUDE.md auto-discovery.
 // --bare requires API-key auth; OAuth-only users silently miss the win.
+//
+// The --mcp-config payload MUST be a JSON object containing an "mcpServers"
+// key (with an empty record as the value to declare zero servers). Claude's
+// strict schema validator rejects a bare "{}" with
+// `mcpServers: Invalid input: expected record, received undefined`, which
+// makes every Haiku subprocess exit 1 in ~225ms and silently breaks the
+// branch rename and task summary flows. Do not simplify this back to "{}".
 func buildClaudeHaikuArgs() []string {
 	args := []string{"-p", "--model", claudeHaikuModel}
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
@@ -117,7 +124,7 @@ func buildClaudeHaikuArgs() []string {
 	}
 	args = append(
 		args,
-		"--strict-mcp-config", "--mcp-config", "{}",
+		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--tools", "",
