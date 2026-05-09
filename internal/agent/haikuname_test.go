@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -555,7 +556,6 @@ func TestBuildClaudeHaikuArgs_AlwaysOnFlags(t *testing.T) {
 	}
 	for _, want := range []string{
 		"--strict-mcp-config",
-		"--mcp-config {}",
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--tools ",
@@ -565,6 +565,34 @@ func TestBuildClaudeHaikuArgs_AlwaysOnFlags(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv missing %q; got %q", want, joined)
 		}
+	}
+
+	// --mcp-config must be a JSON object with an "mcpServers" record. A bare
+	// "{}" is rejected by claude's strict schema validator (regression guard
+	// for the silent branch-rename / task-summary failure).
+	mcpIdx := -1
+	for i, a := range args {
+		if a == "--mcp-config" {
+			mcpIdx = i
+			break
+		}
+	}
+	if mcpIdx < 0 {
+		t.Fatalf("argv missing --mcp-config; got %v", args)
+	}
+	if mcpIdx+1 >= len(args) {
+		t.Fatalf("--mcp-config has no value; got %v", args)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(args[mcpIdx+1]), &cfg); err != nil {
+		t.Fatalf("--mcp-config value %q not valid JSON: %v", args[mcpIdx+1], err)
+	}
+	servers, ok := cfg["mcpServers"]
+	if !ok {
+		t.Errorf("--mcp-config value %q missing required \"mcpServers\" key", args[mcpIdx+1])
+	}
+	if _, ok := servers.(map[string]any); !ok {
+		t.Errorf("--mcp-config \"mcpServers\" must be an object; got %T (%v)", servers, servers)
 	}
 }
 
