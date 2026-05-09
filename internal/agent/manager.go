@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -73,6 +74,7 @@ type Manager struct {
 
 	branchNamer    BranchNamer
 	taskSummarizer TaskSummarizer
+	planDrafter    PlanDrafter
 }
 
 // haikuNamePerAttemptTimeout bounds how long a single Haiku summarization
@@ -130,6 +132,7 @@ func NewManager(repoPath string, settings config.ResolvedSettings) *Manager {
 		done:           make(chan struct{}),
 		branchNamer:    DefaultBranchNamer(),
 		taskSummarizer: DefaultTaskSummarizer(),
+		planDrafter:    DefaultPlanDrafter(),
 	}
 
 	batonDir := filepath.Join(repoPath, ".baton")
@@ -174,6 +177,16 @@ func (m *Manager) SetTaskSummarizer(ts TaskSummarizer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.taskSummarizer = ts
+}
+
+// SetPlanDrafter overrides the PlanDrafter used for generating and revising
+// plan markdown. Intended for tests so they can stub out the Sonnet
+// subprocess. Passing nil disables planning gracefully — StartDraft will
+// return an error rather than spawning a broken subprocess.
+func (m *Manager) SetPlanDrafter(p PlanDrafter) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.planDrafter = p
 }
 
 // getTaskSummarizer returns the current TaskSummarizer under a read lock.
@@ -442,6 +455,112 @@ func (m *Manager) maybeStartTaskSummary(sess *Session) {
 		}
 		sess.SetTaskSummary(summary)
 	}()
+}
+
+// ErrDraftInFlight is returned when StartDraft is called for a session that
+// already has an in-flight drafting subprocess. Surfaces double-dispatch from
+// the UI layer (e.g. user pressed `enter` twice on the modal) without
+// silently spawning a duplicate Sonnet call.
+var ErrDraftInFlight = errors.New("draft already in flight for session")
+
+// ErrPlanDrafterNotConfigured is returned when StartDraft is called but the
+// manager has no plan drafter (e.g. a test set it to nil to disable).
+var ErrPlanDrafterNotConfigured = errors.New("plan drafter not configured")
+
+// StartDraft begins async drafting of a plan for sessionID with the given
+// user prompt. Transitions the session to LifecycleDrafting, then spawns a
+// goroutine that calls PlanDrafter.Draft, writes the result via
+// Session.WritePlan, and transitions to LifecyclePlanning on success or
+// LifecyclePlanning(error) on failure. The goroutine is tracked in
+// m.watchers so Shutdown drains cleanly; cancellation occurs when m.done
+// closes (manager shutdown), KillSession is called, or CancelDraft is
+// called directly. Drafting subprocesses are NOT counted against
+// MaxConcurrentAgents — they are transient text-generation calls, not
+// long-lived agents.
+func (m *Manager) StartDraft(sessionID, prompt string) error {
+	m.mu.RLock()
+	sess := m.sessions[sessionID]
+	drafter := m.planDrafter
+	m.mu.RUnlock()
+
+	if sess == nil {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	if drafter == nil {
+		return ErrPlanDrafterNotConfigured
+	}
+	if !IsActionablePrompt(prompt) {
+		return fmt.Errorf("prompt is empty or non-actionable")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), PlanDraftTimeout)
+	if !sess.TryStartDraft(cancel) {
+		cancel()
+		return ErrDraftInFlight
+	}
+
+	sess.SetOriginalPrompt(prompt)
+	sess.SetLifecyclePhase(LifecycleDrafting)
+	sess.SetDraftError(nil)
+	m.emit(Event{Type: EventStatusChanged, SessionID: sessionID})
+
+	m.watchers.Add(1)
+	go m.runDraft(ctx, sess, drafter, prompt)
+	return nil
+}
+
+// runDraft executes a Draft call against drafter and writes the resulting
+// plan markdown via sess.WritePlan. Any failure path (drafter error, empty
+// output, write error) lands the session in LifecyclePlanning with
+// DraftError set so the Planning card can render a useful error badge —
+// the user can then retry via the editor's revise flow or by pressing
+// `n` again. Always emits EventStatusChanged on transition so the UI
+// repaints.
+func (m *Manager) runDraft(ctx context.Context, sess *Session, drafter PlanDrafter, prompt string) {
+	defer m.watchers.Done()
+	defer sess.finishDraft()
+
+	// Cancel the drafting subprocess if the manager shuts down mid-call.
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+	go func() {
+		select {
+		case <-m.done:
+			sess.CancelDraft()
+		case <-doneCh:
+		}
+	}()
+
+	body, err := drafter.Draft(ctx, DraftRequest{UserPrompt: prompt})
+
+	// If the session has already been removed from the manager (e.g. by a
+	// completed KillSession), skip the post-draft writes — there is nothing
+	// for the resulting state to attach to. Mirrors renameSessionBranch's
+	// gating pattern. This does NOT eliminate a narrow race where KillSession
+	// is in the middle of Cleanup but has not yet deleted the map entry: in
+	// that window WritePlan can still race directory removal. The race is
+	// benign — WritePlan returns an error and we set DraftError on a session
+	// that's about to be garbage-collected — so we accept it for parity with
+	// the rest of the manager.
+	m.mu.RLock()
+	_, stillOpen := m.sessions[sess.ID]
+	m.mu.RUnlock()
+	if !stillOpen {
+		return
+	}
+
+	if err == nil && strings.TrimSpace(body) == "" {
+		err = errors.New("planner returned empty plan")
+	}
+	if err == nil {
+		if writeErr := sess.WritePlan(body); writeErr != nil {
+			err = writeErr
+		}
+	}
+
+	sess.SetDraftError(err)
+	sess.SetLifecyclePhase(LifecyclePlanning)
+	m.emit(Event{Type: EventStatusChanged, SessionID: sess.ID})
 }
 
 // IsActionablePrompt reports whether prompt carries enough text for a
@@ -999,15 +1118,27 @@ func (m *Manager) KillSession(sessionID string) error {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 
+	// Cancel any in-flight plan-drafting subprocess so the goroutine drains
+	// before we remove the worktree. WritePlan would otherwise race with
+	// directory removal. CancelDraft is a no-op when no draft is running.
+	sess.CancelDraft()
+
 	sess.KillAll()
+
+	// Delete the session from the map BEFORE removing the worktree so
+	// runDraft's stillOpen guard observes the session as gone before any
+	// post-Cleanup WritePlan attempt. The previous order (Cleanup first,
+	// delete second) left a window where stillOpen=true while the worktree
+	// directory was already removed, relying on an implicit contract that
+	// PlanDrafter.Draft must return a non-nil error on context cancellation.
+	// Mirrors closeSession's delete-then-cleanup ordering.
+	m.mu.Lock()
+	delete(m.sessions, sessionID)
+	m.mu.Unlock()
 
 	if err := sess.Cleanup(m.repoPath); err != nil {
 		return fmt.Errorf("cleanup session %s: %w", sessionID, err)
 	}
-
-	m.mu.Lock()
-	delete(m.sessions, sessionID)
-	m.mu.Unlock()
 
 	return nil
 }
@@ -1299,6 +1430,13 @@ func (m *Manager) closeSession(sessionID string, sess *Session) {
 	delete(m.sessions, sessionID)
 	m.mu.Unlock()
 
+	// Cancel any in-flight plan-drafting subprocess for symmetry with
+	// KillSession. The current pipeline never reaches closeSession with a
+	// draft running (drafting precedes building), but StartDraft does not
+	// enforce that precondition — without this call, Shutdown could block
+	// on m.watchers for up to PlanDraftTimeout if the gap is ever reached.
+	// CancelDraft is a no-op when no draft is running.
+	sess.CancelDraft()
 	sess.KillAll()
 	_ = sess.Cleanup(m.repoPath)
 

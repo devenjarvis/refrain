@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -32,6 +37,9 @@ type Session struct {
 	taskSummary    string // short summary of the session's task, set once by the summarizer goroutine
 	hasTaskSummary bool   // true once SetTaskSummary has been called
 	summarizing    bool   // true while an async task-summary goroutine is in flight; gates double-dispatch
+	drafting       bool   // true while a plan-drafting subprocess is in flight; gates double-dispatch
+	draftCancel    context.CancelFunc
+	draftErr       error // last drafting error, surfaced by the Planning card; cleared on successful draft
 }
 
 // newSession creates a session with the given worktree. New sessions land in
@@ -661,6 +669,188 @@ func (s *Session) finishTaskSummary() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.summarizing = false
+}
+
+// IsDrafting reports whether a plan-drafting subprocess is currently in flight.
+func (s *Session) IsDrafting() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.drafting
+}
+
+// TryStartDraft atomically returns true if a plan-drafting subprocess should
+// start now, or false if one is already in flight. The provided cancel func
+// is stored so CancelDraft can cancel an in-flight subprocess (e.g. when
+// KillSession is called or the manager shuts down). Callers that receive
+// true must call finishDraft when done.
+func (s *Session) TryStartDraft(cancel context.CancelFunc) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.drafting {
+		return false
+	}
+	s.drafting = true
+	s.draftCancel = cancel
+	return true
+}
+
+// finishDraft clears the in-flight draft flag and releases the stored cancel
+// func by invoking it (idempotent — calling cancel after the context already
+// fired is a no-op). Called from the deferred cleanup of the goroutine
+// spawned after TryStartDraft returns true. Does NOT clear draftErr — the
+// last error stays on the session so the Planning card can show it.
+func (s *Session) finishDraft() {
+	s.mu.Lock()
+	cancel := s.draftCancel
+	s.drafting = false
+	s.draftCancel = nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// CancelDraft cancels the in-flight drafting subprocess if any. Safe to call
+// when no draft is in flight (no-op). Used by Manager.KillSession and
+// Manager.Shutdown to abort the subprocess promptly so the goroutine can
+// drain through finishDraft.
+func (s *Session) CancelDraft() {
+	s.mu.RLock()
+	cancel := s.draftCancel
+	s.mu.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// SetDraftError stores the latest drafting error (or nil to clear). Cleared
+// only when a subsequent draft succeeds; finishDraft does NOT clear it so
+// the Planning card can render the failure even after the goroutine exits.
+func (s *Session) SetDraftError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.draftErr = err
+}
+
+// DraftError returns the last drafting error, or nil if the most recent
+// drafting attempt succeeded (or no draft has run).
+func (s *Session) DraftError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.draftErr
+}
+
+// PlanPath returns the absolute path to the session's plan markdown file
+// (<worktree>/.claude/plan.md). Always returns a path even if the file does
+// not exist — callers use HasPlan or ReadPlan to test for presence.
+func (s *Session) PlanPath() string {
+	return filepath.Join(s.Worktree.Path, ".claude", "plan.md")
+}
+
+// ReadPlan returns the contents of the session's plan file. Returns
+// ("", nil) if the file does not exist (no plan written yet) — callers
+// should treat absence and emptiness identically.
+func (s *Session) ReadPlan() (string, error) {
+	data, err := os.ReadFile(s.PlanPath())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("plan: reading %s: %w", s.PlanPath(), err)
+	}
+	return string(data), nil
+}
+
+// WritePlan writes content to the session's plan file using a temp+rename
+// for atomicity. Ensures <worktree>/.claude/ exists, and on first write
+// also appends ".claude/" to the worktree's root .gitignore if not already
+// covered, so the plan stays out of the eventual PR diff. Concurrent reads
+// during a write see either the old content or the new content, never a
+// partial write — os.Rename is atomic on Unix.
+func (s *Session) WritePlan(content string) error {
+	planDir := filepath.Join(s.Worktree.Path, ".claude")
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		return fmt.Errorf("plan: creating %s: %w", planDir, err)
+	}
+
+	// Best effort: gitignore management must not block writing the plan.
+	// Stderr writes during an active TUI alt-screen scramble the rendered
+	// UI, so the error is swallowed here — the worst case is the plan
+	// shows up in `git status`, which is recoverable.
+	_ = s.ensureClaudeIgnored()
+
+	planPath := s.PlanPath()
+	tmp, err := os.CreateTemp(planDir, "plan-*.md.tmp")
+	if err != nil {
+		return fmt.Errorf("plan: creating temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("plan: writing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("plan: closing temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, planPath); err != nil {
+		return fmt.Errorf("plan: renaming temp file to %s: %w", planPath, err)
+	}
+	committed = true
+	return nil
+}
+
+// HasPlan reports whether the session's plan file exists on disk.
+func (s *Session) HasPlan() bool {
+	_, err := os.Stat(s.PlanPath())
+	return err == nil
+}
+
+// ensureClaudeIgnored appends ".claude/" to the worktree's root .gitignore
+// if not already covered. Writes the file even if it didn't exist previously.
+// Errors are returned but treated as non-fatal by WritePlan — the worst case
+// is the plan shows up in `git status`, which the user can fix manually.
+func (s *Session) ensureClaudeIgnored() error {
+	gitignorePath := filepath.Join(s.Worktree.Path, ".gitignore")
+	existing, err := os.ReadFile(gitignorePath)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("plan: reading %s: %w", gitignorePath, err)
+	}
+	if claudeIgnoreCovered(string(existing)) {
+		return nil
+	}
+	addition := ".claude/\n"
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		addition = "\n" + addition
+	}
+	combined := append(existing, []byte(addition)...)
+	if err := os.WriteFile(gitignorePath, combined, 0o644); err != nil {
+		return fmt.Errorf("plan: writing %s: %w", gitignorePath, err)
+	}
+	return nil
+}
+
+// claudeIgnoreCovered reports whether body of a .gitignore already excludes
+// the .claude/ directory. Only matches the exact patterns ".claude/" and
+// ".claude" — fancier glob analysis would risk a false positive that misses
+// a duplicate-add edge case. Comments (lines starting with `#`) are skipped.
+func claudeIgnoreCovered(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if trimmed == ".claude" || trimmed == ".claude/" {
+			return true
+		}
+	}
+	return false
 }
 
 // LastOutputTime returns the most recent lastOutput time across all non-shell
