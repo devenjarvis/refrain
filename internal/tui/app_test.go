@@ -339,6 +339,12 @@ func TestPanelFocusSwitching(t *testing.T) {
 		t.Fatalf("Expected focusList after esc, got %v", app.dashboard.panelFocus)
 	}
 
+	// Sessions created by the legacy `n` path land in LifecyclePlanning by
+	// default. Planning rows now open the plan editor (PR3 wiring), so
+	// advance to Building with `b` before testing the focusLaunch entry.
+	model, _ = app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	app = model.(App)
+
 	// Enter on the cursor-selected session re-opens focusLaunch.
 	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	app = model.(App)

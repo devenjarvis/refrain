@@ -104,10 +104,16 @@ func newSession(t *testing.T) *Session {
 		"[user]\n\tname = e2e-test\n\temail = e2e@test.local\n[init]\n\tdefaultBranch = main\n",
 	)
 
-	// Write global config: set agent_program to bash.
+	// Write global config: set agent_program to bash. plan_first_enabled is
+	// pinned to false here so the existing e2e tests (which press `n` and
+	// expect an immediate bash prompt in focusLaunch) keep working under
+	// the new default. The plan-first flow itself is exercised by unit
+	// tests in internal/agent and internal/tui; e2e tests target the
+	// session-creation path, not plan generation.
 	globalCfg := map[string]any{
 		"agent_program":      "bash",
 		"bypass_permissions": false,
+		"plan_first_enabled": false,
 	}
 	writeJSON(t, filepath.Join(home, ".baton", "config.json"), globalCfg)
 
@@ -115,6 +121,7 @@ func newSession(t *testing.T) *Session {
 	repoCfg := map[string]any{
 		"agent_program":      "bash",
 		"bypass_permissions": false,
+		"plan_first_enabled": false,
 	}
 	writeJSON(t, filepath.Join(repoDir, ".baton", "config.json"), repoCfg)
 

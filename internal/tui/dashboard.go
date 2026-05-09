@@ -366,9 +366,11 @@ func (d dashboardModel) sessionsInPhase(phases ...agent.LifecyclePhase) []listIt
 
 // planningSessions returns the sessions the user is still scoping. Planning is
 // the entry point for new work — sessions advance to Building (InProgress) once
-// the user presses 'b'.
+// the user presses 'b'. Drafting sessions (LifecycleDrafting) are included
+// here so they're visible from the dashboard while the background draft runs;
+// the card renderer detects the sub-phase and shows a "drafting…" badge.
 func (d dashboardModel) planningSessions() []listItem {
-	return d.sessionsInPhase(agent.LifecyclePlanning)
+	return d.sessionsInPhase(agent.LifecyclePlanning, agent.LifecycleDrafting)
 }
 
 // reviewQueueSessions returns listItems for sessions in ReadyForReview or
@@ -554,7 +556,17 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, selected boo
 		name = "> " + name
 	}
 	nameStyled := lipgloss.NewStyle().Foreground(ColorText).Bold(true).Render(name)
-	badge := d.sessionFocusStatus(sess)
+	// Planning + Drafting phases get a dedicated badge + description because
+	// they have no agent yet — the regular sessionFocusStatus path is keyed
+	// off agent.Status and would render "0 active, 0 idle" for these rows.
+	phase := sess.LifecyclePhase()
+	planningPhase := phase == agent.LifecyclePlanning || phase == agent.LifecycleDrafting
+	var badge string
+	if planningPhase {
+		badge = planningStatusBadge(sess)
+	} else {
+		badge = d.sessionFocusStatus(sess)
+	}
 	line1 := rightAlign(stripe+" "+nameStyled, badge, width)
 
 	// --- Lines 2 and 3: description (always two lines) ---
@@ -562,7 +574,13 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, selected boo
 	if descBudget < 1 {
 		descBudget = 1
 	}
-	descText, descPending := focusTaskDescription(sess)
+	var descText string
+	var descPending bool
+	if planningPhase {
+		descText, descPending = planningDescription(sess)
+	} else {
+		descText, descPending = focusTaskDescription(sess)
+	}
 	descLine1, descLine2 := wrapTwoLines(descText, descBudget)
 	descStyle := StyleSubtle
 	if descPending {
@@ -628,6 +646,117 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, selected boo
 	line4 := rightAlign(bottomLeft, StyleSubtle.Render(elapsedStr), width)
 
 	return []string{line1, line2, line3, line4}
+}
+
+// planningStatusBadge renders the right-aligned status badge for a Planning
+// or Drafting card. Priority: Drafting > Revising > DraftError > plan task
+// summary > "no plan yet". Drafting and revising are mutually exclusive at
+// the session level, so the fall-through ordering is unambiguous.
+//
+// Reads plan content via Session.CachedPlan to keep the per-render hot path
+// off os.Stat + os.ReadFile. Cache is invalidated by WritePlan, which the
+// drafter and revise paths both go through.
+func planningStatusBadge(sess *agent.Session) string {
+	if sess.IsDrafting() {
+		return lipgloss.NewStyle().Foreground(ColorWarning).Render("✎ drafting…")
+	}
+	if sess.IsRevising() {
+		return lipgloss.NewStyle().Foreground(ColorWarning).Render("✎ revising…")
+	}
+	if err := sess.DraftError(); err != nil {
+		return lipgloss.NewStyle().Foreground(ColorError).Render("✗ draft failed")
+	}
+	plan, present := sess.CachedPlan()
+	if !present {
+		return StyleSubtle.Render("○ no plan yet")
+	}
+	total, done := planTaskCounts(plan)
+	if total == 0 {
+		return lipgloss.NewStyle().Foreground(ColorPrimary).Render("✎ plan ready")
+	}
+	return lipgloss.NewStyle().Foreground(ColorPrimary).Render(
+		fmt.Sprintf("✎ %d/%d tasks", done, total),
+	)
+}
+
+// planningDescription chooses the description text for a Planning or Drafting
+// card. Drafting shows the prompt italicized; a successful draft surfaces the
+// first uncompleted task; a failed draft surfaces the error excerpt; an
+// orphan Planning row with no plan falls back to the original prompt.
+func planningDescription(sess *agent.Session) (string, bool) {
+	if sess.IsDrafting() {
+		if p := sess.OriginalPrompt(); p != "" {
+			return p, true
+		}
+		return "drafting plan…", true
+	}
+	if sess.IsRevising() {
+		// Match the badge ("✎ revising…") so the card reads as a unit.
+		// Without this branch the description would fall through to the
+		// pre-revise plan's first uncompleted task, which is technically
+		// correct but visually inconsistent with the badge.
+		return "revising plan…", true
+	}
+	if err := sess.DraftError(); err != nil {
+		return "draft failed: " + err.Error(), false
+	}
+	plan, present := sess.CachedPlan()
+	if !present {
+		if p := sess.OriginalPrompt(); p != "" {
+			return p, true
+		}
+		return "no plan yet — press space to write one", true
+	}
+	if next := firstUncompletedTask(plan); next != "" {
+		return "next: " + next, false
+	}
+	if p := sess.OriginalPrompt(); p != "" {
+		return p, false
+	}
+	return "plan ready — press a to approve", false
+}
+
+// planTaskCounts returns (total, done) for "- [ ]" / "- [x]" task list items
+// found anywhere in plan markdown. Tolerant of leading whitespace and either
+// case for the completion marker. Doesn't try to scope to a "## Tasks"
+// section — keeping the check section-agnostic means a renamed heading or a
+// freeform plan still gets a useful count.
+func planTaskCounts(plan string) (total, done int) {
+	for _, raw := range strings.Split(plan, "\n") {
+		line := strings.TrimLeft(raw, " \t")
+		if !strings.HasPrefix(line, "- [") {
+			continue
+		}
+		// Need at least "- [x] " to be a task line.
+		if len(line) < 6 || line[4] != ']' {
+			continue
+		}
+		total++
+		marker := line[3]
+		if marker == 'x' || marker == 'X' {
+			done++
+		}
+	}
+	return total, done
+}
+
+// firstUncompletedTask returns the text of the first "- [ ]" line in plan, or
+// "" if every task is done (or the plan has no task lines). Used by the
+// Planning card description so the user sees what's outstanding without
+// opening the editor.
+func firstUncompletedTask(plan string) string {
+	for _, raw := range strings.Split(plan, "\n") {
+		line := strings.TrimLeft(raw, " \t")
+		if !strings.HasPrefix(line, "- [ ]") {
+			continue
+		}
+		text := strings.TrimSpace(strings.TrimPrefix(line, "- [ ]"))
+		if text == "" {
+			continue
+		}
+		return text
+	}
+	return ""
 }
 
 // focusTaskDescription chooses the description string for a session card in

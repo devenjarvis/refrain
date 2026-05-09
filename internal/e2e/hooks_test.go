@@ -63,13 +63,20 @@ func TestHookPipeline(t *testing.T) {
 	// Point both global and repo config at the stub so whichever baton reads
 	// wins, and pass BATON_E2E_BATON through tu so the stub can invoke the
 	// hook CLI without needing to know the binary path itself.
+	// plan_first_enabled is pinned off here for the same reason as in
+	// helpers_test.go: this test exercises the hook pipeline via `n` →
+	// immediate spawn, not the plan-first prompt-modal flow. Re-stating
+	// the override is necessary because this writeJSON overwrites the
+	// helper's config rather than merging with it.
 	writeJSON(t, filepath.Join(s.home, ".baton", "config.json"), map[string]any{
 		"agent_program":      stubPath,
 		"bypass_permissions": false,
+		"plan_first_enabled": false,
 	})
 	writeJSON(t, filepath.Join(s.repoDir, ".baton", "config.json"), map[string]any{
 		"agent_program":      stubPath,
 		"bypass_permissions": false,
+		"plan_first_enabled": false,
 	})
 	s.extraEnv = append(s.extraEnv, "BATON_E2E_BATON="+batonBin)
 	s.Start()

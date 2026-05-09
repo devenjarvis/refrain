@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/baton/internal/agent"
 	"github.com/devenjarvis/baton/internal/hook"
 )
@@ -483,3 +484,77 @@ func TestShippingSessions_OnlyShippingPhase(t *testing.T) {
 		t.Fatalf("expected exactly the shipping session, got %d entries", len(shipping))
 	}
 }
+
+func TestPlanTaskCounts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		plan      string
+		wantTotal int
+		wantDone  int
+	}{
+		{"empty", "", 0, 0},
+		{"no tasks", "# Goal\nDo a thing\n", 0, 0},
+		{"all open", "# Goal\nx\n\n## Tasks\n- [ ] one\n- [ ] two\n", 2, 0},
+		{"mixed", "## Tasks\n- [x] done\n- [ ] open\n- [X] also done\n", 3, 2},
+		{"indented", "## Tasks\n  - [ ] indented\n\t- [x] tabbed\n", 2, 1},
+		{"prefix only is not a task", "- [ x] not a task\n- [ ] real\n", 1, 0},
+		{"non-task lines ignored", "narrative line\n## Tasks\n- [ ] a\nmore prose\n- [x] b\n", 2, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			total, done := planTaskCounts(tc.plan)
+			if total != tc.wantTotal || done != tc.wantDone {
+				t.Errorf("planTaskCounts(%q) = (%d, %d), want (%d, %d)",
+					tc.plan, total, done, tc.wantTotal, tc.wantDone)
+			}
+		})
+	}
+}
+
+func TestFirstUncompletedTask(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		plan string
+		want string
+	}{
+		{"empty", "", ""},
+		{"all done", "- [x] one\n- [X] two\n", ""},
+		{"first open", "- [x] done\n- [ ] next thing\n- [ ] later\n", "next thing"},
+		{"trims surrounding whitespace", "  - [ ]   trim me  \n", "trim me"},
+		{"skips blank task body", "- [ ]   \n- [ ] real one\n", "real one"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firstUncompletedTask(tc.plan); got != tc.want {
+				t.Errorf("firstUncompletedTask(%q) = %q, want %q", tc.plan, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlanningStatusBadge_PhaseTransitions(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSessionForTestWithPath("id", "name", dir)
+	sess.SetLifecyclePhase(agent.LifecyclePlanning)
+
+	// No plan yet → "no plan yet" surface.
+	if got := planningStatusBadge(sess); !strings.Contains(ansi.Strip(got), "no plan yet") {
+		t.Errorf("badge for fresh planning session = %q, want 'no plan yet'", got)
+	}
+
+	// Plan with tasks → counts surface.
+	if err := sess.WritePlan("- [x] done\n- [ ] todo\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := planningStatusBadge(sess); !strings.Contains(ansi.Strip(got), "1/2 tasks") {
+		t.Errorf("badge with mixed tasks = %q, want '1/2 tasks'", got)
+	}
+
+	// Draft error supersedes the task count.
+	sess.SetDraftError(errAnything{})
+	if got := planningStatusBadge(sess); !strings.Contains(ansi.Strip(got), "draft failed") {
+		t.Errorf("badge with draft error = %q, want 'draft failed'", got)
+	}
+}
+
+type errAnything struct{}
+
+func (errAnything) Error() string { return "anything" }

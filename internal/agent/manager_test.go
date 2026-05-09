@@ -446,3 +446,297 @@ func TestManager_StartDraft_DoesNotCountTowardAgentCount(t *testing.T) {
 		t.Errorf("AgentCount changed across StartDraft: before=%d after=%d (drafting must not count as an agent)", before, got)
 	}
 }
+
+func TestManager_RevisePlan_Success(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	const v1 = "# Goal\nv1\n\n## Tasks\n- [ ] one\n"
+	const v2 = "# Goal\nv2 (revised)\n\n## Tasks\n- [ ] one\n- [ ] two\n"
+	stub := &stubPlanDrafter{
+		reviseFn: func(ctx context.Context, req ReviseRequest) (string, error) {
+			if req.CurrentPlan != v1 {
+				return "", errors.New("unexpected current plan")
+			}
+			if req.Critique != "add a task" {
+				return "", errors.New("unexpected critique")
+			}
+			return v2, nil
+		},
+	}
+	mgr.SetPlanDrafter(stub)
+
+	sess, _, err := mgr.CreateSessionWithCommand(
+		Config{Task: "t", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.WritePlan(v1); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.RevisePlan(sess.ID, "add a task"); err != nil {
+		t.Fatalf("RevisePlan: %v", err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool { return !sess.IsRevising() })
+
+	got, err := sess.ReadPlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != v2 {
+		t.Errorf("plan after revise = %q, want %q", got, v2)
+	}
+	if sess.ReviseError() != nil {
+		t.Errorf("ReviseError = %v, want nil", sess.ReviseError())
+	}
+	if !sess.HasPrevPlan() {
+		t.Error("HasPrevPlan should be true after a successful revise")
+	}
+	prev, restored, err := sess.RestorePrevPlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restored {
+		t.Fatal("RestorePrevPlan should restore after a revise")
+	}
+	if prev != v1 {
+		t.Errorf("snapshot = %q, want %q (pre-revise content)", prev, v1)
+	}
+}
+
+func TestManager_RevisePlan_DrafterErrorLeavesPlanUntouched(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	const v1 = "# Goal\nkeep me\n\n## Tasks\n- [ ] x\n"
+	mgr.SetPlanDrafter(&stubPlanDrafter{
+		reviseFn: func(ctx context.Context, req ReviseRequest) (string, error) {
+			return "", errors.New("boom")
+		},
+	})
+
+	sess, _, _ := mgr.CreateSessionWithCommand(
+		Config{Task: "t", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+	if err := sess.WritePlan(v1); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.RevisePlan(sess.ID, "improve"); err != nil {
+		t.Fatalf("RevisePlan: %v", err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool { return !sess.IsRevising() })
+
+	got, _ := sess.ReadPlan()
+	if got != v1 {
+		t.Errorf("plan after failed revise = %q, want unchanged %q", got, v1)
+	}
+	if sess.ReviseError() == nil {
+		t.Error("ReviseError should be set after drafter failure")
+	}
+	// Snapshot is still around so the user can `u` to recover even after a
+	// failed revise — we don't drop it on error.
+	if !sess.HasPrevPlan() {
+		t.Error("HasPrevPlan should remain true after failed revise (snapshot preserved)")
+	}
+}
+
+func TestManager_RevisePlan_EmptyOutputTreatedAsError(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	mgr.SetPlanDrafter(&stubPlanDrafter{
+		reviseFn: func(ctx context.Context, req ReviseRequest) (string, error) {
+			return "   \n", nil
+		},
+	})
+
+	sess, _, _ := mgr.CreateSessionWithCommand(
+		Config{Task: "t", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+	if err := sess.WritePlan("# Goal\nx\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.RevisePlan(sess.ID, "x"); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool { return !sess.IsRevising() })
+
+	if sess.ReviseError() == nil {
+		t.Error("ReviseError should be set when drafter returns empty output")
+	}
+}
+
+func TestManager_RevisePlan_DoubleDispatchReturnsErrReviseInFlight(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	release := make(chan struct{})
+	mgr.SetPlanDrafter(&stubPlanDrafter{
+		reviseFn: func(ctx context.Context, req ReviseRequest) (string, error) {
+			<-release
+			return "# Goal\nrevised\n", nil
+		},
+	})
+	defer close(release)
+
+	sess, _, _ := mgr.CreateSessionWithCommand(
+		Config{Task: "t", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+	if err := sess.WritePlan("# Goal\nv1\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.RevisePlan(sess.ID, "first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RevisePlan(sess.ID, "second"); !errors.Is(err, ErrReviseInFlight) {
+		t.Errorf("second RevisePlan err = %v, want ErrReviseInFlight", err)
+	}
+}
+
+func TestManager_RevisePlan_NoPlanReturnsError(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	mgr.SetPlanDrafter(&stubPlanDrafter{
+		reviseFn: func(ctx context.Context, req ReviseRequest) (string, error) {
+			return "should not be called", nil
+		},
+	})
+
+	sess, _, _ := mgr.CreateSessionWithCommand(
+		Config{Task: "t", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+
+	if err := mgr.RevisePlan(sess.ID, "improve"); !errors.Is(err, ErrNoPlanToRevise) {
+		t.Errorf("RevisePlan err = %v, want ErrNoPlanToRevise", err)
+	}
+}
+
+func TestManager_RevisePlan_EmptyCritiqueRejected(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	mgr.SetPlanDrafter(&stubPlanDrafter{
+		reviseFn: func(ctx context.Context, req ReviseRequest) (string, error) {
+			return "x", nil
+		},
+	})
+
+	sess, _, _ := mgr.CreateSessionWithCommand(
+		Config{Task: "t", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+	if err := sess.WritePlan("# Goal\nx\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []string{"", "   ", "\t\n"} {
+		if err := mgr.RevisePlan(sess.ID, c); !errors.Is(err, ErrEmptyCritique) {
+			t.Errorf("RevisePlan(%q) err = %v, want ErrEmptyCritique", c, err)
+		}
+	}
+}
+
+func TestManager_RevisePlan_KillSessionCancelsSubprocess(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	release := make(chan struct{})
+	var observedCancel atomic.Bool
+	mgr.SetPlanDrafter(&stubPlanDrafter{
+		reviseFn: func(ctx context.Context, req ReviseRequest) (string, error) {
+			select {
+			case <-ctx.Done():
+				observedCancel.Store(true)
+				return "", ctx.Err()
+			case <-release:
+				return "# Goal\nx", nil
+			}
+		},
+	})
+
+	sess, _, _ := mgr.CreateSessionWithCommand(
+		Config{Task: "t", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+	sessID := sess.ID
+	if err := sess.WritePlan("# Goal\nx\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.RevisePlan(sessID, "x"); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, time.Second, func() bool { return sess.IsRevising() })
+
+	if err := mgr.KillSession(sessID); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+
+	waitForCondition(t, 2*time.Second, func() bool { return !sess.IsRevising() })
+	if !observedCancel.Load() {
+		t.Error("revise subprocess context was not cancelled by KillSession")
+	}
+}
+
+func TestManager_RevisePlan_ShutdownDrainsGoroutine(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+
+	finished := atomic.Bool{}
+	mgr.SetPlanDrafter(&stubPlanDrafter{
+		reviseFn: func(ctx context.Context, req ReviseRequest) (string, error) {
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	})
+
+	sess, _, _ := mgr.CreateSessionWithCommand(
+		Config{Task: "test", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+	if err := sess.WritePlan("# Goal\nx\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.RevisePlan(sess.ID, "improve"); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, time.Second, func() bool { return sess.IsRevising() })
+
+	go func() {
+		mgr.Shutdown()
+		finished.Store(true)
+	}()
+
+	// Shutdown must complete in bounded time even with a revise in flight.
+	// The runRevise goroutine is registered in m.watchers and listens on
+	// m.done — Shutdown closes m.done, the inner goroutine cancels the
+	// drafter context, and runRevise exits via its defer chain.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if finished.Load() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("Shutdown did not return within 3s while a revise was in flight")
+}

@@ -563,6 +563,119 @@ func (m *Manager) runDraft(ctx context.Context, sess *Session, drafter PlanDraft
 	m.emit(Event{Type: EventStatusChanged, SessionID: sess.ID})
 }
 
+// ErrReviseInFlight is returned when RevisePlan is called for a session that
+// already has an in-flight revising subprocess. Mirrors ErrDraftInFlight.
+var ErrReviseInFlight = errors.New("revise already in flight for session")
+
+// ErrNoPlanToRevise is returned when RevisePlan is called against a session
+// with no plan yet on disk. Without a current plan there is nothing for the
+// drafter to revise from — callers should run StartDraft first or hand-write
+// a plan in the editor.
+var ErrNoPlanToRevise = errors.New("no plan to revise")
+
+// RevisePlan runs an async revise pass against the session's current plan.
+// Saves the current plan to .claude/plan.prev.md before invoking the drafter
+// so the user can `u` to undo a single step, then calls PlanDrafter.Revise
+// and writes the result via Session.WritePlan. Mirrors StartDraft's
+// goroutine-tracked pattern: m.watchers ensures Shutdown drains cleanly,
+// CancelRevise / KillSession / Shutdown abort the subprocess. Drafting and
+// revising are mutually exclusive — Session.TryStartRevise returns false
+// while a draft is in flight.
+//
+// On success, sess.ReviseError() is nil and the editor reloads the new plan
+// via the EventStatusChanged the runner emits. On failure (drafter error,
+// empty output, write error), the prior plan is left in place and
+// ReviseError is set so the editor can render the failure inline.
+func (m *Manager) RevisePlan(sessionID, critique string) error {
+	m.mu.RLock()
+	sess := m.sessions[sessionID]
+	drafter := m.planDrafter
+	m.mu.RUnlock()
+
+	if sess == nil {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	if drafter == nil {
+		return ErrPlanDrafterNotConfigured
+	}
+	if strings.TrimSpace(critique) == "" {
+		return ErrEmptyCritique
+	}
+
+	current, err := sess.ReadPlan()
+	if err != nil {
+		return fmt.Errorf("read plan: %w", err)
+	}
+	if strings.TrimSpace(current) == "" {
+		return ErrNoPlanToRevise
+	}
+
+	// Snapshot before we even gate, so a TryStartRevise=false from a racing
+	// caller doesn't corrupt the snapshot that's about to be used by the
+	// in-flight revise. The snapshot is benign on the failure path: the next
+	// successful revise will overwrite it before any user action would
+	// observe it as the undo target.
+	if err := sess.snapshotPlanToPrev(); err != nil {
+		return fmt.Errorf("snapshot plan: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), PlanDraftTimeout)
+	if !sess.TryStartRevise(cancel) {
+		cancel()
+		return ErrReviseInFlight
+	}
+
+	sess.SetReviseError(nil)
+	m.emit(Event{Type: EventStatusChanged, SessionID: sessionID})
+
+	m.watchers.Add(1)
+	go m.runRevise(ctx, sess, drafter, current, critique)
+	return nil
+}
+
+// runRevise executes a Revise call against drafter and writes the resulting
+// plan markdown via sess.WritePlan. Mirrors runDraft's gating pattern:
+// post-call still-open check, error coercion for empty output, always emits
+// EventStatusChanged so the UI repaints. On failure the prior plan is left
+// untouched and ReviseError is set; the user can retry via `r` or undo via
+// `u` (which restores the snapshot we wrote above).
+func (m *Manager) runRevise(ctx context.Context, sess *Session, drafter PlanDrafter, current, critique string) {
+	defer m.watchers.Done()
+	defer sess.finishRevise()
+
+	// Cancel the revising subprocess if the manager shuts down mid-call.
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+	go func() {
+		select {
+		case <-m.done:
+			sess.CancelRevise()
+		case <-doneCh:
+		}
+	}()
+
+	body, err := drafter.Revise(ctx, ReviseRequest{CurrentPlan: current, Critique: critique})
+
+	m.mu.RLock()
+	_, stillOpen := m.sessions[sess.ID]
+	m.mu.RUnlock()
+	if !stillOpen {
+		return
+	}
+
+	if err == nil && strings.TrimSpace(body) == "" {
+		err = errors.New("planner returned empty plan")
+	}
+	if err == nil {
+		if writeErr := sess.WritePlan(body); writeErr != nil {
+			err = writeErr
+		}
+	}
+
+	sess.SetReviseError(err)
+	m.emit(Event{Type: EventStatusChanged, SessionID: sess.ID})
+}
+
 // IsActionablePrompt reports whether prompt carries enough text for a
 // meaningful branch name. Empty/whitespace-only prompts and pure slash
 // commands (e.g. "/clear") return false.
@@ -1135,7 +1248,10 @@ func (m *Manager) KillSession(sessionID string) error {
 	// Cancel any in-flight plan-drafting subprocess so the goroutine drains
 	// before we remove the worktree. WritePlan would otherwise race with
 	// directory removal. CancelDraft is a no-op when no draft is running.
+	// Same applies to revising — both are bounded by m.watchers and write
+	// to the same .claude/ directory.
 	sess.CancelDraft()
+	sess.CancelRevise()
 
 	sess.KillAll()
 
@@ -1444,13 +1560,14 @@ func (m *Manager) closeSession(sessionID string, sess *Session) {
 	delete(m.sessions, sessionID)
 	m.mu.Unlock()
 
-	// Cancel any in-flight plan-drafting subprocess for symmetry with
-	// KillSession. The current pipeline never reaches closeSession with a
-	// draft running (drafting precedes building), but StartDraft does not
-	// enforce that precondition — without this call, Shutdown could block
-	// on m.watchers for up to PlanDraftTimeout if the gap is ever reached.
-	// CancelDraft is a no-op when no draft is running.
+	// Cancel any in-flight plan-drafting / revising subprocess for symmetry
+	// with KillSession. The current pipeline never reaches closeSession with
+	// a draft or revise running (both precede building), but StartDraft /
+	// RevisePlan do not enforce that precondition — without this call,
+	// Shutdown could block on m.watchers for up to PlanDraftTimeout if the
+	// gap is ever reached. Both Cancel* calls are no-ops when nothing's running.
 	sess.CancelDraft()
+	sess.CancelRevise()
 	sess.KillAll()
 	_ = sess.Cleanup(m.repoPath)
 

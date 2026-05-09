@@ -579,17 +579,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ps.lastRemoteSHA = ""
 			ps.lastSHACheck = time.Time{}
 		}
-		// If the editor is open on the session whose drafting just landed,
-		// refresh its content + drafting state so the placeholder swaps to
+		// If the editor is open on the session whose drafting/revising just
+		// landed, refresh its content + state so the placeholder swaps to
 		// the rendered plan without requiring a re-open.
 		if msg.event.Type == agent.EventStatusChanged && a.planEditor != nil &&
 			a.planEditor.sess != nil && a.planEditor.sess.ID == msg.event.SessionID {
+			// Read both flags up-front so the Reload decision sees a coherent
+			// snapshot. RevisePlan emits EventStatusChanged synchronously with
+			// IsRevising=true (before runRevise spawns), so a naive
+			// "Reload when !drafting" path would reset scrollOff at the moment
+			// the revise banner appears. Only Reload when neither subprocess
+			// is in flight — that's the single state where plan.md is stable
+			// and the editor view should reflect disk.
 			drafting := a.planEditor.sess.IsDrafting()
+			revising := a.planEditor.sess.IsRevising()
 			a.planEditor.SetDrafting(drafting)
-			if !drafting {
+			a.planEditor.SetRevising(revising)
+			if !drafting && !revising {
 				a.planEditor.Reload()
 				if derr := a.planEditor.sess.DraftError(); derr != nil {
 					a.planEditor.SetError("draft failed: " + derr.Error())
+				} else if rerr := a.planEditor.sess.ReviseError(); rerr != nil {
+					a.planEditor.SetError("revise failed: " + rerr.Error())
 				}
 			}
 		}
@@ -713,10 +724,63 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case planEditorReviseMsg:
-		// Revise loop ships in PR 3. Surface a clear placeholder so the
-		// editor's `r` keybind doesn't appear broken when used today.
-		if a.planEditor != nil {
-			a.planEditor.SetError("Revise lands in a follow-up PR.")
+		// Persist any unsaved textarea edits before revising so the drafter
+		// sees what the user is actually looking at, not the last-saved
+		// version. WritePlan errors flow up as an inline editor error and
+		// we abort the revise — otherwise the model would revise the wrong
+		// plan and overwrite the user's edits with the result.
+		if a.planEditor != nil && a.planEditor.dirty && a.planEditor.sess != nil {
+			val := a.planEditor.textarea.Value()
+			if err := a.planEditor.sess.WritePlan(val); err != nil {
+				a.planEditor.SetError("save plan: " + err.Error())
+				return a, nil
+			}
+			a.planEditor.plan = val
+			a.planEditor.dirty = false
+		}
+		repoPath := a.repoPathForSession(msg.sessionID)
+		if repoPath == "" {
+			repoPath = a.activeRepo
+		}
+		mgr := a.managers[repoPath]
+		if mgr == nil {
+			if a.planEditor != nil {
+				a.planEditor.SetError("session manager not found")
+			}
+			return a, nil
+		}
+		if err := mgr.RevisePlan(msg.sessionID, msg.critique); err != nil {
+			if a.planEditor != nil {
+				a.planEditor.SetError("revise: " + err.Error())
+			}
+			return a, nil
+		}
+		// Reflect the revising state immediately; the EventStatusChanged
+		// dispatch above will keep it in sync as the goroutine progresses.
+		if a.planEditor != nil && a.planEditor.sess != nil &&
+			a.planEditor.sess.ID == msg.sessionID {
+			a.planEditor.SetRevising(true)
+		}
+		return a, nil
+
+	case planEditorRestoreMsg:
+		// Single-step undo: restore plan.prev.md → plan.md and reload the
+		// editor. No-op when no snapshot exists.
+		if a.planEditor == nil || a.planEditor.sess == nil {
+			return a, nil
+		}
+		sess := a.planEditor.sess
+		if sess.ID != msg.sessionID {
+			return a, nil
+		}
+		_, restored, err := sess.RestorePrevPlan()
+		switch {
+		case err != nil:
+			a.planEditor.SetError("undo: " + err.Error())
+		case !restored:
+			a.planEditor.SetError("nothing to undo")
+		default:
+			a.planEditor.Reload()
 		}
 		return a, nil
 
@@ -1538,6 +1602,14 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err != nil {
 					return createResultMsg{err: err}
 				}
+				// Legacy n (PlanFirstEnabled=false) spawns the agent
+				// immediately, so the session belongs in BUILDING from the
+				// start. Without this transition the row would land in
+				// PLANNING, where the dashboard renders plan-status badges
+				// rather than agent activity. The skip path in
+				// submitPromptModal does the same — keeping both call sites
+				// consistent.
+				sess.SetLifecyclePhase(agent.LifecycleInProgress)
 				return createResultMsg{sessionID: sess.ID, agentID: ag.ID, isNewSession: true}
 			}
 
@@ -2082,6 +2154,10 @@ func (a App) updateBranchPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				return createResultMsg{err: err}
 			}
+			// Branch-picker sessions spawn an agent immediately on the
+			// chosen branch; they belong in BUILDING. See the legacy n
+			// path for the same rationale.
+			sess.SetLifecyclePhase(agent.LifecycleInProgress)
 			return createResultMsg{sessionID: sess.ID, agentID: ag.ID, isNewSession: true}
 		}
 
@@ -2133,6 +2209,9 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				return createResultMsg{err: err}
 			}
+			// Repo-picker sessions spawn an agent immediately; they
+			// belong in BUILDING. See the legacy n path for rationale.
+			sess.SetLifecyclePhase(agent.LifecycleInProgress)
 			return createResultMsg{sessionID: sess.ID, agentID: ag.ID, isNewSession: true}
 		}
 
@@ -2756,7 +2835,14 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 	sess := items[idx].session
 
 	switch a.focusCursorSection {
-	case focusSectionPlanning, focusSectionBuilding:
+	case focusSectionPlanning:
+		// Planning rows open the plan editor — there is no agent yet to drop
+		// into a focusLaunch terminal. Drafting sessions also live in the
+		// Planning section; the editor renders a "Drafting…" placeholder
+		// until the background draft lands and reloads.
+		a.openPlanEditor(sess)
+		return nil, true
+	case focusSectionBuilding:
 		return nil, a.openSessionInFocusLaunch(sess)
 	case focusSectionReview:
 		sess.SetLifecyclePhase(agent.LifecycleInReview)
