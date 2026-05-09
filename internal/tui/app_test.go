@@ -2619,3 +2619,123 @@ func TestCreateResult_SessionsCreatedCount_OnlyIncrementsForNewSession(t *testin
 		t.Errorf("agentsCreatedCount = %d, want 3", app.agentsCreatedCount)
 	}
 }
+
+// TestSubmitPromptModalRoutesToActiveRepo verifies that the prompt-modal
+// submit handler creates the new session in a.activeRepo (the repo the user
+// just picked from the multi-repo picker) rather than re-resolving via the
+// legacy dashboard.selectedRepoPath() lookup. Regression for the bug where
+// pressing `n` with multiple repos opened the picker, the user picked a
+// non-first repo, the prompt modal opened, and ctrl+enter (or plain enter)
+// spawned the worktree in the *first* repo because submitPromptModal queried
+// dashboard.selectedRepoPath() — which reads d.selected against a hierarchical
+// items list whose cursor doesn't follow either the pipeline cursor or the
+// repo-picker selection.
+func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
+	initRepo := func(t *testing.T) string {
+		t.Helper()
+		dir, err := os.MkdirTemp("", "baton-promptroute-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		for _, args := range [][]string{
+			{"git", "init"},
+			{"git", "config", "commit.gpgsign", "false"},
+			{"git", "commit", "--allow-empty", "-m", "init"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("cmd %v in %s: %v\n%s", args, dir, err, out)
+			}
+		}
+		return dir
+	}
+	dir1 := initRepo(t)
+	dir2 := initRepo(t)
+
+	mgr1 := agent.NewManager(dir1, config.Resolve(nil, nil))
+	defer mgr1.Shutdown()
+	mgr2 := agent.NewManager(dir2, config.Resolve(nil, nil))
+	defer mgr2.Shutdown()
+
+	// Disable real plan drafting so submitPromptModal's planning path doesn't
+	// try to spawn a Sonnet subprocess. StartDraft returns an error, which the
+	// handler tolerates and still creates the session.
+	mgr1.SetPlanDrafter(nil)
+	mgr2.SetPlanDrafter(nil)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir1] = mgr1
+	app.managers[dir2] = mgr2
+	app.activeRepo = dir1 // matches initAppMsg's "default to first repo" behavior
+	app.cfg = &config.Config{
+		Repos: []config.Repo{
+			{Path: dir1, Name: "repo1"},
+			{Path: dir2, Name: "repo2"},
+		},
+	}
+	resolved := config.ResolvedSettings{
+		BypassPermissions: true,
+		AgentProgram:      "bash",
+		PlanFirstEnabled:  true,
+	}
+	app.resolvedCache[dir1] = resolved
+	app.resolvedCache[dir2] = resolved
+
+	app.refreshAgentList()
+	// refreshAgentList runs clampToRepo, which anchors d.selected to the first
+	// repo header. That's exactly the state that produced the original bug —
+	// dashboard.selectedRepoPath() returns dir1 even after the user picks
+	// dir2 from the picker.
+
+	// Press `n`. With multiple repos this routes to the repo picker overlay
+	// rather than spawning directly.
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	app = model.(App)
+	if app.view != ViewRepoPicker {
+		t.Fatalf("expected ViewRepoPicker after 'n' with multi-repo cfg, got %v", app.view)
+	}
+
+	// User picks repo2 from the picker. This is what the real picker emits on
+	// enter, and what sets activeRepo + opens the prompt modal.
+	model, _ = app.Update(repoPickerSelectMsg{path: dir2})
+	app = model.(App)
+	if app.view != ViewDashboard {
+		t.Fatalf("expected dashboard view after picker select, got %v", app.view)
+	}
+	if app.activeRepo != dir2 {
+		t.Fatalf("after picking repo2: activeRepo = %q, want %q", app.activeRepo, dir2)
+	}
+	if !app.promptModal.Active() {
+		t.Fatal("expected prompt modal active after picker select with PlanFirstEnabled=true")
+	}
+
+	// Submit through the planning path (skipPlanning=false uses
+	// CreateSessionForPlanning which doesn't spawn an agent). The skip path
+	// differs only in calling CreateSession; both share the same repo lookup
+	// that the fix straightened out, so this exercises the fix.
+	sessionsBefore1 := len(mgr1.ListSessions())
+	sessionsBefore2 := len(mgr2.ListSessions())
+
+	model, _ = app.Update(promptModalSubmitMsg{prompt: "test", skipPlanning: false})
+	// submitPromptModal is on *App so the returned tea.Model is *App, not App.
+	if p, ok := model.(*App); ok {
+		app = *p
+	} else {
+		app = model.(App)
+	}
+
+	if got := len(mgr1.ListSessions()); got != sessionsBefore1 {
+		t.Errorf("repo1 sessions changed: %d → %d (submitPromptModal routed to wrong repo)",
+			sessionsBefore1, got)
+	}
+	if got := len(mgr2.ListSessions()); got != sessionsBefore2+1 {
+		t.Errorf("repo2 sessions: %d → %d, want +1 (new session should land in the picked repo)",
+			sessionsBefore2, got)
+	}
+}

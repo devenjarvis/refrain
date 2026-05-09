@@ -1,0 +1,3 @@
+### Fixed
+
+- New sessions started from the prompt modal now spawn in the repo the user actually picked, not the first registered repo. With multiple repos in `.baton/repos.json`, pressing `n` correctly opened the repo picker and `a.activeRepo` was updated to the user's choice — but `submitPromptModal` then re-resolved the target repo via the legacy `dashboard.selectedRepoPath()` helper, which reads a hierarchical-list cursor that doesn't track the pipeline cursor or the picker selection and is effectively pinned to the first repo's header. Both `enter` (planning path) and `ctrl+enter` (skip-planning path) were affected, so worktrees ended up in the wrong repo regardless of which submit shortcut the user used. `submitPromptModal` now trusts `a.activeRepo` directly.

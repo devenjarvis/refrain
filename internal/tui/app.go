@@ -2901,10 +2901,14 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	if prompt == "" {
 		return a, nil
 	}
-	repoPath := a.dashboard.selectedRepoPath()
-	if repoPath == "" {
-		repoPath = a.activeRepo
-	}
+	// The `n` handler / repo picker that opened this modal already resolved
+	// the target repo and stored it in a.activeRepo. Re-resolving via
+	// dashboard.selectedRepoPath here would override that with the legacy
+	// d.selected lookup — which clamps to the first repo's header and never
+	// follows the pipeline cursor or the picker's selection — pinning new
+	// sessions to the first registered repo regardless of what the user
+	// picked.
+	repoPath := a.activeRepo
 	if repoPath == "" {
 		a.setError("no repo selected")
 		return a, nil
