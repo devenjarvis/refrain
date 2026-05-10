@@ -615,6 +615,99 @@ func TestBuildClaudeHaikuArgs_BareGatedByAPIKey(t *testing.T) {
 	})
 }
 
+func TestDefaultPRDrafter_Success(t *testing.T) {
+	dir := t.TempDir()
+	// Fake claude emits a well-formed title/body response.
+	response := "TITLE: Add dark mode\n\nBODY:\nThis PR adds dark mode to the settings panel."
+	writeFakeClaude(t, dir, response, 0)
+	withPATH(t, dir)
+
+	drafter := DefaultPRDrafter()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	draft, err := drafter(ctx, "commit1: add dark mode", "1 file changed", "implement dark mode", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if draft.Title != "Add dark mode" {
+		t.Errorf("title = %q, want %q", draft.Title, "Add dark mode")
+	}
+	if draft.Body != "This PR adds dark mode to the settings panel." {
+		t.Errorf("body = %q, want different", draft.Body)
+	}
+}
+
+func TestDefaultPRDrafter_SlotSubstitution(t *testing.T) {
+	dir := t.TempDir()
+	stdinFile := filepath.Join(dir, "stdin.txt")
+	writeStdinCapturingClaude(t, dir, stdinFile, "TITLE: t\n\nBODY:\nb")
+	withPATH(t, dir)
+
+	drafter := DefaultPRDrafter()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := drafter(ctx, "the commits", "the diffstat", "the prompt", "the template"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := os.ReadFile(stdinFile)
+	if err != nil {
+		t.Fatalf("read stdin: %v", err)
+	}
+	body := string(got)
+	for _, want := range []string{"the commits", "the diffstat", "the prompt", "the template"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("stdin missing %q\n%s", want, body)
+		}
+	}
+}
+
+func TestDefaultPRDrafter_ClaudeMissing(t *testing.T) {
+	empty := t.TempDir()
+	t.Setenv("PATH", empty)
+
+	drafter := DefaultPRDrafter()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := drafter(ctx, "c", "d", "p", "")
+	if !errors.Is(err, ErrClaudeNotFound) {
+		t.Errorf("expected ErrClaudeNotFound, got: %v", err)
+	}
+}
+
+func TestDefaultPRDrafter_NonZeroExit(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeClaude(t, dir, "TITLE: t\n\nBODY:\nb", 1)
+	withPATH(t, dir)
+
+	drafter := DefaultPRDrafter()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := drafter(ctx, "c", "d", "p", "")
+	if err == nil {
+		t.Fatal("expected error from nonzero-exit claude")
+	}
+}
+
+func TestDefaultPRDrafter_MalformedResponseError(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeClaude(t, dir, "no title or body here", 0)
+	withPATH(t, dir)
+
+	drafter := DefaultPRDrafter()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := drafter(ctx, "c", "d", "p", "")
+	if err == nil {
+		t.Fatal("expected error for malformed response (no TITLE: prefix)")
+	}
+}
+
 func contains(args []string, want string) bool {
 	for _, a := range args {
 		if a == want {
