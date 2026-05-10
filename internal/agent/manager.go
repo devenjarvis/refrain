@@ -1455,13 +1455,16 @@ func (m *Manager) stopHookServer() {
 	m.hookServer = nil
 }
 
-// AgentCount returns the total number of agents across all sessions.
+// AgentCount returns the total number of live, non-shell agents across all
+// sessions. Shells and naturally-exited (Done/Error) agents are excluded so
+// callers using this for capacity checks (the quit warning, soft concurrency
+// limits) don't count work that's already finished.
 func (m *Manager) AgentCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	count := 0
 	for _, s := range m.sessions {
-		count += s.AgentCount()
+		count += s.LiveAgentCount()
 	}
 	return count
 }
