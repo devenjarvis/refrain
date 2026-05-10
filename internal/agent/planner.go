@@ -43,15 +43,24 @@ type PlanDrafter interface {
 // internal/planner.Server in the running baton process. The drafter wires
 // it into the Sonnet subprocess as an MCP server so the planner can pause
 // and call ask_user; an empty value disables the feature for this draft.
+//
+// Cwd, when non-empty, sets the working directory for the Claude subprocess.
+// Set to sess.Worktree.Path so the planner reads the right codebase when
+// multiple repos are registered.
 type DraftRequest struct {
 	UserPrompt     string
 	QuestionSocket string
+	Cwd            string
 }
 
 // ReviseRequest is the input to PlanDrafter.Revise.
+//
+// Cwd, when non-empty, sets the working directory for the Claude subprocess.
+// Set to sess.Worktree.Path so the reviser operates in the correct repo.
 type ReviseRequest struct {
 	CurrentPlan string
 	Critique    string
+	Cwd         string
 }
 
 // planDraftPrompt frames each Draft call. The five fixed sections match what
@@ -142,7 +151,7 @@ func (d *defaultPlanDrafter) Draft(ctx context.Context, req DraftRequest) (strin
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrClaudeNotFound, err)
 	}
-	return runClaudePlanner(ctx, claudePath, d.model, planDraftPrompt+prompt, req.QuestionSocket)
+	return runClaudePlanner(ctx, claudePath, d.model, planDraftPrompt+prompt, req.QuestionSocket, req.Cwd)
 }
 
 func (d *defaultPlanDrafter) Revise(ctx context.Context, req ReviseRequest) (string, error) {
@@ -162,7 +171,7 @@ func (d *defaultPlanDrafter) Revise(ctx context.Context, req ReviseRequest) (str
 	// Revise does not surface ask_user — the user is already iterating on a
 	// concrete plan with the editor's revise input, so an interactive prompt
 	// would just compete for attention. Pass an empty socket path.
-	return runClaudePlanner(ctx, claudePath, d.model, instruction, "")
+	return runClaudePlanner(ctx, claudePath, d.model, instruction, "", req.Cwd)
 }
 
 // plannerQuestionMCPName is the MCP-server key under which the planner
@@ -216,7 +225,7 @@ func buildClaudePlannerArgs(model, questionSocket string) []string {
 	}
 
 	// --tools filters which tools are visible (keeps Bash/Edit/Write hidden even
-	// if Claude's default set expands). --allowed-tools auto-approves those same
+	// if Claude's default set expands). --allowedTools auto-approves those same
 	// tools so the non-interactive -p subprocess never hits a permission gate.
 	// Both flags are required: --tools alone only controls availability, not approval.
 	args = append(
@@ -225,7 +234,7 @@ func buildClaudePlannerArgs(model, questionSocket string) []string {
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--tools", tools,
-		"--allowed-tools", tools,
+		"--allowedTools", tools,
 		"--setting-sources", "user,project",
 		"--exclude-dynamic-system-prompt-sections",
 	)
@@ -282,7 +291,9 @@ func plannerMCPConfigJSON(questionSocket string) string {
 // socket as the parent agent. When questionSocket is non-empty, the
 // BATON_PLANNER_QUESTION_SOCKET env is added so the spawned MCP bridge
 // (registered via buildClaudePlannerArgs) can dial back into baton.
-func runClaudePlanner(ctx context.Context, claudePath, model, instruction, questionSocket string) (string, error) {
+// When cwd is non-empty, cmd.Dir is set so the subprocess reads the correct
+// repo when multiple repos are registered in baton.
+func runClaudePlanner(ctx context.Context, claudePath, model, instruction, questionSocket, cwd string) (string, error) {
 	cmd := exec.CommandContext(ctx, claudePath, buildClaudePlannerArgs(model, questionSocket)...)
 	cmd.Stdin = strings.NewReader(instruction)
 	env := sanitizedHaikuEnv(os.Environ())
@@ -290,6 +301,9 @@ func runClaudePlanner(ctx context.Context, claudePath, model, instruction, quest
 		env = append(env, PlannerQuestionSocketEnv+"="+questionSocket)
 	}
 	cmd.Env = env
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
 	cmd.WaitDelay = 500 * time.Millisecond
 
 	var stdout, stderr bytes.Buffer

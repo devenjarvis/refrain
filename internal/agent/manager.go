@@ -631,7 +631,7 @@ func (m *Manager) runDraft(ctx context.Context, sess *Session, drafter PlanDraft
 		}
 	}()
 
-	body, err := drafter.Draft(ctx, DraftRequest{UserPrompt: prompt, QuestionSocket: qSocket})
+	body, err := drafter.Draft(ctx, DraftRequest{UserPrompt: prompt, QuestionSocket: qSocket, Cwd: sess.Worktree.Path})
 
 	// If the session has already been removed from the manager (e.g. by a
 	// completed KillSession), skip the post-draft writes — there is nothing
@@ -757,7 +757,7 @@ func (m *Manager) runRevise(ctx context.Context, sess *Session, drafter PlanDraf
 		}
 	}()
 
-	body, err := drafter.Revise(ctx, ReviseRequest{CurrentPlan: current, Critique: critique})
+	body, err := drafter.Revise(ctx, ReviseRequest{CurrentPlan: current, Critique: critique, Cwd: sess.Worktree.Path})
 
 	m.mu.RLock()
 	_, stillOpen := m.sessions[sess.ID]

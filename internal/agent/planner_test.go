@@ -160,6 +160,50 @@ func TestDefaultPlanDrafter_DraftStripsBatonHookEnv(t *testing.T) {
 	}
 }
 
+// writeCwdCapturingClaude writes a fake claude that writes its cwd to cwdFile
+// then prints stdout. Used to assert the planner sets cmd.Dir correctly.
+func writeCwdCapturingClaude(t *testing.T, dir, cwdFile, stdout string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"pwd > " + shellSingleQuote(cwdFile) + "\n" +
+		"printf %s " + shellSingleQuote(stdout) + "\n"
+	path := filepath.Join(dir, "claude")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write cwd-capturing claude: %v", err)
+	}
+}
+
+func TestDefaultPlanDrafter_DraftForwardsWorktreeCwd(t *testing.T) {
+	dir := t.TempDir()
+	cwdFile := filepath.Join(dir, "cwd.txt")
+	writeCwdCapturingClaude(t, dir, cwdFile, "# Goal\nstub")
+	withPATH(t, dir)
+
+	targetDir := t.TempDir()
+	// Resolve symlinks so pwd output (real path) matches on macOS (/var → /private/var).
+	wantDir, err := filepath.EvalSymlinks(targetDir)
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
+
+	d := DefaultPlanDrafter("")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := d.Draft(ctx, DraftRequest{UserPrompt: "add dark mode", Cwd: targetDir}); err != nil {
+		t.Fatalf("Draft: %v", err)
+	}
+
+	got, err := os.ReadFile(cwdFile)
+	if err != nil {
+		t.Fatalf("read cwd file: %v", err)
+	}
+	if strings.TrimSpace(string(got)) != wantDir {
+		t.Errorf("subprocess cwd = %q, want %q", strings.TrimSpace(string(got)), wantDir)
+	}
+}
+
 func TestDefaultPlanDrafter_ReviseSuccess(t *testing.T) {
 	dir := t.TempDir()
 	const revised = "# Goal\nRevised\n\n## Tasks\n- [ ] one\n- [ ] two"
@@ -251,7 +295,7 @@ func TestBuildClaudePlannerArgs_UsesSonnet(t *testing.T) {
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--tools Read,Grep,Glob,LS,LSP,WebFetch,WebSearch",
-		"--allowed-tools Read,Grep,Glob,LS,LSP,WebFetch,WebSearch",
+		"--allowedTools Read,Grep,Glob,LS,LSP,WebFetch,WebSearch",
 		"--setting-sources user,project",
 	} {
 		if !strings.Contains(joined, want) {
@@ -337,8 +381,8 @@ func TestBuildClaudePlannerArgs_WithQuestionSocketRegistersMCPServer(t *testing.
 	}
 
 	// The fully-qualified ask_user tool name must appear on both --tools and
-	// --allowed-tools so it is both exposed and auto-approved.
-	for _, flag := range []string{"--tools", "--allowed-tools"} {
+	// --allowedTools so it is both exposed and auto-approved.
+	for _, flag := range []string{"--tools", "--allowedTools"} {
 		idx := -1
 		for i, a := range args {
 			if a == flag {
@@ -372,7 +416,7 @@ func TestBuildClaudePlannerArgs_EmptySocketKeepsZeroServers(t *testing.T) {
 		t.Errorf("--mcp-config = %q, want canonical empty payload", args[mcpIdx+1])
 	}
 
-	for _, flag := range []string{"--tools", "--allowed-tools"} {
+	for _, flag := range []string{"--tools", "--allowedTools"} {
 		idx := -1
 		for i, a := range args {
 			if a == flag {
