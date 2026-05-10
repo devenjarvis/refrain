@@ -81,7 +81,7 @@ How will the developer know the change works? Tests, manual checks, or both.
 ## Not in scope
 What this plan deliberately excludes.
 
-The 400-word cap applies to the PLAN OUTPUT only — research with the tools as much as you need; tool calls and what you read don't count toward the cap, so don't truncate research mid-flight to stay short. The developer will edit your output before approving — favor a short, clear, code-grounded plan they can refine over an exhaustive one. Output only the markdown plan; no preamble, no surrounding explanation, no summary of what you researched.
+The 400-word cap applies to the PLAN OUTPUT only — research with the tools as much as you need; tool calls and what you read don't count toward the cap, so don't truncate research mid-flight to stay short. The developer will edit your output before approving — favor a short, clear, code-grounded plan they can refine over an exhaustive one. Your response MUST begin with ` + "`# Goal`" + ` on the very first line — do not write any text, summary, or transitional sentence before it.
 
 The developer's task description follows.
 
@@ -92,7 +92,7 @@ The developer's task description follows.
 // earlier alongside the change request.
 const planRevisePrompt = `You are revising an existing plan for a coding task based on the developer's feedback. Your working directory is the developer's worktree root, and you have the same read-only toolset as the original drafter (Read, Grep, Glob, LS, LSP, WebFetch, WebSearch). If the critique points at code or files the current plan didn't already cover, re-read the relevant source before revising — don't invent paths or symbols.
 
-Output the full revised plan with the same five sections (Goal / Context / Tasks / Verification / Not in scope). Preserve sections, wording, and tasks the feedback does not touch — make small, surgical changes. Keep the plan under 400 words; research and tool use don't count toward that cap. Output only the markdown plan; no preamble.
+Output the full revised plan with the same five sections (Goal / Context / Tasks / Verification / Not in scope). Preserve sections, wording, and tasks the feedback does not touch — make small, surgical changes. Keep the plan under 400 words; research and tool use don't count toward that cap. Your response MUST begin with ` + "`# Goal`" + ` on the very first line — do not write any text, summary, or transitional sentence before it.
 
 CURRENT PLAN:
 `
@@ -286,5 +286,9 @@ func runClaudePlanner(ctx context.Context, claudePath, model, instruction, quest
 		return "", fmt.Errorf("claude planner: %w (stderr=%q)", err, strings.TrimSpace(stderr.String()))
 	}
 
-	return strings.TrimSpace(stdout.String()), nil
+	output := strings.TrimSpace(stdout.String())
+	if idx := strings.Index(output, "# Goal"); idx > 0 {
+		output = output[idx:]
+	}
+	return output, nil
 }
