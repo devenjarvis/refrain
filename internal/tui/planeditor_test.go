@@ -7,8 +7,12 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/devenjarvis/baton/internal/agent"
 	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/baton/internal/tui/mdrender"
+	"github.com/devenjarvis/baton/internal/tui/mdrender/testutil"
+	"github.com/muesli/termenv"
 )
 
 // newEditorTestSession creates a real session in a temp git repo so the
@@ -70,7 +74,7 @@ func TestPlanEditor_RendersPlanFromDisk(t *testing.T) {
 	}
 
 	editor := newPlanEditor(sess, 80, 30)
-	body := editor.View()
+	body := testutil.StripANSI(editor.View())
 	if !strings.Contains(body, "Do X") || !strings.Contains(body, "step 1") {
 		t.Errorf("editor view missing plan content:\n%s", body)
 	}
@@ -246,5 +250,72 @@ func TestPlanEditor_ReviseInputEmitsCritique(t *testing.T) {
 	}
 	if editor.mode != planEditorModeScroll {
 		t.Errorf("mode after submit = %v, want scroll", editor.mode)
+	}
+}
+
+// TestPlanEditor_ScrollAndEditModeUseSameWidth pins the wiring contract that
+// scroll-mode wrap (via mdrender.RenderLines) and edit-mode wrap (via the
+// embedded mdtextarea) operate at the same column width. Without this, the
+// `i`/`esc` mode toggle would visually reflow content — exactly the
+// regression Task 5's display-line agreement test is meant to catch.
+func TestPlanEditor_ScrollAndEditModeUseSameWidth(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	_ = sess.WritePlan("# H\nshort\n")
+	editor := newPlanEditor(sess, 80, 30)
+	if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
+		t.Errorf("contentWidth=%d, textarea.Width()=%d; both modes must wrap at the same column", got, want)
+	}
+}
+
+// TestPlanEditor_DisplayLineCountAgreesWithRenderer asserts that the editor's
+// scroll-mode display lines exactly match a direct mdrender call on the same
+// content+width. If this drifts apart the i/esc toggle no longer guarantees
+// "scroll position preserved" — the post-wrap row count would change between
+// modes, scrolling the user past content unexpectedly.
+func TestPlanEditor_DisplayLineCountAgreesWithRenderer(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Heading 1\n\n" +
+		"A paragraph with **bold**, *italic*, and `code` that may need to wrap depending on the width.\n\n" +
+		"## Heading 2\n\n" +
+		"- bullet one\n- bullet two with a longer body to encourage wrap when the width is narrow\n- bullet three\n\n" +
+		"```go\nfunc Example() error { return nil }\n```\n\n" +
+		"> a final blockquote\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, 60, 30)
+
+	scrollLines := editor.displayLines()
+	directLines := mdrender.New("monokai").RenderLines(editor.textarea.Value(), editor.contentWidth())
+	if len(scrollLines) != len(directLines) {
+		t.Errorf("editor.displayLines()=%d vs direct mdrender.RenderLines=%d — scroll and edit modes will desync",
+			len(scrollLines), len(directLines))
+	}
+}
+
+// TestPlanEditor_ScrollModeStylesHeadings asserts that scroll-mode rendering
+// actually emits ANSI styling for known markdown constructs. Without this,
+// a regression that silently nil-checks the renderer or short-circuits
+// before styling would compile and pass other tests but show plain output.
+func TestPlanEditor_ScrollModeStylesHeadings(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	sess, _ := newEditorTestSession(t)
+	_ = sess.WritePlan("# Hello world\n")
+	editor := newPlanEditor(sess, 80, 30)
+
+	view := editor.View()
+	stripped := testutil.StripANSI(view)
+	if !strings.Contains(stripped, "# Hello world") {
+		t.Errorf("heading text missing from scroll view:\n%s", stripped)
+	}
+	if !strings.Contains(view, "\x1b[") {
+		t.Errorf("expected ANSI styling in scroll view, got plain output:\n%s", view)
 	}
 }

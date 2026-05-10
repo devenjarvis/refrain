@@ -1,17 +1,23 @@
 package tui
 
 import (
+	"crypto/sha256"
 	"strconv"
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/baton/internal/agent"
+	"github.com/devenjarvis/baton/internal/tui/mdrender"
+	"github.com/devenjarvis/baton/internal/tui/mdtextarea"
 )
+
+// planEditorChromaStyle is the chroma style used by the markdown renderer.
+// Hardcoded for now — a follow-up will plumb this through config.Settings.
+const planEditorChromaStyle = "monokai"
 
 // planEditorMode is the editor's current input mode. The default is
 // scroll-mode (read-only navigation); `i` enters edit-mode and `r` enters
@@ -41,7 +47,7 @@ type planEditorModel struct {
 	saveNote  string // transient confirmation ("saved") or error
 	saveAt    time.Time
 
-	textarea    textarea.Model
+	textarea    mdtextarea.Model
 	reviseInput textinput.Model
 	width       int
 	height      int
@@ -50,6 +56,16 @@ type planEditorModel struct {
 	revisingFor time.Time
 	statusMsg   string // generic status line under the header (e.g. "Drafting…")
 	errMsg      string // inline error message; cleared on next interaction
+
+	renderer *mdrender.Renderer
+
+	// displayCache memoises the post-wrap, post-style display lines for the
+	// current textarea value at the current width. Invalidated by content
+	// hash so edits always re-derive. The renderer itself caches at a coarser
+	// grain (sha256(plan), styleName, width) — this avoids the per-frame map
+	// lookup when nothing changed between renders.
+	displayCache    []string
+	displayCacheKey displayCacheKey
 
 	// Planner question state. When questionAnswerCh is non-nil, the editor is
 	// in planEditorModeQuestion and mirrors the question text + a single-line
@@ -60,6 +76,15 @@ type planEditorModel struct {
 	questionInput    textinput.Model
 	questionAnswerCh chan<- string
 	priorMode        planEditorMode // mode to restore after the question is answered
+}
+
+// displayCacheKey gates the editor-local cache of display lines. width matters
+// because re-wrap depends on it; valueHash matters because edits change the
+// content. styleName isn't part of the key — the renderer is reused per
+// editor and the style is fixed at construction.
+type displayCacheKey struct {
+	width     int
+	valueHash [32]byte
 }
 
 // planEditorApproveMsg is emitted when the user approves the plan (`a`).
@@ -113,11 +138,13 @@ func newPlanEditor(sess *agent.Session, width, height int) planEditorModel {
 		height: height,
 	}
 
-	ta := textarea.New()
+	ta := mdtextarea.New()
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
 	ta.SetWidth(textareaWidth(width))
 	ta.SetHeight(textareaHeight(height))
+	m.renderer = mdrender.New(planEditorChromaStyle)
+	ta.SetMarkdownRenderer(m.renderer)
 	m.textarea = ta
 
 	ti := textinput.New()
@@ -330,7 +357,7 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 		m.scrollOff = 0
 		return nil
 	case "G", "end":
-		m.scrollOff = len(m.planLines())
+		m.scrollOff = len(m.displayLines())
 		m.clampScroll()
 		return nil
 	case "i":
@@ -487,14 +514,30 @@ func (m *planEditorModel) emitClose() tea.Cmd {
 	return func() tea.Msg { return planEditorCloseMsg{sessionID: sessID} }
 }
 
-// planLines returns the lines rendered in scroll mode. We pull from the
-// textarea rather than m.plan so unsaved edits stay visible after esc.
-func (m *planEditorModel) planLines() []string {
+// displayLines returns the post-wrap, post-style ANSI display lines for the
+// current textarea content at the current width. Result is cached on the
+// model keyed by (width, valueHash); the renderer itself caches at a coarser
+// grain so cross-frame reuse is cheap even when the editor is reconstructed.
+func (m *planEditorModel) displayLines() []string {
 	v := m.textarea.Value()
 	if v == "" {
 		return nil
 	}
-	return strings.Split(strings.TrimRight(v, "\n"), "\n")
+	w := m.contentWidth()
+	key := displayCacheKey{width: w, valueHash: sha256.Sum256([]byte(v))}
+	if m.displayCache != nil && m.displayCacheKey == key {
+		return m.displayCache
+	}
+	out := m.renderer.RenderLines(v, w)
+	m.displayCache = out
+	m.displayCacheKey = key
+	return out
+}
+
+// contentWidth is the column width used for both wrap and styling. Match
+// textareaWidth so scroll-mode wraps line up with edit-mode wraps.
+func (m *planEditorModel) contentWidth() int {
+	return textareaWidth(m.width)
 }
 
 // bodyHeight is the number of lines available for plan content.
@@ -508,12 +551,15 @@ func (m *planEditorModel) bodyHeight() int {
 }
 
 func (m *planEditorModel) clampScroll() {
-	max := len(m.planLines()) - m.bodyHeight()
+	max := len(m.displayLines()) - m.bodyHeight()
 	if max < 0 {
 		max = 0
 	}
 	if m.scrollOff > max {
 		m.scrollOff = max
+	}
+	if m.scrollOff < 0 {
+		m.scrollOff = 0
 	}
 }
 
@@ -587,8 +633,11 @@ func (m *planEditorModel) renderBody() string {
 	if m.revising {
 		// Show the current plan greyed out so the user has context for the
 		// in-flight critique, plus a status line at the top. Cleaner than a
-		// blank "Revising…" screen and lets the user keep reading.
-		all := m.planLines()
+		// blank "Revising…" screen and lets the user keep reading. The grey
+		// wrapper drops the inline syntax highlighting on purpose; revising
+		// is a transient state and a uniform muted body cues "this is the
+		// previous plan, not the current one".
+		all := m.planLinesPlain()
 		body := m.bodyHeight() - 1
 		if body < 1 {
 			body = 1
@@ -601,11 +650,18 @@ func (m *planEditorModel) renderBody() string {
 		if len(all) == 0 {
 			rendered = StyleSubtle.Render("(no plan content)")
 		} else {
-			rendered = strings.Join(all[m.scrollOff:end], "\n")
+			start := m.scrollOff
+			if start > len(all) {
+				start = len(all)
+			}
+			if start < 0 {
+				start = 0
+			}
+			rendered = strings.Join(all[start:end], "\n")
 		}
 		return StyleActive.Render("Revising plan with claude -p…") + "\n" + StyleSubtle.Render(rendered)
 	}
-	all := m.planLines()
+	all := m.displayLines()
 	if len(all) == 0 {
 		return StyleSubtle.Render("(no plan content yet — press i to start writing or r to revise)")
 	}
@@ -626,6 +682,16 @@ func (m *planEditorModel) renderBody() string {
 		end = len(all)
 	}
 	return strings.Join(all[start:end], "\n")
+}
+
+// planLinesPlain returns the textarea's value as raw source lines. Used by
+// the revising-mode preview, which intentionally shows un-styled muted text.
+func (m *planEditorModel) planLinesPlain() []string {
+	v := m.textarea.Value()
+	if v == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(v, "\n"), "\n")
 }
 
 func (m *planEditorModel) renderFooter() string {
