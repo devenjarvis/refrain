@@ -125,8 +125,8 @@ func hookDebugLog(socketPath string, kind hook.Kind, toolName string, toolInput 
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	ts := time.Now().Format(time.RFC3339)
-	fmt.Fprintf(f, "%s kind=%s tool_name=%q tool_input_len=%d raw_len=%d\n",
+	_, _ = fmt.Fprintf(f, "%s kind=%s tool_name=%q tool_input_len=%d raw_len=%d\n",
 		ts, kind, toolName, len(toolInput), len(raw))
 }
