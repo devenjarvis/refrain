@@ -56,6 +56,14 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 	if gs.AgentProgram != nil {
 		agentProgram = *gs.AgentProgram
 	}
+	planModel := ""
+	if gs.PlanModel != nil {
+		planModel = *gs.PlanModel
+	}
+	agentModel := ""
+	if gs.AgentModel != nil {
+		agentModel = *gs.AgentModel
+	}
 	ideCommand := ""
 	if gs.IDECommand != nil {
 		ideCommand = *gs.IDECommand
@@ -90,6 +98,8 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 	fields = addTextInput(fields, "Default Branch", defaultBranch, "auto-detect", inputWidth)
 	fields = addTextInput(fields, "Branch Prefix", branchPrefix, config.DefaultBranchPrefix, inputWidth)
 	fields = addTextInput(fields, "Agent Program", agentProgram, config.DefaultAgentProgram, inputWidth)
+	fields = addTextInput(fields, "Plan Model", planModel, config.DefaultPlanModel, inputWidth)
+	fields = addTextInput(fields, "Agent Model", agentModel, "claude default", inputWidth)
 	fields = addEditorFields(fields, ideCommand)
 	fields = addTextInput(fields, "Sidebar Width", sidebarWidth, strconv.Itoa(config.DefaultSidebarWidth), inputWidth)
 	fields = addTextInput(fields, fieldFocusSession, focusSessionMinutes, strconv.Itoa(config.DefaultFocusSessionMinutes), inputWidth)
@@ -159,6 +169,12 @@ func (m globalConfigModel) extractSettings() *config.GlobalSettings {
 	}
 	if v := m.form.textValue("Agent Program"); v != "" {
 		s.AgentProgram = &v
+	}
+	if v := m.form.textValue("Plan Model"); v != "" {
+		s.PlanModel = &v
+	}
+	if v := m.form.textValue("Agent Model"); v != "" {
+		s.AgentModel = &v
 	}
 	if v := extractIDECommand(m.form); v != "" {
 		s.IDECommand = &v

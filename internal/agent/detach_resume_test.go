@@ -307,6 +307,24 @@ func TestBuildResumeArgs(t *testing.T) {
 			sessID:   "",
 			wantArgs: []string{"--continue", "hello"},
 		},
+		{
+			name:     "agent model prepended for claude",
+			cfg:      Config{AgentModel: "claude-opus-4-7", BypassPermissions: true, Task: "do stuff"},
+			sessID:   "uuid-123",
+			wantArgs: []string{"--model", "claude-opus-4-7", "--dangerously-skip-permissions", "--resume", "uuid-123", "do stuff"},
+		},
+		{
+			name:     "agent model ignored for non-claude program",
+			cfg:      Config{AgentProgram: "bash", AgentModel: "claude-opus-4-7", BypassPermissions: true},
+			sessID:   "uuid-456",
+			wantArgs: []string{"--dangerously-skip-permissions", "--resume", "uuid-456"},
+		},
+		{
+			name:     "empty agent model passes nothing",
+			cfg:      Config{AgentModel: "", Task: "hello"},
+			sessID:   "",
+			wantArgs: []string{"--continue", "hello"},
+		},
 	}
 
 	for _, tt := range tests {

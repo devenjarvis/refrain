@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/devenjarvis/baton/internal/config"
 )
 
 // PlannerQuestionSocketEnv is the environment variable the planner Sonnet
@@ -17,8 +19,6 @@ import (
 // Exported so cmd/plannerquestion.go (and tests) can reference the same
 // name without hardcoding the string in two places.
 const PlannerQuestionSocketEnv = "BATON_PLANNER_QUESTION_SOCKET"
-
-const claudeSonnetModel = "claude-sonnet-4-6"
 
 // ErrEmptyPrompt is returned when Draft is called with an empty user prompt.
 var ErrEmptyPrompt = errors.New("planner: empty user prompt")
@@ -98,9 +98,11 @@ CURRENT PLAN:
 `
 
 // DefaultPlanDrafter returns a PlanDrafter that shells out to
-// `claude -p --model claude-sonnet-4-6` with the planning instruction piped
-// on stdin. Env stripped of baton hook wiring so the subprocess does not
-// register against the running TUI's hook socket as the parent agent.
+// `claude -p --model <model>` with the planning instruction piped on stdin.
+// An empty model falls back to config.DefaultPlanModel so callers that
+// haven't migrated to the parameterized form keep their existing behavior.
+// Env stripped of baton hook wiring so the subprocess does not register
+// against the running TUI's hook socket as the parent agent.
 //
 // Cancellation is caller-driven via ctx (no wall-clock timeout in the default
 // path): Sonnet drafting can take a couple of minutes on complex prompts and
@@ -108,15 +110,28 @@ CURRENT PLAN:
 // pass a cancel-only context so the only kill paths are user-initiated
 // (KillSession, manager shutdown, an explicit CancelDraft / CancelRevise).
 //
-// Sonnet (not Haiku) is intentional: planning quality compounds downstream,
-// since a fuzzier plan turns into a fuzzier agent run and more verification
-// tax. The cost of one extra one-shot subprocess at planning time is low
-// next to the human review time it saves later.
-func DefaultPlanDrafter() PlanDrafter {
-	return &defaultPlanDrafter{}
+// Sonnet (not Haiku) is the default for a reason: planning quality compounds
+// downstream, since a fuzzier plan turns into a fuzzier agent run and more
+// verification tax. The cost of one extra one-shot subprocess at planning
+// time is low next to the human review time it saves later. Users who want
+// to override this for cost or speed reasons can set plan_model in config.
+func DefaultPlanDrafter(model string) PlanDrafter {
+	if model == "" {
+		model = config.DefaultPlanModel
+	}
+	return &defaultPlanDrafter{model: model}
 }
 
-type defaultPlanDrafter struct{}
+type defaultPlanDrafter struct {
+	model string
+}
+
+// Model returns the model string this drafter was constructed with.
+// Used by the manager to detect whether a settings change requires
+// swapping in a fresh drafter.
+func (d *defaultPlanDrafter) Model() string {
+	return d.model
+}
 
 func (d *defaultPlanDrafter) Draft(ctx context.Context, req DraftRequest) (string, error) {
 	prompt := strings.TrimSpace(req.UserPrompt)
@@ -127,7 +142,7 @@ func (d *defaultPlanDrafter) Draft(ctx context.Context, req DraftRequest) (strin
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrClaudeNotFound, err)
 	}
-	return runClaudePlanner(ctx, claudePath, planDraftPrompt+prompt, req.QuestionSocket)
+	return runClaudePlanner(ctx, claudePath, d.model, planDraftPrompt+prompt, req.QuestionSocket)
 }
 
 func (d *defaultPlanDrafter) Revise(ctx context.Context, req ReviseRequest) (string, error) {
@@ -147,7 +162,7 @@ func (d *defaultPlanDrafter) Revise(ctx context.Context, req ReviseRequest) (str
 	// Revise does not surface ask_user — the user is already iterating on a
 	// concrete plan with the editor's revise input, so an interactive prompt
 	// would just compete for attention. Pass an empty socket path.
-	return runClaudePlanner(ctx, claudePath, instruction, "")
+	return runClaudePlanner(ctx, claudePath, d.model, instruction, "")
 }
 
 // plannerQuestionMCPName is the MCP-server key under which the planner
@@ -162,7 +177,8 @@ const plannerQuestionMCPName = "baton_planner_question"
 const plannerQuestionToolName = "mcp__" + plannerQuestionMCPName + "__ask_user"
 
 // buildClaudePlannerArgs returns the argv (excluding the binary path) for a
-// one-shot planning subprocess. Mirrors buildClaudeHaikuArgs but uses Sonnet.
+// one-shot planning subprocess. The model is parameterized so callers can
+// override the default; an empty model falls back to config.DefaultPlanModel.
 // The drafter is given a read-only tool allowlist so it can research the
 // codebase (Read/Grep/Glob/LS/LSP) and pull external docs (WebFetch/WebSearch)
 // before producing the plan markdown. Writes and Bash stay blocked — the
@@ -184,8 +200,11 @@ const plannerQuestionToolName = "mcp__" + plannerQuestionMCPName + "__ask_user"
 // `mcpServers: Invalid input: expected record, received undefined`, which
 // makes every planner subprocess exit 1 and surfaces as
 // `claude planner: exit status 1`. Do not simplify this back to "{}".
-func buildClaudePlannerArgs(questionSocket string) []string {
-	args := []string{"-p", "--model", claudeSonnetModel}
+func buildClaudePlannerArgs(model, questionSocket string) []string {
+	if model == "" {
+		model = config.DefaultPlanModel
+	}
+	args := []string{"-p", "--model", model}
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		args = append(args, "--bare")
 	}
@@ -243,14 +262,14 @@ func plannerMCPConfigJSON(questionSocket string) string {
 	return string(out)
 }
 
-// runClaudePlanner runs `claude -p --model claude-sonnet-4-6` with instruction
-// on stdin and returns the trimmed raw stdout (markdown). Strips baton's hook
+// runClaudePlanner runs `claude -p --model <model>` with instruction on
+// stdin and returns the trimmed raw stdout (markdown). Strips baton's hook
 // env so the subprocess does not register against the running TUI's hook
 // socket as the parent agent. When questionSocket is non-empty, the
 // BATON_PLANNER_QUESTION_SOCKET env is added so the spawned MCP bridge
 // (registered via buildClaudePlannerArgs) can dial back into baton.
-func runClaudePlanner(ctx context.Context, claudePath, instruction, questionSocket string) (string, error) {
-	cmd := exec.CommandContext(ctx, claudePath, buildClaudePlannerArgs(questionSocket)...)
+func runClaudePlanner(ctx context.Context, claudePath, model, instruction, questionSocket string) (string, error) {
+	cmd := exec.CommandContext(ctx, claudePath, buildClaudePlannerArgs(model, questionSocket)...)
 	cmd.Stdin = strings.NewReader(instruction)
 	env := sanitizedHaikuEnv(os.Environ())
 	if questionSocket != "" {

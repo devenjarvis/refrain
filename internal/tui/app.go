@@ -377,6 +377,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Cols:              fixedW,
 					BypassPermissions: resolved.BypassPermissions,
 					AgentProgram:      resolved.AgentProgram,
+					AgentModel:        resolved.AgentModel,
 				},
 				sessions: bs.Sessions,
 			})
@@ -1149,6 +1150,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 							Cols:              a.dashboard.width,
 							BypassPermissions: resolved.BypassPermissions,
 							AgentProgram:      resolved.AgentProgram,
+							AgentModel:        resolved.AgentModel,
 						}
 						if newAg, err := mgr.AddAgent(a.focusLaunchSession.ID, cfg); err == nil {
 							a.focusLaunchAgent = newAg
@@ -1654,6 +1656,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Cols:              fixedW,
 				BypassPermissions: resolved.BypassPermissions,
 				AgentProgram:      resolved.AgentProgram,
+				AgentModel:        resolved.AgentModel,
 			}
 			return a, func() tea.Msg {
 				sess, ag, err := mgr.CreateSession(cfg)
@@ -1695,6 +1698,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Cols:              fixedW,
 				BypassPermissions: resolved.BypassPermissions,
 				AgentProgram:      resolved.AgentProgram,
+				AgentModel:        resolved.AgentModel,
 			}
 			sessionID := sess.ID
 			return a, func() tea.Msg {
@@ -2203,6 +2207,7 @@ func (a App) updateBranchPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Cols:              fixedW,
 			BypassPermissions: resolved.BypassPermissions,
 			AgentProgram:      resolved.AgentProgram,
+			AgentModel:        resolved.AgentModel,
 		}
 
 		branch := item.branch
@@ -2261,6 +2266,7 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Cols:              fixedW,
 			BypassPermissions: resolved.BypassPermissions,
 			AgentProgram:      resolved.AgentProgram,
+			AgentModel:        resolved.AgentModel,
 		}
 		return a, func() tea.Msg {
 			sess, ag, err := mgr.CreateSession(pickerCfg)
@@ -2326,6 +2332,14 @@ func (a *App) initRepoConfigForm(repoPath string) {
 	if rs.AgentProgram != nil {
 		agentProgram = *rs.AgentProgram
 	}
+	planModel := ""
+	if rs.PlanModel != nil {
+		planModel = *rs.PlanModel
+	}
+	agentModel := ""
+	if rs.AgentModel != nil {
+		agentModel = *rs.AgentModel
+	}
 	ideCommand := ""
 	if rs.IDECommand != nil {
 		ideCommand = *rs.IDECommand
@@ -2349,6 +2363,8 @@ func (a *App) initRepoConfigForm(repoPath string) {
 	fields = addTextInput(fields, "Default Branch", defaultBranch, "auto-detect", inputWidth)
 	fields = addTextInput(fields, "Branch Prefix", branchPrefix, config.DefaultBranchPrefix, inputWidth)
 	fields = addTextInput(fields, "Agent Program", agentProgram, config.DefaultAgentProgram, inputWidth)
+	fields = addTextInput(fields, "Plan Model", planModel, config.DefaultPlanModel, inputWidth)
+	fields = addTextInput(fields, "Agent Model", agentModel, "claude default", inputWidth)
 	fields = addEditorFields(fields, ideCommand)
 	fields = addTextInput(fields, "Worktree Directory", worktreeDir, config.DefaultWorktreeDir, inputWidth)
 
@@ -2377,6 +2393,12 @@ func (a App) extractRepoSettings() *config.RepoSettings {
 	}
 	if v := form.textValue("Agent Program"); v != "" {
 		s.AgentProgram = &v
+	}
+	if v := form.textValue("Plan Model"); v != "" {
+		s.PlanModel = &v
+	}
+	if v := form.textValue("Agent Model"); v != "" {
+		s.AgentModel = &v
 	}
 	if v := extractIDECommand(*form); v != "" {
 		s.IDECommand = &v
@@ -2995,6 +3017,7 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 			Cols:              fixedW,
 			BypassPermissions: resolved.BypassPermissions,
 			AgentProgram:      resolved.AgentProgram,
+			AgentModel:        resolved.AgentModel,
 			Task:              prompt,
 		}
 		return a, func() tea.Msg {
@@ -3016,6 +3039,7 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		Cols:              fixedW,
 		BypassPermissions: resolved.BypassPermissions,
 		AgentProgram:      resolved.AgentProgram,
+		AgentModel:        resolved.AgentModel,
 	}
 	sess, err := mgr.CreateSessionForPlanning(cfg)
 	if err != nil {
@@ -3105,6 +3129,7 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 		Cols:              fixedW,
 		BypassPermissions: resolved.BypassPermissions,
 		AgentProgram:      resolved.AgentProgram,
+		AgentModel:        resolved.AgentModel,
 		Task:              prompt,
 	}
 

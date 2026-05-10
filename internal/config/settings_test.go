@@ -561,6 +561,64 @@ func TestResolve_PlanFirst_GlobalOverride(t *testing.T) {
 	}
 }
 
+func TestResolve_Models_Defaults(t *testing.T) {
+	r := config.Resolve(nil, nil)
+	if r.PlanModel != config.DefaultPlanModel {
+		t.Errorf("PlanModel = %q, want %q", r.PlanModel, config.DefaultPlanModel)
+	}
+	if r.AgentModel != "" {
+		t.Errorf("AgentModel = %q, want empty (no --model flag)", r.AgentModel)
+	}
+}
+
+func TestResolve_Models_GlobalOverride(t *testing.T) {
+	g := &config.GlobalSettings{
+		PlanModel:  strPtr("claude-haiku-4-5"),
+		AgentModel: strPtr("claude-opus-4-7"),
+	}
+	r := config.Resolve(g, nil)
+	if r.PlanModel != "claude-haiku-4-5" {
+		t.Errorf("PlanModel = %q, want claude-haiku-4-5", r.PlanModel)
+	}
+	if r.AgentModel != "claude-opus-4-7" {
+		t.Errorf("AgentModel = %q, want claude-opus-4-7", r.AgentModel)
+	}
+}
+
+func TestResolve_Models_RepoOverridesGlobal(t *testing.T) {
+	g := &config.GlobalSettings{
+		PlanModel:  strPtr("global-plan"),
+		AgentModel: strPtr("global-agent"),
+	}
+	repo := &config.RepoSettings{
+		PlanModel:  strPtr("repo-plan"),
+		AgentModel: strPtr("repo-agent"),
+	}
+	r := config.Resolve(g, repo)
+	if r.PlanModel != "repo-plan" {
+		t.Errorf("PlanModel = %q, want repo-plan", r.PlanModel)
+	}
+	if r.AgentModel != "repo-agent" {
+		t.Errorf("AgentModel = %q, want repo-agent", r.AgentModel)
+	}
+}
+
+func TestGlobalSettings_Models_OmitsNilFields(t *testing.T) {
+	s := &config.GlobalSettings{}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(data, &m)
+	if _, ok := m["plan_model"]; ok {
+		t.Error("plan_model should be omitted when nil")
+	}
+	if _, ok := m["agent_model"]; ok {
+		t.Error("agent_model should be omitted when nil")
+	}
+}
+
 func TestResolve_PlanFirst_RepoOverridesGlobal(t *testing.T) {
 	g := &config.GlobalSettings{
 		PlanFirstEnabled:    boolPtr(true),

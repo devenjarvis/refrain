@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/devenjarvis/baton/internal/config"
 )
 
 func TestDefaultPlanDrafter_DraftSuccess(t *testing.T) {
@@ -18,7 +20,7 @@ func TestDefaultPlanDrafter_DraftSuccess(t *testing.T) {
 	writeFakeClaude(t, dir, planMD, 0)
 	withPATH(t, dir)
 
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -32,7 +34,7 @@ func TestDefaultPlanDrafter_DraftSuccess(t *testing.T) {
 }
 
 func TestDefaultPlanDrafter_DraftEmptyPromptError(t *testing.T) {
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -50,7 +52,7 @@ func TestDefaultPlanDrafter_DraftPipesPromptVerbatim(t *testing.T) {
 	writeStdinCapturingClaude(t, dir, stdinFile, "# Goal\nstub")
 	withPATH(t, dir)
 
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -76,7 +78,7 @@ func TestDefaultPlanDrafter_DraftClaudeMissing(t *testing.T) {
 	empty := t.TempDir()
 	t.Setenv("PATH", empty)
 
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -91,7 +93,7 @@ func TestDefaultPlanDrafter_DraftNonZeroExitSurfacesStderr(t *testing.T) {
 	writeFakeClaude(t, dir, "noise", 1)
 	withPATH(t, dir)
 
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -115,7 +117,7 @@ func TestDefaultPlanDrafter_DraftContextCancel(t *testing.T) {
 	writeSlowClaude(t, dir, 10)
 	withPATH(t, dir)
 
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
@@ -138,7 +140,7 @@ func TestDefaultPlanDrafter_DraftStripsBatonHookEnv(t *testing.T) {
 	t.Setenv("BATON_HOOK_SOCKET", "/should/not/leak.sock")
 	t.Setenv("BATON_AGENT_ID", "should-not-leak")
 
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -164,7 +166,7 @@ func TestDefaultPlanDrafter_ReviseSuccess(t *testing.T) {
 	writeFakeClaude(t, dir, revised, 0)
 	withPATH(t, dir)
 
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -181,7 +183,7 @@ func TestDefaultPlanDrafter_ReviseSuccess(t *testing.T) {
 }
 
 func TestDefaultPlanDrafter_ReviseEmptyInputs(t *testing.T) {
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -201,7 +203,7 @@ func TestDefaultPlanDrafter_RevisePipesPlanAndCritique(t *testing.T) {
 	writeStdinCapturingClaude(t, dir, stdinFile, "# Goal\nrevised")
 	withPATH(t, dir)
 
-	d := DefaultPlanDrafter()
+	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -229,12 +231,12 @@ func TestDefaultPlanDrafter_RevisePipesPlanAndCritique(t *testing.T) {
 
 func TestBuildClaudePlannerArgs_UsesSonnet(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	args := buildClaudePlannerArgs("")
+	args := buildClaudePlannerArgs("", "")
 	if args[0] != "-p" {
 		t.Errorf("first arg = %q, want -p", args[0])
 	}
-	if !containsPair(args, "--model", claudeSonnetModel) {
-		t.Errorf("missing --model %s; args=%v", claudeSonnetModel, args)
+	if !containsPair(args, "--model", config.DefaultPlanModel) {
+		t.Errorf("missing --model %s; args=%v", config.DefaultPlanModel, args)
 	}
 	for _, banned := range []string{"claude-haiku-4-5", "claude-haiku-3-5"} {
 		for _, a := range args {
@@ -287,7 +289,7 @@ func TestBuildClaudePlannerArgs_UsesSonnet(t *testing.T) {
 
 func TestBuildClaudePlannerArgs_WithQuestionSocketRegistersMCPServer(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	args := buildClaudePlannerArgs("/tmp/baton-q.sock")
+	args := buildClaudePlannerArgs("", "/tmp/baton-q.sock")
 
 	mcpIdx := -1
 	for i, a := range args {
@@ -338,7 +340,7 @@ func TestBuildClaudePlannerArgs_WithQuestionSocketRegistersMCPServer(t *testing.
 
 func TestBuildClaudePlannerArgs_EmptySocketKeepsZeroServers(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	args := buildClaudePlannerArgs("")
+	args := buildClaudePlannerArgs("", "")
 	mcpIdx := -1
 	for i, a := range args {
 		if a == "--mcp-config" {
@@ -371,16 +373,49 @@ func TestBuildClaudePlannerArgs_EmptySocketKeepsZeroServers(t *testing.T) {
 func TestBuildClaudePlannerArgs_BareGatedByAPIKey(t *testing.T) {
 	t.Run("with API key", func(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "sk-test")
-		args := buildClaudePlannerArgs("")
+		args := buildClaudePlannerArgs("", "")
 		if !contains(args, "--bare") {
 			t.Errorf("expected --bare with ANTHROPIC_API_KEY set; got %v", args)
 		}
 	})
 	t.Run("without API key", func(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "")
-		args := buildClaudePlannerArgs("")
+		args := buildClaudePlannerArgs("", "")
 		if contains(args, "--bare") {
 			t.Errorf("did not expect --bare without ANTHROPIC_API_KEY; got %v", args)
 		}
 	})
+}
+
+func TestBuildClaudePlannerArgs_CustomModel(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	args := buildClaudePlannerArgs("claude-haiku-4-5", "")
+	if !containsPair(args, "--model", "claude-haiku-4-5") {
+		t.Errorf("missing --model claude-haiku-4-5; args=%v", args)
+	}
+	for _, a := range args {
+		if a == config.DefaultPlanModel {
+			t.Errorf("custom model should not also include default %q; args=%v", config.DefaultPlanModel, args)
+		}
+	}
+}
+
+func TestDefaultPlanDrafter_EmptyModelFallsBackToDefault(t *testing.T) {
+	d, ok := DefaultPlanDrafter("").(*defaultPlanDrafter)
+	if !ok {
+		t.Fatalf("DefaultPlanDrafter(\"\") not *defaultPlanDrafter")
+	}
+	if d.Model() != config.DefaultPlanModel {
+		t.Errorf("Model() = %q, want %q", d.Model(), config.DefaultPlanModel)
+	}
+}
+
+func TestDefaultPlanDrafter_NonEmptyModelPreserved(t *testing.T) {
+	d, ok := DefaultPlanDrafter("claude-opus-4-7").(*defaultPlanDrafter)
+	if !ok {
+		t.Fatalf("DefaultPlanDrafter(\"claude-opus-4-7\") not *defaultPlanDrafter")
+	}
+	if d.Model() != "claude-opus-4-7" {
+		t.Errorf("Model() = %q, want claude-opus-4-7", d.Model())
+	}
 }

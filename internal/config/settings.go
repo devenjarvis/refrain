@@ -16,8 +16,15 @@ const (
 	DefaultAgentProgram      = "claude"
 	DefaultWorktreeDir       = ".baton/worktrees"
 	DefaultSidebarWidth      = 30
-	MinSidebarWidth          = 20
-	MaxSidebarWidth          = 60
+
+	// DefaultPlanModel is the model used by the plan drafter subprocess.
+	// Sonnet (not Haiku) is intentional: planning quality compounds
+	// downstream — see the comment on agent.DefaultPlanDrafter for details.
+	// The agent package references this constant rather than declaring its
+	// own so the default stays a single source of truth.
+	DefaultPlanModel = "claude-sonnet-4-6"
+	MinSidebarWidth  = 20
+	MaxSidebarWidth  = 60
 
 	// Wellness defaults.
 	DefaultFocusSessionMinutes = 90
@@ -65,6 +72,8 @@ type GlobalSettings struct {
 	BranchPrefix      *string `json:"branch_prefix,omitempty"`
 	BranchNamePrompt  *string `json:"branch_name_prompt,omitempty"`
 	AgentProgram      *string `json:"agent_program,omitempty"`
+	AgentModel        *string `json:"agent_model,omitempty"`
+	PlanModel         *string `json:"plan_model,omitempty"`
 	IDECommand        *string `json:"ide_command,omitempty"`
 	SidebarWidth      *int    `json:"sidebar_width,omitempty"`
 
@@ -87,6 +96,8 @@ type RepoSettings struct {
 	BranchPrefix        *string `json:"branch_prefix,omitempty"`
 	BranchNamePrompt    *string `json:"branch_name_prompt,omitempty"`
 	AgentProgram        *string `json:"agent_program,omitempty"`
+	AgentModel          *string `json:"agent_model,omitempty"`
+	PlanModel           *string `json:"plan_model,omitempty"`
 	IDECommand          *string `json:"ide_command,omitempty"`
 	WorktreeDir         *string `json:"worktree_dir,omitempty"`
 	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
@@ -102,9 +113,16 @@ type ResolvedSettings struct {
 	BranchPrefix      string
 	BranchNamePrompt  string
 	AgentProgram      string
-	IDECommand        string
-	WorktreeDir       string
-	SidebarWidth      int
+	// AgentModel is the --model flag value passed to spawned `claude`
+	// agents. Empty means "no --model flag" — the Claude CLI picks its
+	// own default.
+	AgentModel string
+	// PlanModel is the --model flag value passed to the plan drafter
+	// subprocess. Defaults to DefaultPlanModel.
+	PlanModel    string
+	IDECommand   string
+	WorktreeDir  string
+	SidebarWidth int
 
 	// Wellness settings.
 	FocusSessionMinutes int
@@ -126,6 +144,7 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		BranchPrefix:        DefaultBranchPrefix,
 		BranchNamePrompt:    DefaultBranchNamePrompt,
 		AgentProgram:        DefaultAgentProgram,
+		PlanModel:           DefaultPlanModel,
 		WorktreeDir:         DefaultWorktreeDir,
 		SidebarWidth:        DefaultSidebarWidth,
 		FocusSessionMinutes: DefaultFocusSessionMinutes,
@@ -154,6 +173,12 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if global.AgentProgram != nil {
 			r.AgentProgram = *global.AgentProgram
+		}
+		if global.AgentModel != nil {
+			r.AgentModel = *global.AgentModel
+		}
+		if global.PlanModel != nil {
+			r.PlanModel = *global.PlanModel
 		}
 		if global.IDECommand != nil {
 			r.IDECommand = *global.IDECommand
@@ -196,6 +221,12 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if repo.AgentProgram != nil {
 			r.AgentProgram = *repo.AgentProgram
+		}
+		if repo.AgentModel != nil {
+			r.AgentModel = *repo.AgentModel
+		}
+		if repo.PlanModel != nil {
+			r.PlanModel = *repo.PlanModel
 		}
 		if repo.IDECommand != nil {
 			r.IDECommand = *repo.IDECommand

@@ -602,6 +602,53 @@ func TestStopHookNoAskingQuestionWithoutTrailingQuestion(t *testing.T) {
 	}
 }
 
+func TestBuildSpawnArgs_AgentModel(t *testing.T) {
+	wt := t.TempDir()
+	tests := []struct {
+		name     string
+		cfg      Config
+		wantArgs []string
+	}{
+		{
+			name:     "model prepended for default claude program",
+			cfg:      Config{AgentModel: "claude-opus-4-7", BypassPermissions: true, Task: "do stuff"},
+			wantArgs: []string{"--model", "claude-opus-4-7", "--dangerously-skip-permissions", "do stuff"},
+		},
+		{
+			name:     "empty model no flag",
+			cfg:      Config{BypassPermissions: true, Task: "hi"},
+			wantArgs: []string{"--dangerously-skip-permissions", "hi"},
+		},
+		{
+			name:     "model ignored for non-claude program",
+			cfg:      Config{AgentProgram: "bash", AgentModel: "claude-opus-4-7", Task: "hi"},
+			wantArgs: []string{"hi"},
+		},
+		{
+			name:     "model without bypass or task",
+			cfg:      Config{AgentModel: "claude-sonnet-4-6"},
+			wantArgs: []string{"--model", "claude-sonnet-4-6"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Pass empty socketPath so buildHookArgs returns no --settings pair.
+			got, err := buildSpawnArgs(tt.cfg, wt, "")
+			if err != nil {
+				t.Fatalf("buildSpawnArgs error: %v", err)
+			}
+			if len(got) != len(tt.wantArgs) {
+				t.Fatalf("expected %d args, got %d: %v", len(tt.wantArgs), len(got), got)
+			}
+			for i, want := range tt.wantArgs {
+				if got[i] != want {
+					t.Errorf("arg[%d]: expected %q, got %q (full=%v)", i, want, got[i], got)
+				}
+			}
+		})
+	}
+}
+
 func TestUserPromptSubmitClearsAskingQuestion(t *testing.T) {
 	repo := setupTestRepo(t)
 	mgr := NewManager(repo, defaultTestSettings())

@@ -148,7 +148,7 @@ func NewManager(repoPath string, settings config.ResolvedSettings) *Manager {
 		done:             make(chan struct{}),
 		branchNamer:      DefaultBranchNamer(),
 		taskSummarizer:   DefaultTaskSummarizer(),
-		planDrafter:      DefaultPlanDrafter(),
+		planDrafter:      DefaultPlanDrafter(settings.PlanModel),
 		plannerQuestions: make(chan PlannerQuestion, 8),
 	}
 
@@ -880,10 +880,20 @@ func (m *Manager) FindAgentAndSession(agentID string) (*Agent, *Session) {
 
 // UpdateSettings replaces the manager's resolved settings.
 // New sessions will use the updated values; existing sessions are unaffected.
+//
+// If the resolved PlanModel changed and the current planDrafter is still the
+// package default (i.e. tests haven't injected a mock via SetPlanDrafter),
+// the drafter is rebuilt with the new model so the next StartDraft picks up
+// the change without requiring a baton restart. A test-injected drafter is
+// left alone — overriding it here would silently break SetPlanDrafter's
+// contract.
 func (m *Manager) UpdateSettings(s config.ResolvedSettings) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.settings = s
+	if d, ok := m.planDrafter.(*defaultPlanDrafter); ok && d.Model() != s.PlanModel {
+		m.planDrafter = DefaultPlanDrafter(s.PlanModel)
+	}
 }
 
 // Settings returns the current resolved settings.
@@ -1590,6 +1600,7 @@ func (m *Manager) ResumeSession(ss state.SessionState, cfg Config) error {
 			RepoPath:          m.repoPath,
 			BypassPermissions: cfg.BypassPermissions,
 			AgentProgram:      settings.AgentProgram,
+			AgentModel:        settings.AgentModel,
 		}
 
 		a, err := sess.AddAgentResumed(agentCfg, as.ClaudeSessionID)

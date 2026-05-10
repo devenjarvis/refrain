@@ -57,6 +57,11 @@ type Config struct {
 	RepoPath          string
 	BypassPermissions bool
 	AgentProgram      string // CLI program to spawn; defaults to "claude" if empty
+	// AgentModel, when non-empty, is forwarded as `--model <AgentModel>` to
+	// spawned `claude` agents. Empty means "no --model flag" (Claude CLI
+	// picks its own default). Ignored when AgentProgram is not `claude` —
+	// passing --model to a custom binary is undefined.
+	AgentModel string
 }
 
 // agentProgram returns the CLI program from cfg, defaulting to "claude".
@@ -179,6 +184,12 @@ func newResumedAgent(
 func buildResumeArgs(cfg Config, claudeSessionID string) []string {
 	var args []string
 
+	// --model goes before --dangerously-skip-permissions so flags stay
+	// grouped before the positional --resume/--continue/Task args.
+	if cfg.AgentModel != "" && supportsHooks(cfg) {
+		args = append(args, "--model", cfg.AgentModel)
+	}
+
 	if cfg.BypassPermissions {
 		args = append(args, "--dangerously-skip-permissions")
 	}
@@ -202,6 +213,12 @@ func buildSpawnArgs(cfg Config, worktreePath, socketPath string) ([]string, erro
 	args, err := buildHookArgs(cfg, worktreePath, socketPath)
 	if err != nil {
 		return nil, err
+	}
+	// --model goes before --dangerously-skip-permissions so flags stay
+	// grouped before the positional Task arg. Only applied when the program
+	// is claude — passing --model to a custom binary is undefined.
+	if cfg.AgentModel != "" && supportsHooks(cfg) {
+		args = append(args, "--model", cfg.AgentModel)
 	}
 	if cfg.BypassPermissions {
 		args = append(args, "--dangerously-skip-permissions")
