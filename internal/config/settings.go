@@ -68,6 +68,21 @@ If a file at .claude/plan.md exists in the worktree, the commit subject MUST sta
 Do not squash unrelated work into a single commit, and do not amend a previous commit to add new task work — each task is its own commit so the work can be reviewed task-by-task.`
 )
 
+// KnownModels is the list of Claude model IDs offered in the config form
+// dropdowns for fields that pass `--model` to a real subprocess (e.g. the
+// plan drafter). The first entry is the form's default selection.
+var KnownModels = []string{
+	"claude-opus-4-7",
+	"claude-sonnet-4-6",
+	"claude-haiku-4-5-20251001",
+}
+
+// KnownAgentModels is the option list for the Agent Model dropdown. The
+// leading empty string represents "claude default" — when selected, no
+// `--model` flag is forwarded to the spawned agent and Claude picks its own
+// default.
+var KnownAgentModels = append([]string{""}, KnownModels...)
+
 // ClampSidebarWidth returns w constrained to [MinSidebarWidth, MaxSidebarWidth].
 func ClampSidebarWidth(w int) int {
 	if w < MinSidebarWidth {
