@@ -459,6 +459,13 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 	if !sess.DoneAt().IsZero() {
 		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ finished — awaiting prompt")
 	}
+	if sess.LifecyclePhase() == agent.LifecycleInProgress {
+		if ag := sess.PrimaryAgent(); ag != nil {
+			if badge := buildingProgressBadge(ag.Todos(), activeCount); badge != "" {
+				return badge
+			}
+		}
+	}
 	return StyleSubtle.Render(fmt.Sprintf("%d active, %d idle", activeCount, idleCount))
 }
 
@@ -578,14 +585,15 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	if descBudget < 1 {
 		descBudget = 1
 	}
-	var descText string
+	var descLine1, descLine2 string
 	var descPending bool
 	if planningPhase {
+		var descText string
 		descText, descPending = planningDescription(sess)
+		descLine1, descLine2 = wrapTwoLines(descText, descBudget)
 	} else {
-		descText, descPending = focusTaskDescription(sess)
+		descLine1, descLine2, descPending = focusTaskDescription(sess, descBudget)
 	}
-	descLine1, descLine2 := wrapTwoLines(descText, descBudget)
 	descStyle := StyleSubtle
 	if descPending {
 		descStyle = lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
@@ -763,22 +771,86 @@ func firstUncompletedTask(plan string) string {
 	return ""
 }
 
-// focusTaskDescription chooses the description string for a session card in
-// focus mode and reports whether it should render in pending (italic) style.
-// Mirrors the legacy renderFocusSessionCard switch so callers stay consistent
-// with sessionFocusStatus regarding which signal wins.
-func focusTaskDescription(sess *agent.Session) (text string, pending bool) {
+// buildingProgressBadge returns a styled "▸ done/total · N active" badge for
+// a Building-phase session that has received ≥1 TodoWrite. Returns "" when
+// todos is empty so the caller can fall back to the normal "N active, M idle"
+// string. Status conditions (error/waiting/asking) must preempt this badge —
+// the caller is responsible for that guard.
+func buildingProgressBadge(todos []agent.TodoItem, activeCount int) string {
+	if len(todos) == 0 {
+		return ""
+	}
+	total := len(todos)
+	done := 0
+	for _, t := range todos {
+		if t.Status == "completed" {
+			done++
+		}
+	}
+	badge := fmt.Sprintf("▸ %d/%d", done, total)
+	if activeCount > 0 {
+		badge += fmt.Sprintf(" · %d active", activeCount)
+	}
+	return StyleSubtle.Render(badge)
+}
+
+// focusTaskDescription chooses the description lines for a session card in
+// focus mode and reports whether they should render in pending (italic) style.
+// For Building-phase sessions that have received ≥1 TodoWrite, line1 shows the
+// active task's activeForm and line2 shows the next pending task. Otherwise
+// the text is word-wrapped into two lines by wrapTwoLines.
+func focusTaskDescription(sess *agent.Session, budget int) (line1, line2 string, pending bool) {
+	if sess.LifecyclePhase() == agent.LifecycleInProgress {
+		if ag := sess.PrimaryAgent(); ag != nil {
+			todos := ag.Todos()
+			if len(todos) > 0 {
+				var activeText, nextPending string
+				for _, t := range todos {
+					if t.Status == "in_progress" {
+						activeText = t.ActiveForm
+						if activeText == "" {
+							activeText = t.Content
+						}
+						break
+					}
+				}
+				for _, t := range todos {
+					if t.Status == "pending" {
+						nextPending = t.Content
+						break
+					}
+				}
+				if activeText == "" && nextPending != "" {
+					activeText = nextPending
+					nextPending = ""
+				}
+				if activeText != "" {
+					l1 := truncateVisible("▸ "+activeText, budget)
+					var l2 string
+					if nextPending != "" {
+						l2 = truncateVisible("next: "+nextPending, budget)
+					}
+					return l1, l2, false
+				}
+			}
+		}
+	}
+
 	origPrompt := sess.OriginalPrompt()
+	var text string
+	var pend bool
 	switch {
 	case sess.HasTaskSummary() && sess.TaskSummary() != "":
-		return sess.TaskSummary(), false
+		text, pend = sess.TaskSummary(), false
 	case sess.HasTaskSummary() && sess.TaskSummary() == "":
-		return origPrompt, false
+		text, pend = origPrompt, false
 	case !sess.HasTaskSummary() && origPrompt != "":
-		return origPrompt, true
+		text, pend = origPrompt, true
 	default:
-		return "…", false
+		text, pend = "…", false
 	}
+	l1, l2 := wrapTwoLines(text, budget)
+	return l1, l2, pend
 }
 
 // wrapTwoLines greedily word-wraps s into at most two lines of `budget`
