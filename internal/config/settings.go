@@ -28,8 +28,8 @@ const (
 	// Sonnet matches the planner default — reviewer output quality directly affects
 	// the developer's confidence in the review verdict.
 	DefaultReviewerModel = "claude-sonnet-4-6"
-	MinSidebarWidth  = 20
-	MaxSidebarWidth  = 60
+	MinSidebarWidth      = 20
+	MaxSidebarWidth      = 60
 
 	// Wellness defaults.
 	DefaultFocusSessionMinutes = 90
@@ -166,8 +166,8 @@ type ResolvedSettings struct {
 	// subprocesses. Defaults to DefaultReviewerModel.
 	ReviewerModel string
 	IDECommand    string
-	WorktreeDir  string
-	SidebarWidth int
+	WorktreeDir   string
+	SidebarWidth  int
 
 	// Wellness settings.
 	FocusSessionMinutes int

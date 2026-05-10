@@ -96,24 +96,18 @@ func buildReviewPrompt(req ReviewRequest) string {
 	return fmt.Sprintf(reviewPromptTemplate, prompt, req.TaskIndex, req.TaskText, diff)
 }
 
-func (r *defaultReviewerAgent) Review(ctx context.Context, req ReviewRequest) (ReviewVerdict, error) {
-	claudePath, err := exec.LookPath("claude")
-	if err != nil {
-		return ReviewVerdict{}, fmt.Errorf("%w: %v", ErrClaudeNotFound, err)
-	}
-
-	model := r.model
-	if model == "" {
-		model = config.DefaultReviewerModel
-	}
-
+// buildReviewerArgs returns the argv (excluding the binary path) for the
+// reviewer subprocess. Mirrors buildClaudeHaikuArgs / buildClaudePlannerArgs:
+// read-only tools only, no MCP servers, no session persistence. --bare is
+// added when ANTHROPIC_API_KEY is set (disables hooks, keychain reads, etc.).
+func buildReviewerArgs(model string) []string {
 	args := []string{"-p", "--model", model}
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		args = append(args, "--bare")
 	}
-	// Read-only tools only — the reviewer inspects code, it does not write it.
 	tools := "Read,Grep,Glob,LS"
-	args = append(args,
+	args = append(
+		args,
 		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 		"--disable-slash-commands",
 		"--no-session-persistence",
@@ -122,8 +116,16 @@ func (r *defaultReviewerAgent) Review(ctx context.Context, req ReviewRequest) (R
 		"--setting-sources", "user,project",
 		"--exclude-dynamic-system-prompt-sections",
 	)
+	return args
+}
 
-	cmd := exec.CommandContext(ctx, claudePath, args...)
+func (r *defaultReviewerAgent) Review(ctx context.Context, req ReviewRequest) (ReviewVerdict, error) {
+	claudePath, err := exec.LookPath("claude")
+	if err != nil {
+		return ReviewVerdict{}, fmt.Errorf("%w: %v", ErrClaudeNotFound, err)
+	}
+
+	cmd := exec.CommandContext(ctx, claudePath, buildReviewerArgs(r.model)...)
 	cmd.Stdin = strings.NewReader(buildReviewPrompt(req))
 	cmd.Env = sanitizedHaikuEnv(os.Environ())
 	cmd.WaitDelay = 500 * time.Millisecond

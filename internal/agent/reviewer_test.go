@@ -113,14 +113,61 @@ func TestGroupCommitsByTask_NoOtherBucket(t *testing.T) {
 	}
 }
 
+// TestBuildReviewerArgs_NoBare verifies --bare is absent without an API key.
+func TestBuildReviewerArgs_NoBare(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	args := buildReviewerArgs("claude-sonnet-4-6")
+	for _, a := range args {
+		if a == "--bare" {
+			t.Error("--bare must not be present when ANTHROPIC_API_KEY is unset")
+		}
+	}
+}
+
+// TestBuildReviewerArgs_BareWithKey verifies --bare is present when ANTHROPIC_API_KEY is set.
+func TestBuildReviewerArgs_BareWithKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	args := buildReviewerArgs("claude-sonnet-4-6")
+	hasBare := false
+	for _, a := range args {
+		if a == "--bare" {
+			hasBare = true
+		}
+	}
+	if !hasBare {
+		t.Error("expected --bare when ANTHROPIC_API_KEY is set")
+	}
+}
+
+// TestBuildReviewerArgs_RequiredFlags verifies the read-only tool flags and
+// no-session-persistence are always present.
+func TestBuildReviewerArgs_RequiredFlags(t *testing.T) {
+	args := buildReviewerArgs("claude-sonnet-4-6")
+	want := map[string]bool{
+		"--no-session-persistence": false,
+		"--tools":                  false,
+		"--allowed-tools":          false,
+	}
+	for _, a := range args {
+		if _, ok := want[a]; ok {
+			want[a] = true
+		}
+	}
+	for flag, found := range want {
+		if !found {
+			t.Errorf("expected flag %q in buildReviewerArgs output", flag)
+		}
+	}
+}
+
 // TestParseReviewerOutput covers the structured VERDICT/RATIONALE format.
 func TestParseReviewerOutput(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
-		wantKind  VerdictKind
-		wantRat   string
-		wantErr   bool
+		name     string
+		input    string
+		wantKind VerdictKind
+		wantRat  string
+		wantErr  bool
 	}{
 		{
 			name:     "pass verdict",

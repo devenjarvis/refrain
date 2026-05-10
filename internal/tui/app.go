@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -984,6 +985,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if len(cmds) > 0 {
 					return a, tea.Batch(cmds...)
+				}
+				// Reviewer unavailable (nil reviewer or nil session): mark all
+				// pending verdicts as error so they don't stay at "···" forever.
+				for _, rec := range msg.entry.verdicts {
+					if rec.state == verdictPending {
+						rec.state = verdictErr
+						rec.err = errors.New("reviewer unavailable")
+					}
 				}
 			}
 		}
@@ -3896,7 +3905,7 @@ type reviewDiffEntry struct {
 
 	// Plan-driven fields; non-nil only when the session has a plan.
 	tasks    []agent.PlanTask
-	groups   []taskReviewGroup        // per-task + "other" commit groups
+	groups   []taskReviewGroup          // per-task + "other" commit groups
 	verdicts map[int]*taskVerdictRecord // keyed by taskIndex (0 = other)
 }
 

@@ -859,7 +859,7 @@ type PlanTask struct {
 // every "- [ ]" or "- [x]" line (leading whitespace stripped) is a task,
 // indexed 1-based in the order they appear. Section headers are ignored.
 func ParsePlanTasks(plan string) []PlanTask {
-	var tasks []PlanTask
+	tasks := make([]PlanTask, 0, 16)
 	idx := 0
 	for _, raw := range strings.Split(plan, "\n") {
 		line := strings.TrimLeft(raw, " \t")

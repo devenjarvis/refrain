@@ -70,7 +70,13 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	if entry == nil {
 		lines = append(lines, StyleSubtle.Render("loading diff stats…"))
 	} else if len(entry.tasks) > 0 || len(entry.groups) > 0 {
-		lines = append(lines, renderTaskList(entry, width, cursor)...)
+		// Overhead: header(1) + divider(1) + "ORIGINAL INTENT"(1) + intent(≤6) +
+		// blank(1) + divider(1) + blank(1) + divider(1) + hints(1) = 14 max.
+		taskListHeight := height - 14
+		if taskListHeight < 4 {
+			taskListHeight = 4
+		}
+		lines = append(lines, renderTaskList(entry, width, taskListHeight, cursor)...)
 	} else {
 		// No plan — fall back to the aggregate file view.
 		leftWidth := (width - 4) / 2
@@ -125,11 +131,11 @@ func (e *reviewDiffEntry) getGroups() []taskReviewGroup {
 	return e.groups
 }
 
-// renderTaskList renders the scrollable per-task review rows.
-func renderTaskList(entry *reviewDiffEntry, width, cursor int) []string {
-	var lines []string
-	lines = append(lines, StyleSubtle.Render("PLAN TASKS"))
-	lines = append(lines, "")
+// renderTaskList renders the scrollable per-task review rows. availHeight
+// controls the visible window; the list scrolls so the cursor stays visible.
+func renderTaskList(entry *reviewDiffEntry, width, availHeight, cursor int) []string {
+	const headerLines = 2 // "PLAN TASKS" + blank
+	header := []string{StyleSubtle.Render("PLAN TASKS"), ""}
 
 	// Build a merged view: one row per plan task, plus the "Other changes" group.
 	type row struct {
@@ -145,7 +151,7 @@ func renderTaskList(entry *reviewDiffEntry, width, cursor int) []string {
 		groupByIdx[g.taskIndex] = g
 	}
 
-	var rows []row
+	rows := make([]row, 0, len(entry.tasks)+1)
 	for _, t := range entry.tasks {
 		g := groupByIdx[t.Index]
 		rows = append(rows, row{taskIndex: t.Index, taskText: t.Text, group: g})
@@ -153,6 +159,22 @@ func renderTaskList(entry *reviewDiffEntry, width, cursor int) []string {
 	// Append "other" group if it exists.
 	if other, ok := groupByIdx[0]; ok {
 		rows = append(rows, row{taskIndex: 0, taskText: "Other changes", group: other})
+	}
+
+	// Compute visible window so the cursor stays centred.
+	rowsH := availHeight - headerLines
+	if rowsH < 1 {
+		rowsH = 1
+	}
+	offset := cursor - rowsH/2
+	if offset < 0 {
+		offset = 0
+	}
+	if offset+rowsH > len(rows) {
+		offset = len(rows) - rowsH
+		if offset < 0 {
+			offset = 0
+		}
 	}
 
 	cursorStyle := lipgloss.NewStyle().
@@ -165,7 +187,15 @@ func renderTaskList(entry *reviewDiffEntry, width, cursor int) []string {
 	subtleGreen := lipgloss.NewStyle().Foreground(lipgloss.Color("#7ed321"))
 	subtleRed := lipgloss.NewStyle().Foreground(lipgloss.Color("#e74c3c"))
 
-	for i, r := range rows {
+	end := offset + rowsH
+	if end > len(rows) {
+		end = len(rows)
+	}
+	lines := make([]string, 0, headerLines+end-offset)
+	lines = append(lines, header...)
+
+	for i := offset; i < end; i++ {
+		r := rows[i]
 		selected := i == cursor
 
 		// Task index label and text.

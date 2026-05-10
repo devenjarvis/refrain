@@ -163,8 +163,8 @@ func TestReviewTaskGroupAtCursor(t *testing.T) {
 	}{
 		{0, 1, false},
 		{1, 2, false},
-		{2, 0, false},  // "Other changes"
-		{3, 0, true},   // out of range
+		{2, 0, false}, // "Other changes"
+		{3, 0, true},  // out of range
 	}
 	for _, tt := range tests {
 		got := reviewTaskGroupAtCursor(entry, tt.cursor)
