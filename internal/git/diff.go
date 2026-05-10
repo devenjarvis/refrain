@@ -57,6 +57,50 @@ func LogCommitsAgainstBase(wt *WorktreeInfo) ([]Commit, error) {
 	return commits, nil
 }
 
+// DiffForCommits returns per-file stats, aggregate stats, and raw unified diff
+// for an arbitrary slice of commit hashes in the given worktree. The hashes
+// are assumed to be in oldest-first order and to form a contiguous run on their
+// branch; the diff is computed as `git diff <first>^..<last>` so intermediate
+// commits collapse into a single coherent change set. An empty slice returns
+// zero values. A single hash uses `<hash>^..<hash>` which equals `git show`.
+func DiffForCommits(wt *WorktreeInfo, hashes []string) ([]FileStat, *DiffStats, string, error) {
+	if len(hashes) == 0 {
+		return nil, &DiffStats{}, "", nil
+	}
+	first, last := hashes[0], hashes[len(hashes)-1]
+	rangeSpec := first + "^.." + last
+
+	rawDiff, err := runGitRaw(wt.Path, "diff", rangeSpec)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("diff for commits: %w", err)
+	}
+
+	numstatOut, err := runGit(wt.Path, "diff", "--numstat", "--diff-filter=AMD", rangeSpec)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("diff numstat for commits: %w", err)
+	}
+	nameStatusOut, err := runGit(wt.Path, "diff", "--name-status", "--diff-filter=AMD", rangeSpec)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("diff name-status for commits: %w", err)
+	}
+
+	fileMap := make(map[string]*FileStat)
+	parseNumstat(numstatOut, fileMap)
+	parseNameStatus(nameStatusOut, fileMap)
+
+	result := make([]FileStat, 0, len(fileMap))
+	agg := &DiffStats{}
+	for _, fs := range fileMap {
+		result = append(result, *fs)
+		agg.Files++
+		agg.Insertions += fs.Insertions
+		agg.Deletions += fs.Deletions
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
+
+	return result, agg, rawDiff, nil
+}
+
 // DiffStats holds summary statistics for a diff.
 type DiffStats struct {
 	Files      int
