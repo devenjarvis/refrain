@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -874,6 +876,60 @@ func ParsePlanTasks(plan string) []PlanTask {
 		tasks = append(tasks, PlanTask{Index: idx, Text: text, Done: done})
 	}
 	return tasks
+}
+
+// taskSubjectRE matches "[task N]" at the start of a commit subject where N is
+// a positive integer. Case-insensitive so "[Task 3]" is also accepted.
+var taskSubjectRE = regexp.MustCompile(`(?i)^\[task\s+(\d+)\]`)
+
+// CommitGroup holds the commits associated with a single plan task (or the
+// "other" bucket for commits without a recognizable [task N] prefix).
+type CommitGroup struct {
+	// TaskIndex is 1-based and matches the PlanTask.Index it belongs to.
+	// Zero means the group is the "Other changes" bucket (no [task N] prefix
+	// and/or uncommitted working-tree changes).
+	TaskIndex int
+	Commits   []git.Commit
+}
+
+// GroupCommitsByTask partitions commits by their "[task N]" subject prefix.
+// Commits without the prefix land in a group with TaskIndex=0 ("Other
+// changes"). Within each group, commits preserve their input order (oldest
+// first). The returned slice is sorted by TaskIndex ascending, with the
+// TaskIndex=0 group appended last so it renders at the bottom of the review
+// task list.
+func GroupCommitsByTask(commits []git.Commit) []CommitGroup {
+	byIndex := make(map[int]*CommitGroup)
+	for _, c := range commits {
+		idx := 0
+		if m := taskSubjectRE.FindStringSubmatch(c.Subject); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+				idx = n
+			}
+		}
+		if byIndex[idx] == nil {
+			byIndex[idx] = &CommitGroup{TaskIndex: idx}
+		}
+		byIndex[idx].Commits = append(byIndex[idx].Commits, c)
+	}
+
+	// Collect and sort task-indexed groups; append "other" (0) last.
+	var groups []CommitGroup
+	var otherGroup *CommitGroup
+	for idx, g := range byIndex {
+		if idx == 0 {
+			otherGroup = g
+		} else {
+			groups = append(groups, *g)
+		}
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].TaskIndex < groups[j].TaskIndex
+	})
+	if otherGroup != nil {
+		groups = append(groups, *otherGroup)
+	}
+	return groups
 }
 
 // PlanPath returns the absolute path to the session's plan markdown file
