@@ -215,12 +215,17 @@ func buildClaudePlannerArgs(model, questionSocket string) []string {
 		tools += "," + plannerQuestionToolName
 	}
 
+	// --tools filters which tools are visible (keeps Bash/Edit/Write hidden even
+	// if Claude's default set expands). --allowed-tools auto-approves those same
+	// tools so the non-interactive -p subprocess never hits a permission gate.
+	// Both flags are required: --tools alone only controls availability, not approval.
 	args = append(
 		args,
 		"--strict-mcp-config", "--mcp-config", mcpConfig,
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--tools", tools,
+		"--allowed-tools", tools,
 		"--setting-sources", "user,project",
 		"--exclude-dynamic-system-prompt-sections",
 	)
