@@ -230,8 +230,14 @@ func buildClaudePlannerArgs(model, questionSocket string) []string {
 // plannerMCPConfigJSON renders the --mcp-config payload. With an empty
 // socket path it returns the canonical `{"mcpServers":{}}` shape required
 // by claude's strict validator. With a socket path it adds a single server
-// entry that re-execs the running baton binary as the question bridge; the
-// socket itself is passed via env on the parent so the child inherits it.
+// entry that re-execs the running baton binary as the question bridge.
+//
+// The socket path is also written into the server entry's env map so it
+// reaches the MCP child reliably. Setting it on the parent claude process
+// alone is not enough: Claude Code does not always forward its full env to
+// MCP subprocess hosts, and a missing BATON_PLANNER_QUESTION_SOCKET makes
+// the bridge exit silently — the planner then sees ask_user as a tool error
+// and moves past without surfacing the question to the editor.
 func plannerMCPConfigJSON(questionSocket string) string {
 	if questionSocket == "" {
 		return `{"mcpServers":{}}`
@@ -252,6 +258,9 @@ func plannerMCPConfigJSON(questionSocket string) string {
 			plannerQuestionMCPName: map[string]any{
 				"command": bin,
 				"args":    []string{"planner-question-server"},
+				"env": map[string]any{
+					PlannerQuestionSocketEnv: questionSocket,
+				},
 			},
 		},
 	}

@@ -289,7 +289,8 @@ func TestBuildClaudePlannerArgs_UsesSonnet(t *testing.T) {
 
 func TestBuildClaudePlannerArgs_WithQuestionSocketRegistersMCPServer(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	args := buildClaudePlannerArgs("", "/tmp/baton-q.sock")
+	const socketPath = "/tmp/baton-q.sock"
+	args := buildClaudePlannerArgs("", socketPath)
 
 	mcpIdx := -1
 	for i, a := range args {
@@ -320,6 +321,18 @@ func TestBuildClaudePlannerArgs_WithQuestionSocketRegistersMCPServer(t *testing.
 	gotArgs, _ := server["args"].([]any)
 	if !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Errorf("mcp server args = %v, want %v", gotArgs, wantArgs)
+	}
+
+	// The MCP server entry must explicitly carry the socket path in its env
+	// map so Claude Code passes it to the spawned MCP child regardless of
+	// how it manages parent-env inheritance for subprocess hosts.
+	env, ok := server["env"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcp server entry missing env map: %v", server)
+	}
+	gotSocket, _ := env[PlannerQuestionSocketEnv].(string)
+	if gotSocket != socketPath {
+		t.Errorf("mcp server env[%s] = %q, want %q", PlannerQuestionSocketEnv, gotSocket, socketPath)
 	}
 
 	// The fully-qualified ask_user tool name must be on the --tools allowlist.
