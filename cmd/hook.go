@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/devenjarvis/baton/internal/hook"
 	"github.com/spf13/cobra"
@@ -102,8 +104,29 @@ func runHook(cmd *cobra.Command, args []string) error {
 		e.ToolInput = payload.ToolInput
 	}
 
+	if os.Getenv("BATON_HOOK_DEBUG") != "" {
+		hookDebugLog(socketPath, kind, payload.ToolName, e.ToolInput, raw)
+	}
+
 	if err := hook.SendEvent(socketPath, e); err != nil {
 		fmt.Fprintln(os.Stderr, "baton hook: forwarding event:", err)
 	}
 	return nil
+}
+
+// hookDebugLog appends a debug line to .baton/logs/hooks.log when BATON_HOOK_DEBUG is set.
+// socketPath is used to derive the .baton directory — it lives at <repo>/.baton/hook.sock.
+func hookDebugLog(socketPath string, kind hook.Kind, toolName string, toolInput json.RawMessage, raw []byte) {
+	dir := filepath.Join(filepath.Dir(socketPath), "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "hooks.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	ts := time.Now().Format(time.RFC3339)
+	fmt.Fprintf(f, "%s kind=%s tool_name=%q tool_input_len=%d raw_len=%d\n",
+		ts, kind, toolName, len(toolInput), len(raw))
 }

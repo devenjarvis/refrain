@@ -542,11 +542,18 @@ func (a *Agent) OnHookEvent(e hook.Event) (changed bool) {
 			var inp struct {
 				Todos []TodoItem `json:"todos"`
 			}
-			if err := json.Unmarshal(e.ToolInput, &inp); err == nil {
+			if err := json.Unmarshal(e.ToolInput, &inp); err != nil {
+				if os.Getenv("BATON_HOOK_DEBUG") != "" {
+					fmt.Fprintf(os.Stderr, "baton: TodoWrite unmarshal err=%v input=%s\n", err, e.ToolInput)
+				}
+			} else {
 				a.todos = make([]TodoItem, len(inp.Todos))
 				copy(a.todos, inp.Todos)
 				a.todosUpdatedAt = time.Now()
 				todosChanged = true
+				if os.Getenv("BATON_HOOK_DEBUG") != "" {
+					fmt.Fprintf(os.Stderr, "baton: TodoWrite populated todos=%d\n", len(a.todos))
+				}
 			}
 		}
 		if a.status != StatusActive {
