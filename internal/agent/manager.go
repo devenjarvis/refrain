@@ -76,6 +76,7 @@ type Manager struct {
 	branchNamer    BranchNamer
 	taskSummarizer TaskSummarizer
 	planDrafter    PlanDrafter
+	reviewerAgent  ReviewerAgent
 
 	// plannerQuestions aggregates ask_user calls from every in-flight draft's
 	// per-session question server. The TUI App reads from PlannerQuestions()
@@ -149,6 +150,7 @@ func NewManager(repoPath string, settings config.ResolvedSettings) *Manager {
 		branchNamer:      DefaultBranchNamer(),
 		taskSummarizer:   DefaultTaskSummarizer(),
 		planDrafter:      DefaultPlanDrafter(settings.PlanModel),
+		reviewerAgent:    DefaultReviewerAgent(settings.ReviewerModel),
 		plannerQuestions: make(chan PlannerQuestion, 8),
 	}
 
@@ -204,6 +206,22 @@ func (m *Manager) SetPlanDrafter(p PlanDrafter) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.planDrafter = p
+}
+
+// SetReviewerAgent overrides the ReviewerAgent used for per-task code review
+// subprocesses. Intended for tests so they can stub out the Sonnet subprocess.
+// Safe to call while the manager is running — the agent is swapped atomically.
+func (m *Manager) SetReviewerAgent(r ReviewerAgent) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reviewerAgent = r
+}
+
+// ReviewerAgent returns the current ReviewerAgent under a read lock.
+func (m *Manager) ReviewerAgent() ReviewerAgent {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.reviewerAgent
 }
 
 // getTaskSummarizer returns the current TaskSummarizer under a read lock.

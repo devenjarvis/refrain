@@ -23,8 +23,13 @@ const (
 	// The agent package references this constant rather than declaring its
 	// own so the default stays a single source of truth.
 	DefaultPlanModel = "claude-sonnet-4-6"
-	MinSidebarWidth  = 20
-	MaxSidebarWidth  = 60
+
+	// DefaultReviewerModel is the model used by the per-task reviewer subprocess.
+	// Sonnet matches the planner default — reviewer output quality directly affects
+	// the developer's confidence in the review verdict.
+	DefaultReviewerModel = "claude-sonnet-4-6"
+	MinSidebarWidth      = 20
+	MaxSidebarWidth      = 60
 
 	// Wellness defaults.
 	DefaultFocusSessionMinutes = 90
@@ -114,6 +119,9 @@ type GlobalSettings struct {
 	MaxConcurrentAgents *int `json:"max_concurrent_agents,omitempty"`
 	MaxReviewBacklog    *int `json:"max_review_backlog,omitempty"`
 
+	// ReviewerModel overrides the model used for per-task review subprocesses.
+	ReviewerModel *string `json:"reviewer_model,omitempty"`
+
 	// Plan-first planning. Both fields are also overridable per-repo.
 	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
 	BuildFromPlanPrompt *string `json:"build_from_plan_prompt,omitempty"`
@@ -130,6 +138,7 @@ type RepoSettings struct {
 	AgentProgram        *string `json:"agent_program,omitempty"`
 	AgentModel          *string `json:"agent_model,omitempty"`
 	PlanModel           *string `json:"plan_model,omitempty"`
+	ReviewerModel       *string `json:"reviewer_model,omitempty"`
 	IDECommand          *string `json:"ide_command,omitempty"`
 	WorktreeDir         *string `json:"worktree_dir,omitempty"`
 	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
@@ -152,10 +161,13 @@ type ResolvedSettings struct {
 	AgentModel string
 	// PlanModel is the --model flag value passed to the plan drafter
 	// subprocess. Defaults to DefaultPlanModel.
-	PlanModel    string
-	IDECommand   string
-	WorktreeDir  string
-	SidebarWidth int
+	PlanModel string
+	// ReviewerModel is the --model flag value passed to per-task reviewer
+	// subprocesses. Defaults to DefaultReviewerModel.
+	ReviewerModel string
+	IDECommand    string
+	WorktreeDir   string
+	SidebarWidth  int
 
 	// Wellness settings.
 	FocusSessionMinutes int
@@ -182,6 +194,7 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		BranchNamePrompt:    DefaultBranchNamePrompt,
 		AgentProgram:        DefaultAgentProgram,
 		PlanModel:           DefaultPlanModel,
+		ReviewerModel:       DefaultReviewerModel,
 		WorktreeDir:         DefaultWorktreeDir,
 		SidebarWidth:        DefaultSidebarWidth,
 		FocusSessionMinutes: DefaultFocusSessionMinutes,
@@ -217,6 +230,9 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if global.PlanModel != nil {
 			r.PlanModel = *global.PlanModel
+		}
+		if global.ReviewerModel != nil {
+			r.ReviewerModel = *global.ReviewerModel
 		}
 		if global.IDECommand != nil {
 			r.IDECommand = *global.IDECommand
@@ -268,6 +284,9 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if repo.PlanModel != nil {
 			r.PlanModel = *repo.PlanModel
+		}
+		if repo.ReviewerModel != nil {
+			r.ReviewerModel = *repo.ReviewerModel
 		}
 		if repo.IDECommand != nil {
 			r.IDECommand = *repo.IDECommand

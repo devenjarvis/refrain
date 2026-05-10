@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -154,6 +155,7 @@ type App struct {
 	focusBreakAnimFrame    int
 	reviewDiffCache        map[string]*reviewDiffEntry // keyed by session ID
 	reviewSession          *agent.Session              // session currently open in review panel
+	reviewTaskCursor       int                         // selected task row in the review task list
 	planEditor             *planEditorModel            // non-nil while panelFocus == focusPlanEditor
 	promptModal            promptModalModel            // overlay for plan-first new-session prompt
 
@@ -973,6 +975,58 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reviewDiffMsg:
 		if msg.err == nil && msg.entry != nil {
 			a.reviewDiffCache[msg.sessionID] = msg.entry
+			// If the entry has task groups, dispatch a reviewer per group.
+			if len(msg.entry.groups) > 0 {
+				repoPath := a.repoPathForSession(msg.sessionID)
+				if repoPath == "" {
+					repoPath = a.activeRepo
+				}
+				var cmds []tea.Cmd
+				mgr := a.managers[repoPath]
+				var reviewer agent.ReviewerAgent
+				if mgr != nil {
+					reviewer = mgr.ReviewerAgent()
+				}
+				if reviewer != nil {
+					sess := a.sessionByID(msg.sessionID)
+					if sess != nil {
+						for _, g := range msg.entry.groups {
+							// Mark running before dispatching so the spinner shows.
+							if v, ok := msg.entry.verdicts[g.taskIndex]; ok {
+								v.state = verdictRunning
+							}
+							cmds = append(cmds, a.reviewTaskCmd(sess, g, reviewer))
+						}
+					}
+				}
+				if len(cmds) > 0 {
+					return a, tea.Batch(cmds...)
+				}
+				// Reviewer unavailable (nil reviewer or nil session): mark all
+				// pending verdicts as error so they don't stay at "···" forever.
+				for _, rec := range msg.entry.verdicts {
+					if rec.state == verdictPending {
+						rec.state = verdictErr
+						rec.err = errors.New("reviewer unavailable")
+					}
+				}
+			}
+		}
+		return a, nil
+
+	case reviewVerdictMsg:
+		entry := a.reviewDiffCache[msg.sessionID]
+		if entry != nil && entry.verdicts != nil {
+			rec := entry.verdicts[msg.taskIndex]
+			if rec != nil {
+				if msg.err != nil {
+					rec.state = verdictErr
+					rec.err = msg.err
+				} else {
+					rec.state = verdictDone
+					rec.verdict = msg.verdict
+				}
+			}
 		}
 		return a, nil
 
@@ -1375,6 +1429,47 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}()
 				}
 				return a, nil
+			case "j", "down":
+				// Move cursor down in the task list.
+				if entry := a.reviewDiffCache[a.reviewSession.ID]; entry != nil {
+					max := reviewTaskCount(entry) - 1
+					if a.reviewTaskCursor < max {
+						a.reviewTaskCursor++
+					}
+				}
+				return a, nil
+			case "k", "up":
+				// Move cursor up in the task list.
+				if a.reviewTaskCursor > 0 {
+					a.reviewTaskCursor--
+				}
+				return a, nil
+			case "enter", "space":
+				// Drill into the selected task's diff. Opens the diff browser
+				// filtered to the commits for that task; esc returns to the
+				// task list (handled by diffCloseMsg).
+				entry := a.reviewDiffCache[a.reviewSession.ID]
+				if entry == nil || len(entry.groups) == 0 {
+					return a, nil
+				}
+				group := reviewTaskGroupAtCursor(entry, a.reviewTaskCursor)
+				if group == nil || group.rawDiff == "" {
+					return a, nil
+				}
+				m, err := diffmodel.Parse(group.rawDiff)
+				if err != nil {
+					a.setError(err.Error())
+					return a, nil
+				}
+				taskLabel := a.reviewSession.GetDisplayName()
+				if group.taskIndex > 0 {
+					taskLabel += fmt.Sprintf(" · task %d", group.taskIndex)
+				} else {
+					taskLabel += " · other changes"
+				}
+				a.view = ViewDiff
+				a.diff = newDiffModel(taskLabel, m, a.width, a.height-1)
+				return a, nil
 			}
 			// All other keys are no-ops in review panel.
 			return a, nil
@@ -1491,6 +1586,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sess := reviewItems[idx].session
 				sess.SetLifecyclePhase(agent.LifecycleInReview)
 				a.reviewSession = sess
+				a.reviewTaskCursor = 0
 				a.dashboard.panelFocus = focusReview
 				// Fetch diff stats if not already cached.
 				if _, ok := a.reviewDiffCache[sess.ID]; !ok {
@@ -2952,6 +3048,7 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 	case focusSectionReview:
 		sess.SetLifecyclePhase(agent.LifecycleInReview)
 		a.reviewSession = sess
+		a.reviewTaskCursor = 0
 		a.dashboard.panelFocus = focusReview
 		if _, ok := a.reviewDiffCache[sess.ID]; !ok {
 			return a.fetchReviewDiffCmd(sess), true
@@ -3199,7 +3296,7 @@ func (a App) View() tea.View {
 	case ViewDashboard:
 		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
 			entry := a.reviewDiffCache[a.reviewSession.ID]
-			v := tea.NewView(renderReviewPanel(a.reviewSession, entry, a.width))
+			v := tea.NewView(renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor))
 			v.AltScreen = true
 			return v
 		}
@@ -3414,6 +3511,71 @@ func (a *App) repoPathForSession(sessionID string) string {
 		}
 	}
 	return ""
+}
+
+// reviewTaskGroupAtCursor returns the taskReviewGroup at position cursor in the
+// review task list, following the same row ordering as renderTaskList: plan
+// tasks in index order, then the "Other changes" group (taskIndex == 0) last.
+// Returns nil if cursor is out of range or no groups exist.
+func reviewTaskGroupAtCursor(entry *reviewDiffEntry, cursor int) *taskReviewGroup {
+	if entry == nil {
+		return nil
+	}
+	groupByIdx := make(map[int]*taskReviewGroup, len(entry.groups))
+	for i := range entry.groups {
+		g := &entry.groups[i]
+		groupByIdx[g.taskIndex] = g
+	}
+	row := 0
+	for _, t := range entry.tasks {
+		if row == cursor {
+			return groupByIdx[t.Index]
+		}
+		row++
+	}
+	// Check "Other changes" row.
+	if g, ok := groupByIdx[0]; ok {
+		if row == cursor {
+			return g
+		}
+	}
+	return nil
+}
+
+// reviewTaskCount returns the number of task rows in a review entry (plan tasks
+// plus the "other" group if present).
+func reviewTaskCount(entry *reviewDiffEntry) int {
+	if entry == nil {
+		return 0
+	}
+	n := len(entry.tasks)
+	for _, g := range entry.groups {
+		if g.taskIndex == 0 {
+			n++ // "Other changes" row
+			break
+		}
+	}
+	return n
+}
+
+// sessionByID returns the Session with the given ID across all managed repos,
+// or nil if not found.
+func (a *App) sessionByID(sessionID string) *agent.Session {
+	if a.cfg == nil {
+		return nil
+	}
+	for _, repo := range a.cfg.Repos {
+		mgr := a.managers[repo.Path]
+		if mgr == nil {
+			continue
+		}
+		for _, sess := range mgr.ListSessions() {
+			if sess.ID == sessionID {
+				return sess
+			}
+		}
+	}
+	return nil
 }
 
 // cleanStaleCaches removes diff stats and PR cache entries for sessions that no longer exist.
@@ -3737,10 +3899,42 @@ func (a *App) writeWellnessLog() {
 	_, _ = f.WriteString(string(data) + "\n")
 }
 
+// verdictState tracks the progress of a per-task reviewer subprocess.
+type verdictState int
+
+const (
+	verdictPending verdictState = iota // reviewer not yet dispatched
+	verdictRunning                     // reviewer subprocess in flight
+	verdictDone                        // reviewer returned a verdict
+	verdictErr                         // reviewer subprocess errored
+)
+
+// taskVerdictRecord holds the verdict state for one task row.
+type taskVerdictRecord struct {
+	state   verdictState
+	verdict agent.ReviewVerdict
+	err     error
+}
+
+// taskReviewGroup holds one plan task's commits and their resolved diff stats.
+type taskReviewGroup struct {
+	taskIndex int
+	commits   []git.Commit
+	files     []git.FileStat
+	stats     *git.DiffStats
+	rawDiff   string
+}
+
 // reviewDiffEntry caches diff stats for a session in the review panel.
 type reviewDiffEntry struct {
+	// Aggregate file stats (always populated, even when no plan exists).
 	files     []git.FileStat
 	aggregate *git.DiffStats
+
+	// Plan-driven fields; non-nil only when the session has a plan.
+	tasks    []agent.PlanTask
+	groups   []taskReviewGroup          // per-task + "other" commit groups
+	verdicts map[int]*taskVerdictRecord // keyed by taskIndex (0 = other)
 }
 
 // reviewDiffMsg carries the result of an async review diff fetch.
@@ -3750,7 +3944,18 @@ type reviewDiffMsg struct {
 	err       error
 }
 
-// fetchReviewDiffCmd returns a Cmd that fetches diff stats for a session to populate the review cache.
+// reviewVerdictMsg carries the result of a single per-task reviewer subprocess.
+type reviewVerdictMsg struct {
+	sessionID string
+	taskIndex int
+	verdict   agent.ReviewVerdict
+	err       error
+}
+
+// fetchReviewDiffCmd returns a Cmd that fetches diff stats for a session to
+// populate the review cache. When the session has a plan, it also computes
+// per-task commit groups and per-group diff stats so the review panel can
+// render a task-by-task view.
 func (a App) fetchReviewDiffCmd(sess *agent.Session) tea.Cmd {
 	sessID := sess.ID
 	wt := sess.Worktree
@@ -3762,12 +3967,77 @@ func (a App) fetchReviewDiffCmd(sess *agent.Session) tea.Cmd {
 	if repoPath == "" {
 		repoPath = a.activeRepo
 	}
+	planContent, hasPlan := sess.CachedPlan()
 	return func() tea.Msg {
 		files, agg, err := git.GetPerFileDiffStats(repoPath, wt)
 		if err != nil {
 			return reviewDiffMsg{sessionID: sessID, err: err}
 		}
-		return reviewDiffMsg{sessionID: sessID, entry: &reviewDiffEntry{files: files, aggregate: agg}}
+		entry := &reviewDiffEntry{files: files, aggregate: agg}
+
+		if hasPlan && planContent != "" {
+			entry.tasks = agent.ParsePlanTasks(planContent)
+			commits, logErr := git.LogCommitsAgainstBase(wt)
+			if logErr == nil && len(commits) > 0 {
+				commitGroups := agent.GroupCommitsByTask(commits)
+				entry.groups = make([]taskReviewGroup, 0, len(commitGroups))
+				entry.verdicts = make(map[int]*taskVerdictRecord)
+				for _, cg := range commitGroups {
+					hashes := make([]string, len(cg.Commits))
+					for i, c := range cg.Commits {
+						hashes[i] = c.Hash
+					}
+					gFiles, gStats, rawDiff, diffErr := git.DiffForCommits(wt, hashes)
+					if diffErr != nil {
+						gStats = &git.DiffStats{}
+					}
+					entry.groups = append(entry.groups, taskReviewGroup{
+						taskIndex: cg.TaskIndex,
+						commits:   cg.Commits,
+						files:     gFiles,
+						stats:     gStats,
+						rawDiff:   rawDiff,
+					})
+					entry.verdicts[cg.TaskIndex] = &taskVerdictRecord{state: verdictPending}
+				}
+			}
+		}
+
+		return reviewDiffMsg{sessionID: sessID, entry: entry}
+	}
+}
+
+// reviewTaskCmd returns a Cmd that runs a reviewer subprocess for one task
+// group and returns a reviewVerdictMsg when done.
+func (a App) reviewTaskCmd(sess *agent.Session, group taskReviewGroup, reviewer agent.ReviewerAgent) tea.Cmd {
+	sessID := sess.ID
+	originalPrompt := sess.OriginalPrompt()
+	taskIndex := group.taskIndex
+	rawDiff := group.rawDiff
+
+	// Find task text from the entry if available.
+	taskText := fmt.Sprintf("Task %d", taskIndex)
+	if taskIndex == 0 {
+		taskText = "Other changes"
+	} else if entry := a.reviewDiffCache[sessID]; entry != nil {
+		for _, t := range entry.tasks {
+			if t.Index == taskIndex {
+				taskText = t.Text
+				break
+			}
+		}
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		verdict, err := reviewer.Review(ctx, agent.ReviewRequest{
+			TaskIndex:      taskIndex,
+			TaskText:       taskText,
+			TaskDiff:       rawDiff,
+			OriginalPrompt: originalPrompt,
+		})
+		return reviewVerdictMsg{sessionID: sessID, taskIndex: taskIndex, verdict: verdict, err: err}
 	}
 }
 

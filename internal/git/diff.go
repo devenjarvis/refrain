@@ -7,6 +7,105 @@ import (
 	"strings"
 )
 
+// Commit holds metadata for a single git commit.
+type Commit struct {
+	Hash    string
+	Subject string
+	Body    string
+}
+
+// LogCommitsAgainstBase returns commits reachable from HEAD but not from
+// BaseBranch, ordered oldest-first (natural review order). The worktree path
+// is used as the working directory so the command runs in the right context
+// even when the repo root is elsewhere.
+func LogCommitsAgainstBase(wt *WorktreeInfo) ([]Commit, error) {
+	// %x1f separates fields within one record; %x1e terminates each record.
+	// This avoids ambiguity with newlines in commit bodies.
+	out, err := runGit(
+		wt.Path, "log",
+		"--format=format:%H%x1f%s%x1f%b%x1e",
+		"--reverse",
+		wt.BaseBranch+"..HEAD",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("log commits: %w", err)
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+	commits := make([]Commit, 0, 32)
+	for _, record := range strings.Split(out, "\x1e") {
+		record = strings.TrimSpace(record)
+		if record == "" {
+			continue
+		}
+		parts := strings.SplitN(record, "\x1f", 3)
+		c := Commit{}
+		if len(parts) > 0 {
+			c.Hash = strings.TrimSpace(parts[0])
+		}
+		if len(parts) > 1 {
+			c.Subject = strings.TrimSpace(parts[1])
+		}
+		if len(parts) > 2 {
+			c.Body = strings.TrimSpace(parts[2])
+		}
+		if c.Hash == "" {
+			continue
+		}
+		commits = append(commits, c)
+	}
+	return commits, nil
+}
+
+// DiffForCommits returns per-file stats, aggregate stats, and raw unified diff
+// for an arbitrary slice of commit hashes in the given worktree. The hashes
+// must be in oldest-first order but need not be contiguous — each commit is
+// diffed individually (hash^..hash) and the results are concatenated. This
+// ensures correctness when task commits are interleaved with other tasks'
+// commits in the log.
+func DiffForCommits(wt *WorktreeInfo, hashes []string) ([]FileStat, *DiffStats, string, error) {
+	if len(hashes) == 0 {
+		return nil, &DiffStats{}, "", nil
+	}
+
+	var rawDiffSb strings.Builder
+	fileMap := make(map[string]*FileStat)
+
+	for _, h := range hashes {
+		rangeSpec := h + "^.." + h
+
+		raw, err := runGitRaw(wt.Path, "diff", rangeSpec)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("diff for commits: %w", err)
+		}
+		rawDiffSb.WriteString(raw)
+
+		numstatOut, err := runGit(wt.Path, "diff", "--numstat", "--diff-filter=AMD", rangeSpec)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("diff numstat for commits: %w", err)
+		}
+		nameStatusOut, err := runGit(wt.Path, "diff", "--name-status", "--diff-filter=AMD", rangeSpec)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("diff name-status for commits: %w", err)
+		}
+		parseNumstat(numstatOut, fileMap)
+		parseNameStatus(nameStatusOut, fileMap)
+	}
+
+	result := make([]FileStat, 0, len(fileMap))
+	agg := &DiffStats{}
+	for _, fs := range fileMap {
+		result = append(result, *fs)
+		agg.Files++
+		agg.Insertions += fs.Insertions
+		agg.Deletions += fs.Deletions
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
+
+	return result, agg, rawDiffSb.String(), nil
+}
+
 // DiffStats holds summary statistics for a diff.
 type DiffStats struct {
 	Files      int

@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -845,10 +847,98 @@ func (s *Session) ReviseError() error {
 	return s.reviseErr
 }
 
+// PlanTask is a single task item parsed from a plan file.
+type PlanTask struct {
+	Index int    // 1-based, counting all "- [ ]" and "- [x]" lines top-to-bottom
+	Text  string // task description without the leading "- [ ] " or "- [x] "
+	Done  bool   // true if marked [x] or [X]
+}
+
+// ParsePlanTasks extracts ordered task items from plan markdown using the same
+// counting rules as planTaskCounts in internal/tui/dashboard.go:
+// every "- [ ]" or "- [x]" line (leading whitespace stripped) is a task,
+// indexed 1-based in the order they appear. Section headers are ignored.
+func ParsePlanTasks(plan string) []PlanTask {
+	tasks := make([]PlanTask, 0, 16)
+	idx := 0
+	for _, raw := range strings.Split(plan, "\n") {
+		line := strings.TrimLeft(raw, " \t")
+		if !strings.HasPrefix(line, "- [") {
+			continue
+		}
+		if len(line) < 6 || line[4] != ']' {
+			continue
+		}
+		idx++
+		marker := line[3]
+		done := marker == 'x' || marker == 'X'
+		text := strings.TrimSpace(line[5:])
+		tasks = append(tasks, PlanTask{Index: idx, Text: text, Done: done})
+	}
+	return tasks
+}
+
+// taskSubjectRE matches "[task N]" at the start of a commit subject where N is
+// a positive integer. Case-insensitive so "[Task 3]" is also accepted.
+var taskSubjectRE = regexp.MustCompile(`(?i)^\[task\s+(\d+)\]`)
+
+// CommitGroup holds the commits associated with a single plan task (or the
+// "other" bucket for commits without a recognizable [task N] prefix).
+type CommitGroup struct {
+	// TaskIndex is 1-based and matches the PlanTask.Index it belongs to.
+	// Zero means the group is the "Other changes" bucket (no [task N] prefix
+	// and/or uncommitted working-tree changes).
+	TaskIndex int
+	Commits   []git.Commit
+}
+
+// GroupCommitsByTask partitions commits by their "[task N]" subject prefix.
+// Commits without the prefix land in a group with TaskIndex=0 ("Other
+// changes"). Within each group, commits preserve their input order (oldest
+// first). The returned slice is sorted by TaskIndex ascending, with the
+// TaskIndex=0 group appended last so it renders at the bottom of the review
+// task list.
+func GroupCommitsByTask(commits []git.Commit) []CommitGroup {
+	byIndex := make(map[int]*CommitGroup)
+	for _, c := range commits {
+		idx := 0
+		if m := taskSubjectRE.FindStringSubmatch(c.Subject); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+				idx = n
+			}
+		}
+		if byIndex[idx] == nil {
+			byIndex[idx] = &CommitGroup{TaskIndex: idx}
+		}
+		byIndex[idx].Commits = append(byIndex[idx].Commits, c)
+	}
+
+	// Collect and sort task-indexed groups; append "other" (0) last.
+	var groups []CommitGroup
+	var otherGroup *CommitGroup
+	for idx, g := range byIndex {
+		if idx == 0 {
+			otherGroup = g
+		} else {
+			groups = append(groups, *g)
+		}
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].TaskIndex < groups[j].TaskIndex
+	})
+	if otherGroup != nil {
+		groups = append(groups, *otherGroup)
+	}
+	return groups
+}
+
 // PlanPath returns the absolute path to the session's plan markdown file
 // (<worktree>/.claude/plan.md). Always returns a path even if the file does
 // not exist — callers use HasPlan or ReadPlan to test for presence.
 func (s *Session) PlanPath() string {
+	if s.Worktree == nil {
+		return ""
+	}
 	return filepath.Join(s.Worktree.Path, ".claude", "plan.md")
 }
 
@@ -856,6 +946,9 @@ func (s *Session) PlanPath() string {
 // snapshot (<worktree>/.claude/plan.prev.md). The file is written by
 // RevisePlan as a single-step undo target; RestorePrevPlan reads it back.
 func (s *Session) PrevPlanPath() string {
+	if s.Worktree == nil {
+		return ""
+	}
 	return filepath.Join(s.Worktree.Path, ".claude", "plan.prev.md")
 }
 
@@ -958,7 +1051,11 @@ func (s *Session) CachedPlan() (string, bool) {
 	// Lazy load. Drop the read lock before doing I/O so a concurrent
 	// WritePlan can populate the cache while we read; if it does, we
 	// just observe its write on the next call.
-	data, err := os.ReadFile(s.PlanPath())
+	planPath := s.PlanPath()
+	if planPath == "" {
+		return "", false
+	}
+	data, err := os.ReadFile(planPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			s.mu.Lock()

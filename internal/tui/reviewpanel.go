@@ -14,9 +14,20 @@ import (
 	"github.com/devenjarvis/baton/internal/git"
 )
 
+// spinnerFrames is the braille spinner sequence used while a verdict is running.
+var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
+
+// reviewSpinnerFrame returns the current spinner character based on wall time.
+// Using time.Now() keeps all running rows in sync without needing a tick counter.
+func reviewSpinnerFrame() string {
+	frame := int(time.Now().UnixMilli()/100) % len(spinnerFrames)
+	return spinnerFrames[frame]
+}
+
 // renderReviewPanel renders the fullscreen review panel for a session.
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width int) string {
+// cursor is the currently selected task row index (0-based among all task rows).
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int) string {
 	var lines []string
 
 	// Header
@@ -55,16 +66,23 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width int) s
 	lines = append(lines, "")
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
 
-	// Changes
+	// Body: task list (if plan exists) or legacy file-centric view.
 	if entry == nil {
 		lines = append(lines, StyleSubtle.Render("loading diff stats…"))
+	} else if len(entry.tasks) > 0 || len(entry.groups) > 0 {
+		// Overhead: header(1) + divider(1) + "ORIGINAL INTENT"(1) + intent(≤6) +
+		// blank(1) + divider(1) + blank(1) + divider(1) + hints(1) = 14 max.
+		taskListHeight := height - 14
+		if taskListHeight < 4 {
+			taskListHeight = 4
+		}
+		lines = append(lines, renderTaskList(entry, width, taskListHeight, cursor)...)
 	} else {
+		// No plan — fall back to the aggregate file view.
 		leftWidth := (width - 4) / 2
 		rightWidth := width - leftWidth - 4
-
 		leftLines := renderFocusList(entry, leftWidth)
 		rightLines := renderReviewShape(entry, rightWidth)
-
 		maxRows := len(leftLines)
 		if len(rightLines) > maxRows {
 			maxRows = len(rightLines)
@@ -88,16 +106,194 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width int) s
 	// Action footer
 	lines = append(lines, "")
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	taskHint := ""
+	if len(entry.getGroups()) > 0 {
+		taskHint = "   " + lipgloss.NewStyle().Foreground(lipgloss.Color("#f0c060")).Render("enter") + StyleSubtle.Render(" — view task diff")
+	}
 	hints := "  " +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#5ab58a")).Render("p") + StyleSubtle.Render(" — open PR in GitHub") +
 		"   " + lipgloss.NewStyle().Foreground(lipgloss.Color("#7ec8e3")).Render("t") + StyleSubtle.Render(" — open agent terminal") +
 		"   " + StyleSubtle.Render("c — mark complete") +
 		"   " + StyleSubtle.Render("e — open in editor") +
 		"   " + StyleSubtle.Render("d — defer") +
+		taskHint +
 		"   " + StyleSubtle.Render("ESC — back to focus")
 	lines = append(lines, hints)
 
 	return strings.Join(lines, "\n")
+}
+
+// getGroups safely returns groups, even on a nil entry.
+func (e *reviewDiffEntry) getGroups() []taskReviewGroup {
+	if e == nil {
+		return nil
+	}
+	return e.groups
+}
+
+// renderTaskList renders the scrollable per-task review rows. availHeight
+// controls the visible window; the list scrolls so the cursor stays visible.
+func renderTaskList(entry *reviewDiffEntry, width, availHeight, cursor int) []string {
+	const headerLines = 2 // "PLAN TASKS" + blank
+	header := []string{StyleSubtle.Render("PLAN TASKS"), ""}
+
+	// Build a merged view: one row per plan task, plus the "Other changes" group.
+	type row struct {
+		taskIndex int
+		taskText  string
+		group     *taskReviewGroup // may be nil if no commits for this task
+	}
+
+	// Index groups by taskIndex for O(1) lookup.
+	groupByIdx := make(map[int]*taskReviewGroup, len(entry.groups))
+	for i := range entry.groups {
+		g := &entry.groups[i]
+		groupByIdx[g.taskIndex] = g
+	}
+
+	rows := make([]row, 0, len(entry.tasks)+1)
+	for _, t := range entry.tasks {
+		g := groupByIdx[t.Index]
+		rows = append(rows, row{taskIndex: t.Index, taskText: t.Text, group: g})
+	}
+	// Append "other" group if it exists.
+	if other, ok := groupByIdx[0]; ok {
+		rows = append(rows, row{taskIndex: 0, taskText: "Other changes", group: other})
+	}
+
+	// Compute visible window so the cursor stays centred.
+	rowsH := availHeight - headerLines
+	if rowsH < 1 {
+		rowsH = 1
+	}
+	offset := cursor - rowsH/2
+	if offset < 0 {
+		offset = 0
+	}
+	if offset+rowsH > len(rows) {
+		offset = len(rows) - rowsH
+		if offset < 0 {
+			offset = 0
+		}
+	}
+
+	cursorStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#2a2a3a")).
+		Bold(true)
+	checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#5ab58a"))
+	concernStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f0c060"))
+	failStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#e74c3c"))
+	spinStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9b7fdb"))
+	subtleGreen := lipgloss.NewStyle().Foreground(lipgloss.Color("#7ed321"))
+	subtleRed := lipgloss.NewStyle().Foreground(lipgloss.Color("#e74c3c"))
+
+	end := offset + rowsH
+	if end > len(rows) {
+		end = len(rows)
+	}
+	lines := make([]string, 0, headerLines+end-offset)
+	lines = append(lines, header...)
+
+	for i := offset; i < end; i++ {
+		r := rows[i]
+		selected := i == cursor
+
+		// Task index label and text.
+		label := fmt.Sprintf("[%d]", r.taskIndex)
+		if r.taskIndex == 0 {
+			label = "[?]"
+		}
+		labelW := 5
+		labelPart := StyleSubtle.Render(fmt.Sprintf("%-*s", labelW, label))
+
+		maxTextW := width - labelW - 30
+		if maxTextW < 10 {
+			maxTextW = 10
+		}
+		textPart := truncateVisible(r.taskText, maxTextW)
+
+		// Commit count + stats.
+		statPart := ""
+		if r.group != nil && r.group.stats != nil {
+			st := r.group.stats
+			commitCount := len(r.group.commits)
+			statPart = fmt.Sprintf("%d commit", commitCount)
+			if commitCount != 1 {
+				statPart += "s"
+			}
+			if st.Insertions > 0 || st.Deletions > 0 {
+				statPart += "  " +
+					subtleGreen.Render(fmt.Sprintf("+%d", st.Insertions)) +
+					" " +
+					subtleRed.Render(fmt.Sprintf("-%d", st.Deletions))
+			}
+		} else if r.group == nil {
+			statPart = StyleSubtle.Render("no commits")
+		}
+
+		// Verdict badge.
+		verdictPart := ""
+		if entry.verdicts != nil {
+			if v, ok := entry.verdicts[r.taskIndex]; ok {
+				switch v.state {
+				case verdictPending:
+					verdictPart = StyleSubtle.Render("···")
+				case verdictRunning:
+					verdictPart = spinStyle.Render(reviewSpinnerFrame())
+				case verdictDone:
+					switch v.verdict.Kind {
+					case agent.VerdictPass:
+						verdictPart = checkStyle.Render("✓ pass")
+					case agent.VerdictConcerns:
+						verdictPart = concernStyle.Render("! concerns")
+					case agent.VerdictFail:
+						verdictPart = failStyle.Render("✗ fail")
+					}
+					if v.verdict.Rationale != "" {
+						rationale := truncateVisible(v.verdict.Rationale, width-12)
+						verdictPart += "  " + StyleSubtle.Render(rationale)
+					}
+				case verdictErr:
+					errStr := "err"
+					if v.err != nil {
+						errStr = truncateVisible(v.err.Error(), 30)
+					}
+					verdictPart = failStyle.Render("✗ " + errStr)
+				}
+			}
+		}
+
+		// Assemble the row.
+		rowText := labelPart + " " + textPart
+		if verdictPart != "" {
+			// Right-align verdict badge in the remaining space.
+			usedW := labelW + 1 + ansi.StringWidth(textPart)
+			spaceW := width - 4 - usedW - ansi.StringWidth(statPart) - ansi.StringWidth(verdictPart) - 3
+			if spaceW < 1 {
+				spaceW = 1
+			}
+			rowText += strings.Repeat(" ", spaceW) + statPart + "  " + verdictPart
+		} else if statPart != "" {
+			usedW := labelW + 1 + ansi.StringWidth(textPart)
+			spaceW := width - 4 - usedW - ansi.StringWidth(statPart)
+			if spaceW < 1 {
+				spaceW = 1
+			}
+			rowText += strings.Repeat(" ", spaceW) + statPart
+		}
+
+		if selected {
+			// Pad to full width for background highlight.
+			padW := width - 4 - ansi.StringWidth(rowText)
+			if padW < 0 {
+				padW = 0
+			}
+			rowText = cursorStyle.Render(rowText + strings.Repeat(" ", padW))
+		}
+		lines = append(lines, "  "+rowText)
+	}
+
+	return lines
 }
 
 // renderFocusList returns left-column lines: total + top files + also-changed.
