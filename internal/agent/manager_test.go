@@ -852,3 +852,56 @@ func TestManager_StartDraft_NoQuestionsByDefault(t *testing.T) {
 		return !sess.IsDrafting() && sess.HasPlan()
 	})
 }
+
+// TestManager_AgentCount_ExcludesExitedAgents pins the fix for the inflated
+// quit/concurrency warnings: an agent that has exited stays in the session
+// map (so the user can inspect it) but must not count toward
+// Manager.AgentCount, which is used to gate the "agents running" detach
+// confirmation and the soft concurrent-agent limit. Both Done (clean exit)
+// and Error (non-zero exit) are exercised so the symmetric arms of
+// LiveAgentCount's switch are both covered.
+func TestManager_AgentCount_ExcludesExitedAgents(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		want    Status
+	}{
+		{"error_exit", "exit 1", StatusError},
+		{"clean_exit", "exit 0", StatusDone},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			mgr := NewManager(repo, defaultTestSettings())
+			defer mgr.Shutdown()
+
+			sess, ag, err := mgr.CreateSessionWithCommand(
+				Config{Task: "test", Rows: 24, Cols: 80},
+				func(name string) *exec.Cmd { return exec.Command("bash", "-c", tc.command) },
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			select {
+			case <-ag.Done():
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for agent to exit")
+			}
+
+			if got := ag.Status(); got != tc.want {
+				t.Fatalf("expected %s after %q, got %s", tc.want, tc.command, got)
+			}
+			if got := sess.AgentCount(); got != 1 {
+				t.Errorf("session should retain exited agent in its map, got AgentCount=%d", got)
+			}
+			if got := mgr.AgentCount(); got != 0 {
+				t.Errorf("expected Manager.AgentCount=0 (exited agent must not count), got %d", got)
+			}
+			if got := sess.LiveAgentCount(); got != 0 {
+				t.Errorf("expected Session.LiveAgentCount=0 (exited agent must not count), got %d", got)
+			}
+		})
+	}
+}

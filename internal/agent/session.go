@@ -312,6 +312,27 @@ func (s *Session) AgentCount() int {
 	return len(s.agents)
 }
 
+// LiveAgentCount returns the number of non-shell agents whose status is
+// neither StatusDone nor StatusError. This is the right count for capacity
+// checks (concurrent-agent limits, the quit "agents running" warning) where
+// shells and naturally-exited agents shouldn't trigger the warning.
+func (s *Session) LiveAgentCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, a := range s.agents {
+		if a.IsShell {
+			continue
+		}
+		switch a.Status() {
+		case StatusDone, StatusError:
+			continue
+		}
+		count++
+	}
+	return count
+}
+
 // AgentStatusPriority returns a sortable rank for an agent's current status,
 // used by both Session.PrimaryAgent (deterministic pick for pipeline keys) and
 // the App-level focusLaunch auto-open pick. Order: Active > Waiting > Idle >
