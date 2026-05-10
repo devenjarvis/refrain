@@ -43,6 +43,15 @@ const (
 	// is substituted with the user's prompt before the call.
 	DefaultBranchNamePrompt = "Summarize this task into a 3-5 word git branch slug (lowercase, kebab-case, no prefix). Respond with ONLY the slug.\n\n{prompt}"
 
+	// DefaultPRDraftByDefault controls whether new PRs are created as drafts.
+	// Defaults to true — drafts require an explicit "ready for review" action
+	// on GitHub, which prompts a deliberate review decision.
+	DefaultPRDraftByDefault = true
+
+	// DefaultAutoOpenPRInBrowser controls whether the browser opens
+	// automatically after a PR is created. Defaults to true.
+	DefaultAutoOpenPRInBrowser = true
+
 	// DefaultPlanFirstEnabled gates the plan-first planning flow. When true
 	// (the default) the n keybind opens a prompt modal, drafts a plan via
 	// claude -p, and only spawns the agent after the user approves the plan.
@@ -126,6 +135,12 @@ type GlobalSettings struct {
 	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
 	BuildFromPlanPrompt *string `json:"build_from_plan_prompt,omitempty"`
 	BuildSystemPrompt   *string `json:"build_system_prompt,omitempty"`
+
+	// PR creation settings.
+	PRTitlePrompt      *string `json:"pr_title_prompt,omitempty"`
+	PRBodyPrompt       *string `json:"pr_body_prompt,omitempty"`
+	PRDraftByDefault   *bool   `json:"pr_draft_by_default,omitempty"`
+	AutoOpenPRInBrowser *bool  `json:"auto_open_pr_in_browser,omitempty"`
 }
 
 // RepoSettings holds per-repo overrides stored at <repo>/.baton/config.json.
@@ -144,6 +159,12 @@ type RepoSettings struct {
 	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
 	BuildFromPlanPrompt *string `json:"build_from_plan_prompt,omitempty"`
 	BuildSystemPrompt   *string `json:"build_system_prompt,omitempty"`
+
+	// PR creation settings.
+	PRTitlePrompt       *string `json:"pr_title_prompt,omitempty"`
+	PRBodyPrompt        *string `json:"pr_body_prompt,omitempty"`
+	PRDraftByDefault    *bool   `json:"pr_draft_by_default,omitempty"`
+	AutoOpenPRInBrowser *bool   `json:"auto_open_pr_in_browser,omitempty"`
 }
 
 // ResolvedSettings is the fully merged configuration with no nil pointers.
@@ -182,6 +203,12 @@ type ResolvedSettings struct {
 	// the spawned `claude` agent at every Building-phase spawn site (and
 	// resume). Empty means no flag.
 	BuildSystemPrompt string
+
+	// PR creation settings.
+	PRTitlePrompt       string
+	PRBodyPrompt        string
+	PRDraftByDefault    bool
+	AutoOpenPRInBrowser bool
 }
 
 // Resolve merges global and repo settings over built-in defaults.
@@ -204,6 +231,8 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		PlanFirstEnabled:    DefaultPlanFirstEnabled,
 		BuildFromPlanPrompt: DefaultBuildFromPlanPrompt,
 		BuildSystemPrompt:   DefaultBuildSystemPrompt,
+		PRDraftByDefault:    DefaultPRDraftByDefault,
+		AutoOpenPRInBrowser: DefaultAutoOpenPRInBrowser,
 	}
 
 	if global != nil {
@@ -261,6 +290,18 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		if global.BuildSystemPrompt != nil {
 			r.BuildSystemPrompt = *global.BuildSystemPrompt
 		}
+		if global.PRTitlePrompt != nil {
+			r.PRTitlePrompt = *global.PRTitlePrompt
+		}
+		if global.PRBodyPrompt != nil {
+			r.PRBodyPrompt = *global.PRBodyPrompt
+		}
+		if global.PRDraftByDefault != nil {
+			r.PRDraftByDefault = *global.PRDraftByDefault
+		}
+		if global.AutoOpenPRInBrowser != nil {
+			r.AutoOpenPRInBrowser = *global.AutoOpenPRInBrowser
+		}
 	}
 
 	if repo != nil {
@@ -302,6 +343,18 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if repo.BuildSystemPrompt != nil {
 			r.BuildSystemPrompt = *repo.BuildSystemPrompt
+		}
+		if repo.PRTitlePrompt != nil {
+			r.PRTitlePrompt = *repo.PRTitlePrompt
+		}
+		if repo.PRBodyPrompt != nil {
+			r.PRBodyPrompt = *repo.PRBodyPrompt
+		}
+		if repo.PRDraftByDefault != nil {
+			r.PRDraftByDefault = *repo.PRDraftByDefault
+		}
+		if repo.AutoOpenPRInBrowser != nil {
+			r.AutoOpenPRInBrowser = *repo.AutoOpenPRInBrowser
 		}
 	}
 
