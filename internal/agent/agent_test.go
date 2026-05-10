@@ -649,6 +649,125 @@ func TestBuildSpawnArgs_AgentModel(t *testing.T) {
 	}
 }
 
+func TestBuildSpawnArgs_BuildSystemPrompt(t *testing.T) {
+	wt := t.TempDir()
+	tests := []struct {
+		name     string
+		cfg      Config
+		wantArgs []string
+	}{
+		{
+			name: "prompt set emits flag",
+			cfg: Config{
+				BuildSystemPrompt: "use TodoWrite and commit per task",
+				BypassPermissions: true,
+				Task:              "do work",
+			},
+			wantArgs: []string{
+				"--append-system-prompt", "use TodoWrite and commit per task",
+				"--dangerously-skip-permissions",
+				"do work",
+			},
+		},
+		{
+			name:     "empty prompt no flag",
+			cfg:      Config{BypassPermissions: true, Task: "hi"},
+			wantArgs: []string{"--dangerously-skip-permissions", "hi"},
+		},
+		{
+			name: "prompt ignored for non-claude program",
+			cfg: Config{
+				AgentProgram:      "bash",
+				BuildSystemPrompt: "ignored",
+				Task:              "hi",
+			},
+			wantArgs: []string{"hi"},
+		},
+		{
+			name: "model and prompt both prepend, model first",
+			cfg: Config{
+				AgentModel:        "claude-opus-4-7",
+				BuildSystemPrompt: "p",
+				Task:              "t",
+			},
+			wantArgs: []string{
+				"--model", "claude-opus-4-7",
+				"--append-system-prompt", "p",
+				"t",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildSpawnArgs(tt.cfg, wt, "")
+			if err != nil {
+				t.Fatalf("buildSpawnArgs error: %v", err)
+			}
+			if len(got) != len(tt.wantArgs) {
+				t.Fatalf("expected %d args, got %d: %v", len(tt.wantArgs), len(got), got)
+			}
+			for i, want := range tt.wantArgs {
+				if got[i] != want {
+					t.Errorf("arg[%d]: expected %q, got %q (full=%v)", i, want, got[i], got)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildResumeArgs_BuildSystemPrompt(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      Config
+		sid      string
+		wantArgs []string
+	}{
+		{
+			name: "prompt set emits flag on resume",
+			cfg: Config{
+				BuildSystemPrompt: "use TodoWrite",
+				BypassPermissions: true,
+			},
+			sid:      "abc123",
+			wantArgs: []string{"--append-system-prompt", "use TodoWrite", "--dangerously-skip-permissions", "--resume", "abc123"},
+		},
+		{
+			name:     "empty prompt no flag on resume",
+			cfg:      Config{BypassPermissions: true},
+			sid:      "abc123",
+			wantArgs: []string{"--dangerously-skip-permissions", "--resume", "abc123"},
+		},
+		{
+			name:     "prompt ignored for non-claude program on resume",
+			cfg:      Config{AgentProgram: "bash", BuildSystemPrompt: "ignored"},
+			sid:      "",
+			wantArgs: []string{"--continue"},
+		},
+		{
+			name: "model and prompt both prepend on resume, model first",
+			cfg: Config{
+				AgentModel:        "claude-opus-4-7",
+				BuildSystemPrompt: "p",
+			},
+			sid:      "sid",
+			wantArgs: []string{"--model", "claude-opus-4-7", "--append-system-prompt", "p", "--resume", "sid"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildResumeArgs(tt.cfg, tt.sid)
+			if len(got) != len(tt.wantArgs) {
+				t.Fatalf("expected %d args, got %d: %v", len(tt.wantArgs), len(got), got)
+			}
+			for i, want := range tt.wantArgs {
+				if got[i] != want {
+					t.Errorf("arg[%d]: expected %q, got %q (full=%v)", i, want, got[i], got)
+				}
+			}
+		})
+	}
+}
+
 func TestUserPromptSubmitClearsAskingQuestion(t *testing.T) {
 	repo := setupTestRepo(t)
 	mgr := NewManager(repo, defaultTestSettings())

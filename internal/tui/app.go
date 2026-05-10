@@ -378,6 +378,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					BypassPermissions: resolved.BypassPermissions,
 					AgentProgram:      resolved.AgentProgram,
 					AgentModel:        resolved.AgentModel,
+					BuildSystemPrompt: resolved.BuildSystemPrompt,
 				},
 				sessions: bs.Sessions,
 			})
@@ -1151,6 +1152,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 							BypassPermissions: resolved.BypassPermissions,
 							AgentProgram:      resolved.AgentProgram,
 							AgentModel:        resolved.AgentModel,
+							BuildSystemPrompt: resolved.BuildSystemPrompt,
 						}
 						if newAg, err := mgr.AddAgent(a.focusLaunchSession.ID, cfg); err == nil {
 							a.focusLaunchAgent = newAg
@@ -1657,6 +1659,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				BypassPermissions: resolved.BypassPermissions,
 				AgentProgram:      resolved.AgentProgram,
 				AgentModel:        resolved.AgentModel,
+				BuildSystemPrompt: resolved.BuildSystemPrompt,
 			}
 			return a, func() tea.Msg {
 				sess, ag, err := mgr.CreateSession(cfg)
@@ -1699,6 +1702,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				BypassPermissions: resolved.BypassPermissions,
 				AgentProgram:      resolved.AgentProgram,
 				AgentModel:        resolved.AgentModel,
+				BuildSystemPrompt: resolved.BuildSystemPrompt,
 			}
 			sessionID := sess.ID
 			return a, func() tea.Msg {
@@ -2208,6 +2212,7 @@ func (a App) updateBranchPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			BypassPermissions: resolved.BypassPermissions,
 			AgentProgram:      resolved.AgentProgram,
 			AgentModel:        resolved.AgentModel,
+			BuildSystemPrompt: resolved.BuildSystemPrompt,
 		}
 
 		branch := item.branch
@@ -2267,6 +2272,7 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			BypassPermissions: resolved.BypassPermissions,
 			AgentProgram:      resolved.AgentProgram,
 			AgentModel:        resolved.AgentModel,
+			BuildSystemPrompt: resolved.BuildSystemPrompt,
 		}
 		return a, func() tea.Msg {
 			sess, ag, err := mgr.CreateSession(pickerCfg)
@@ -3018,6 +3024,7 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 			BypassPermissions: resolved.BypassPermissions,
 			AgentProgram:      resolved.AgentProgram,
 			AgentModel:        resolved.AgentModel,
+			BuildSystemPrompt: resolved.BuildSystemPrompt,
 			Task:              prompt,
 		}
 		return a, func() tea.Msg {
@@ -3130,6 +3137,7 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 		BypassPermissions: resolved.BypassPermissions,
 		AgentProgram:      resolved.AgentProgram,
 		AgentModel:        resolved.AgentModel,
+		BuildSystemPrompt: resolved.BuildSystemPrompt,
 		Task:              prompt,
 	}
 

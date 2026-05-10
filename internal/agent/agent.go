@@ -62,6 +62,12 @@ type Config struct {
 	// picks its own default). Ignored when AgentProgram is not `claude` —
 	// passing --model to a custom binary is undefined.
 	AgentModel string
+	// BuildSystemPrompt, when non-empty, is forwarded as
+	// `--append-system-prompt <BuildSystemPrompt>` to spawned `claude`
+	// agents. Empty means no flag. Ignored when AgentProgram is not
+	// `claude` — passing --append-system-prompt to a custom binary is
+	// undefined.
+	BuildSystemPrompt string
 }
 
 // agentProgram returns the CLI program from cfg, defaulting to "claude".
@@ -190,6 +196,13 @@ func buildResumeArgs(cfg Config, claudeSessionID string) []string {
 		args = append(args, "--model", cfg.AgentModel)
 	}
 
+	// Re-attach the build-phase prompt on resume too. Anthropic doesn't
+	// promise that --append-system-prompt persists across --resume, and
+	// duplicating identical text is harmless if it does.
+	if cfg.BuildSystemPrompt != "" && supportsHooks(cfg) {
+		args = append(args, "--append-system-prompt", cfg.BuildSystemPrompt)
+	}
+
 	if cfg.BypassPermissions {
 		args = append(args, "--dangerously-skip-permissions")
 	}
@@ -219,6 +232,9 @@ func buildSpawnArgs(cfg Config, worktreePath, socketPath string) ([]string, erro
 	// is claude — passing --model to a custom binary is undefined.
 	if cfg.AgentModel != "" && supportsHooks(cfg) {
 		args = append(args, "--model", cfg.AgentModel)
+	}
+	if cfg.BuildSystemPrompt != "" && supportsHooks(cfg) {
+		args = append(args, "--append-system-prompt", cfg.BuildSystemPrompt)
 	}
 	if cfg.BypassPermissions {
 		args = append(args, "--dangerously-skip-permissions")

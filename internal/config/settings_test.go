@@ -636,3 +636,39 @@ func TestResolve_PlanFirst_RepoOverridesGlobal(t *testing.T) {
 		t.Errorf("BuildFromPlanPrompt = %q, want repo", r.BuildFromPlanPrompt)
 	}
 }
+
+func TestResolve_BuildSystemPrompt_Default(t *testing.T) {
+	r := config.Resolve(nil, nil)
+	if r.BuildSystemPrompt != config.DefaultBuildSystemPrompt {
+		t.Errorf("BuildSystemPrompt = %q, want default", r.BuildSystemPrompt)
+	}
+}
+
+func TestResolve_BuildSystemPrompt_GlobalOverride(t *testing.T) {
+	g := &config.GlobalSettings{BuildSystemPrompt: strPtr("custom")}
+	r := config.Resolve(g, nil)
+	if r.BuildSystemPrompt != "custom" {
+		t.Errorf("BuildSystemPrompt = %q, want %q", r.BuildSystemPrompt, "custom")
+	}
+}
+
+func TestResolve_BuildSystemPrompt_RepoOverridesGlobal(t *testing.T) {
+	g := &config.GlobalSettings{BuildSystemPrompt: strPtr("global")}
+	repo := &config.RepoSettings{BuildSystemPrompt: strPtr("repo")}
+	r := config.Resolve(g, repo)
+	if r.BuildSystemPrompt != "repo" {
+		t.Errorf("BuildSystemPrompt = %q, want repo", r.BuildSystemPrompt)
+	}
+}
+
+// An empty-string override is honored as a deliberate disable. The build
+// path keys flag emission off `BuildSystemPrompt != ""`, so this lets users
+// opt out by setting "build_system_prompt": "" in their config without
+// requiring a separate boolean toggle.
+func TestResolve_BuildSystemPrompt_EmptyStringDisables(t *testing.T) {
+	g := &config.GlobalSettings{BuildSystemPrompt: strPtr("")}
+	r := config.Resolve(g, nil)
+	if r.BuildSystemPrompt != "" {
+		t.Errorf("BuildSystemPrompt = %q, want empty (disabled)", r.BuildSystemPrompt)
+	}
+}

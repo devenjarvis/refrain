@@ -50,6 +50,22 @@ const (
 	// real agent when an approved plan is handed off. The agent is expected
 	// to read .claude/plan.md and execute it.
 	DefaultBuildFromPlanPrompt = "Read .claude/plan.md and execute the plan. Update task checkboxes as you complete them. Stop when all tasks are complete or when you need a decision."
+
+	// DefaultBuildSystemPrompt is appended (via Claude's
+	// --append-system-prompt flag) to every Building-phase agent. It tells
+	// Claude to (a) plan via TodoWrite so progress can be scraped through
+	// PostToolUse hooks, and (b) commit per task with a parseable subject
+	// prefix so commits can be mapped back to plan tasks during review. The
+	// "[task N]" indexing matches the "- [ ]" / "- [x]" counting in
+	// internal/tui/dashboard.go's planTaskCounts so the prompt and the
+	// future parser agree on what counts as a task line.
+	DefaultBuildSystemPrompt = `When you start a non-trivial task in this session, use the TodoWrite tool first to break the work into ordered, atomic steps and update item status as you progress.
+
+Make exactly one git commit per completed step.
+
+If a file at .claude/plan.md exists in the worktree, the commit subject MUST start with "[task N] " where N is the 1-based index of the corresponding "- [ ]" line in that file (counting only task list lines, top-to-bottom, ignoring section headers). If no .claude/plan.md exists, prefix the subject with "task: " instead. The rest of the subject is a normal short description. Example: "[task 3] add --append-system-prompt flag plumbing".
+
+Do not squash unrelated work into a single commit, and do not amend a previous commit to add new task work — each task is its own commit so the work can be reviewed task-by-task.`
 )
 
 // ClampSidebarWidth returns w constrained to [MinSidebarWidth, MaxSidebarWidth].
@@ -86,6 +102,7 @@ type GlobalSettings struct {
 	// Plan-first planning. Both fields are also overridable per-repo.
 	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
 	BuildFromPlanPrompt *string `json:"build_from_plan_prompt,omitempty"`
+	BuildSystemPrompt   *string `json:"build_system_prompt,omitempty"`
 }
 
 // RepoSettings holds per-repo overrides stored at <repo>/.baton/config.json.
@@ -102,6 +119,7 @@ type RepoSettings struct {
 	WorktreeDir         *string `json:"worktree_dir,omitempty"`
 	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
 	BuildFromPlanPrompt *string `json:"build_from_plan_prompt,omitempty"`
+	BuildSystemPrompt   *string `json:"build_system_prompt,omitempty"`
 }
 
 // ResolvedSettings is the fully merged configuration with no nil pointers.
@@ -133,6 +151,10 @@ type ResolvedSettings struct {
 	// Plan-first planning.
 	PlanFirstEnabled    bool
 	BuildFromPlanPrompt string
+	// BuildSystemPrompt is forwarded as `--append-system-prompt <text>` to
+	// the spawned `claude` agent at every Building-phase spawn site (and
+	// resume). Empty means no flag.
+	BuildSystemPrompt string
 }
 
 // Resolve merges global and repo settings over built-in defaults.
@@ -153,6 +175,7 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		MaxReviewBacklog:    DefaultMaxReviewBacklog,
 		PlanFirstEnabled:    DefaultPlanFirstEnabled,
 		BuildFromPlanPrompt: DefaultBuildFromPlanPrompt,
+		BuildSystemPrompt:   DefaultBuildSystemPrompt,
 	}
 
 	if global != nil {
@@ -204,6 +227,9 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		if global.BuildFromPlanPrompt != nil {
 			r.BuildFromPlanPrompt = *global.BuildFromPlanPrompt
 		}
+		if global.BuildSystemPrompt != nil {
+			r.BuildSystemPrompt = *global.BuildSystemPrompt
+		}
 	}
 
 	if repo != nil {
@@ -239,6 +265,9 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if repo.BuildFromPlanPrompt != nil {
 			r.BuildFromPlanPrompt = *repo.BuildFromPlanPrompt
+		}
+		if repo.BuildSystemPrompt != nil {
+			r.BuildSystemPrompt = *repo.BuildSystemPrompt
 		}
 	}
 
