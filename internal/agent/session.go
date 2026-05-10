@@ -845,6 +845,37 @@ func (s *Session) ReviseError() error {
 	return s.reviseErr
 }
 
+// PlanTask is a single task item parsed from a plan file.
+type PlanTask struct {
+	Index int    // 1-based, counting all "- [ ]" and "- [x]" lines top-to-bottom
+	Text  string // task description without the leading "- [ ] " or "- [x] "
+	Done  bool   // true if marked [x] or [X]
+}
+
+// ParsePlanTasks extracts ordered task items from plan markdown using the same
+// counting rules as planTaskCounts in internal/tui/dashboard.go:
+// every "- [ ]" or "- [x]" line (leading whitespace stripped) is a task,
+// indexed 1-based in the order they appear. Section headers are ignored.
+func ParsePlanTasks(plan string) []PlanTask {
+	var tasks []PlanTask
+	idx := 0
+	for _, raw := range strings.Split(plan, "\n") {
+		line := strings.TrimLeft(raw, " \t")
+		if !strings.HasPrefix(line, "- [") {
+			continue
+		}
+		if len(line) < 6 || line[4] != ']' {
+			continue
+		}
+		idx++
+		marker := line[3]
+		done := marker == 'x' || marker == 'X'
+		text := strings.TrimSpace(line[5:])
+		tasks = append(tasks, PlanTask{Index: idx, Text: text, Done: done})
+	}
+	return tasks
+}
+
 // PlanPath returns the absolute path to the session's plan markdown file
 // (<worktree>/.claude/plan.md). Always returns a path even if the file does
 // not exist — callers use HasPlan or ReadPlan to test for presence.
