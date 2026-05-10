@@ -251,6 +251,7 @@ func TestBuildClaudePlannerArgs_UsesSonnet(t *testing.T) {
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--tools Read,Grep,Glob,LS,LSP,WebFetch,WebSearch",
+		"--allowed-tools Read,Grep,Glob,LS,LSP,WebFetch,WebSearch",
 		"--setting-sources user,project",
 	} {
 		if !strings.Contains(joined, want) {
@@ -335,19 +336,22 @@ func TestBuildClaudePlannerArgs_WithQuestionSocketRegistersMCPServer(t *testing.
 		t.Errorf("mcp server env[%s] = %q, want %q", PlannerQuestionSocketEnv, gotSocket, socketPath)
 	}
 
-	// The fully-qualified ask_user tool name must be on the --tools allowlist.
-	toolsIdx := -1
-	for i, a := range args {
-		if a == "--tools" {
-			toolsIdx = i
-			break
+	// The fully-qualified ask_user tool name must appear on both --tools and
+	// --allowed-tools so it is both exposed and auto-approved.
+	for _, flag := range []string{"--tools", "--allowed-tools"} {
+		idx := -1
+		for i, a := range args {
+			if a == flag {
+				idx = i
+				break
+			}
 		}
-	}
-	if toolsIdx < 0 || toolsIdx+1 >= len(args) {
-		t.Fatalf("argv missing --tools value")
-	}
-	if !strings.Contains(args[toolsIdx+1], plannerQuestionToolName) {
-		t.Errorf("--tools missing %q; got %q", plannerQuestionToolName, args[toolsIdx+1])
+		if idx < 0 || idx+1 >= len(args) {
+			t.Fatalf("argv missing %s value", flag)
+		}
+		if !strings.Contains(args[idx+1], plannerQuestionToolName) {
+			t.Errorf("%s missing %q; got %q", flag, plannerQuestionToolName, args[idx+1])
+		}
 	}
 }
 
@@ -368,18 +372,20 @@ func TestBuildClaudePlannerArgs_EmptySocketKeepsZeroServers(t *testing.T) {
 		t.Errorf("--mcp-config = %q, want canonical empty payload", args[mcpIdx+1])
 	}
 
-	toolsIdx := -1
-	for i, a := range args {
-		if a == "--tools" {
-			toolsIdx = i
-			break
+	for _, flag := range []string{"--tools", "--allowed-tools"} {
+		idx := -1
+		for i, a := range args {
+			if a == flag {
+				idx = i
+				break
+			}
 		}
-	}
-	if toolsIdx < 0 || toolsIdx+1 >= len(args) {
-		t.Fatalf("argv missing --tools value")
-	}
-	if strings.Contains(args[toolsIdx+1], "ask_user") {
-		t.Errorf("--tools should NOT include ask_user when socket is empty; got %q", args[toolsIdx+1])
+		if idx < 0 || idx+1 >= len(args) {
+			t.Fatalf("argv missing %s value", flag)
+		}
+		if strings.Contains(args[idx+1], "ask_user") {
+			t.Errorf("%s should NOT include ask_user when socket is empty; got %q", flag, args[idx+1])
+		}
 	}
 }
 
