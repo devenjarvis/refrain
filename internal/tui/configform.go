@@ -271,3 +271,14 @@ func (f configForm) selectIndex(label string) int {
 	}
 	return 0
 }
+
+// optionIndex returns the index of value in options, or 0 if not present.
+// Used to compute the initial selection for a fieldSelect.
+func optionIndex(options []string, value string) int {
+	for i, o := range options {
+		if o == value {
+			return i
+		}
+	}
+	return 0
+}
