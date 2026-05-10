@@ -216,6 +216,88 @@ func TestPrIndicator_NonStacked(t *testing.T) {
 	}
 }
 
+// TestRowStatePhrase verifies the state phrase selector for shipping row badges.
+func TestRowStatePhrase(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry *prCacheEntry
+		want  string
+	}{
+		{
+			name:  "nil entry",
+			entry: nil,
+			want:  "",
+		},
+		{
+			name:  "no pr",
+			entry: &prCacheEntry{},
+			want:  "",
+		},
+		{
+			name: "merge ready",
+			entry: &prCacheEntry{
+				pr:      &github.PRState{Mergeable: true},
+				checks:  &github.CheckStatus{State: "success", Total: 1, Passed: 1},
+				reviews: &github.ReviewStatus{State: "approved", Approved: 1},
+			},
+			want: "Ready",
+		},
+		{
+			name: "conflicts",
+			entry: &prCacheEntry{
+				pr:      &github.PRState{Mergeable: false},
+				checks:  &github.CheckStatus{State: "success", Total: 1, Passed: 1},
+				reviews: &github.ReviewStatus{State: "approved", Approved: 1},
+			},
+			want: "Conflicts",
+		},
+		{
+			name: "changes requested",
+			entry: &prCacheEntry{
+				pr:      &github.PRState{Mergeable: true},
+				reviews: &github.ReviewStatus{State: "changes_requested"},
+			},
+			want: "Changes requested",
+		},
+		{
+			name: "ci failing",
+			entry: &prCacheEntry{
+				pr:     &github.PRState{Mergeable: true},
+				checks: &github.CheckStatus{State: "failure", Failed: 2, Total: 5},
+			},
+			want: "CI 2/5 failing",
+		},
+		{
+			name: "waiting on ci",
+			entry: &prCacheEntry{
+				pr:     &github.PRState{Mergeable: true},
+				checks: &github.CheckStatus{State: "pending"},
+			},
+			want: "Waiting on CI",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := rowStatePhrase(tc.entry)
+			if got != tc.want {
+				t.Errorf("rowStatePhrase = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPrIndicator_StatePhrase verifies that prIndicator surfaces the state phrase.
+func TestPrIndicator_StatePhrase(t *testing.T) {
+	entry := &prCacheEntry{
+		pr:     &github.PRState{Number: 7, Mergeable: true},
+		checks: &github.CheckStatus{State: "failure", Failed: 1, Total: 3},
+	}
+	ind := prIndicator(entry)
+	if !strings.Contains(ind, "CI 1/3 failing") {
+		t.Errorf("prIndicator = %q, want to contain CI phrase", ind)
+	}
+}
+
 // Ensure the test file participates in the package even when the above tests
 // are filtered out via -run.
 var _ = tea.Batch

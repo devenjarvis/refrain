@@ -9,6 +9,32 @@ import (
 	"github.com/devenjarvis/baton/internal/github"
 )
 
+// rowStatePhrase returns a human-readable badge for a session's shipping row.
+// Priority: merge-ready > conflicts > changes-requested > CI failure > CI pending.
+func rowStatePhrase(entry *prCacheEntry) string {
+	if entry == nil || entry.pr == nil {
+		return ""
+	}
+	if isMergeReady(entry) {
+		return "Ready"
+	}
+	if !entry.pr.Mergeable {
+		return "Conflicts"
+	}
+	if entry.reviews != nil && entry.reviews.State == "changes_requested" {
+		return "Changes requested"
+	}
+	if entry.checks != nil {
+		switch entry.checks.State {
+		case "failure":
+			return fmt.Sprintf("CI %d/%d failing", entry.checks.Failed, entry.checks.Total)
+		case "pending":
+			return "Waiting on CI"
+		}
+	}
+	return ""
+}
+
 // prPollMsg carries the result of an async PR status poll.
 //
 // Three result shapes are possible and must be distinguished by the handler:
@@ -106,7 +132,7 @@ func prIndicator(entry *prCacheEntry) string {
 		return ""
 	}
 
-	// Non-stacked: simple "#N symbol [Ready]" format.
+	// Non-stacked: simple "#N symbol [phrase]" format.
 	if len(entry.stack) == 0 {
 		prNum := StyleLink.Render(fmt.Sprintf("#%d", entry.pr.Number))
 		sym := checkSymbolFor(entry.checks)
@@ -114,8 +140,8 @@ func prIndicator(entry *prCacheEntry) string {
 		if sym != "" {
 			result += " " + sym
 		}
-		if isMergeReady(entry) {
-			result += " " + lipgloss.NewStyle().Foreground(ColorSuccess).Render("Ready")
+		if phrase := rowStatePhrase(entry); phrase != "" {
+			result += " " + statePhraseStyle(phrase).Render(phrase)
 		}
 		return result
 	}
@@ -147,10 +173,24 @@ func prIndicator(entry *prCacheEntry) string {
 	}
 
 	result := strings.Join(parts, sep)
-	if isMergeReady(entry) {
-		result += " " + lipgloss.NewStyle().Foreground(ColorSuccess).Render("Ready")
+	if phrase := rowStatePhrase(entry); phrase != "" {
+		result += " " + statePhraseStyle(phrase).Render(phrase)
 	}
 	return result
+}
+
+// statePhraseStyle returns a lipgloss style appropriate for a row state phrase.
+func statePhraseStyle(phrase string) lipgloss.Style {
+	switch phrase {
+	case "Ready":
+		return lipgloss.NewStyle().Foreground(ColorSuccess)
+	case "Conflicts", "Changes requested":
+		return lipgloss.NewStyle().Foreground(ColorError)
+	case "Waiting on CI":
+		return lipgloss.NewStyle().Foreground(ColorWarning)
+	default: // "CI N/M failing"
+		return lipgloss.NewStyle().Foreground(ColorError)
+	}
 }
 
 // prIndicatorWidth returns the approximate visible width of prIndicator output
@@ -159,13 +199,13 @@ func prIndicatorWidth(entry *prCacheEntry) int {
 	if entry == nil || entry.pr == nil {
 		return 0
 	}
-	// Head PR: "#N" + optional " symbol" + optional " Ready"
+	// Head PR: "#N" + optional " symbol" + optional " phrase"
 	w := 1 + len(fmt.Sprintf("%d", entry.pr.Number))
 	if entry.checks != nil {
 		w += 2 // " symbol"
 	}
-	if isMergeReady(entry) {
-		w += 6 // " Ready"
+	if phrase := rowStatePhrase(entry); phrase != "" {
+		w += 1 + len(phrase)
 	}
 	// Base levels: each adds " \u2192 #N" + optional " symbol"
 	for _, base := range entry.stack {
