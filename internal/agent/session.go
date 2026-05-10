@@ -936,6 +936,9 @@ func GroupCommitsByTask(commits []git.Commit) []CommitGroup {
 // (<worktree>/.claude/plan.md). Always returns a path even if the file does
 // not exist — callers use HasPlan or ReadPlan to test for presence.
 func (s *Session) PlanPath() string {
+	if s.Worktree == nil {
+		return ""
+	}
 	return filepath.Join(s.Worktree.Path, ".claude", "plan.md")
 }
 
@@ -943,6 +946,9 @@ func (s *Session) PlanPath() string {
 // snapshot (<worktree>/.claude/plan.prev.md). The file is written by
 // RevisePlan as a single-step undo target; RestorePrevPlan reads it back.
 func (s *Session) PrevPlanPath() string {
+	if s.Worktree == nil {
+		return ""
+	}
 	return filepath.Join(s.Worktree.Path, ".claude", "plan.prev.md")
 }
 
@@ -1045,7 +1051,11 @@ func (s *Session) CachedPlan() (string, bool) {
 	// Lazy load. Drop the read lock before doing I/O so a concurrent
 	// WritePlan can populate the cache while we read; if it does, we
 	// just observe its write on the next call.
-	data, err := os.ReadFile(s.PlanPath())
+	planPath := s.PlanPath()
+	if planPath == "" {
+		return "", false
+	}
+	data, err := os.ReadFile(planPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			s.mu.Lock()
