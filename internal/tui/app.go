@@ -3809,6 +3809,13 @@ func getLocalHeadSHA(worktreePath string) string {
 // refreshPRStatusForSession returns a Cmd that polls PR, check, and review status for a single session.
 // worktreePath is used as a fallback SHA source when the branch hasn't been pushed under its current name.
 func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePath string) tea.Cmd {
+	// Guard: ensure the caller passed the repo that actually owns this session.
+	// This catches programming errors (e.g. passing cfg.Repos[0].Path for a
+	// session that belongs to a different repo) before the poll fires.
+	if owning := a.repoPathForSession(sessionID); owning != "" && owning != repoPath {
+		mismatchErr := fmt.Errorf("internal: refreshPRStatus: repoPath %q does not own session %s (owner=%q)", repoPath, sessionID, owning)
+		return func() tea.Msg { return prPollMsg{sessionID: sessionID, err: mismatchErr} }
+	}
 	ghClient := a.ghClient
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
