@@ -17,7 +17,12 @@ type settingsSchema struct {
 }
 
 type hookMatcher struct {
-	Hooks []hookCommand `json:"hooks"`
+	// Matcher filters which tool calls trigger this hook entry. Required for
+	// PreToolUse — without it Claude Code does not fire the hook. Use "*" to
+	// match all tool calls. Omitted (empty) for lifecycle hooks (SessionStart,
+	// Stop, etc.) where the event type alone is the filter.
+	Matcher string        `json:"matcher,omitempty"`
+	Hooks   []hookCommand `json:"hooks"`
 }
 
 type hookCommand struct {
@@ -50,7 +55,7 @@ func WriteHooksFile(path string) error {
 			"SessionEnd":       {{Hooks: []hookCommand{{Type: "command", Command: batonPath + " hook session-end"}}}},
 			"Notification":     {{Hooks: []hookCommand{{Type: "command", Command: batonPath + " hook notification"}}}},
 			"UserPromptSubmit": {{Hooks: []hookCommand{{Type: "command", Command: batonPath + " hook user-prompt-submit"}}}},
-			"PreToolUse":       {{Hooks: []hookCommand{{Type: "command", Command: batonPath + " hook pre-tool-use"}}}},
+			"PreToolUse":       {{Matcher: "*", Hooks: []hookCommand{{Type: "command", Command: batonPath + " hook pre-tool-use"}}}},
 		},
 	}
 

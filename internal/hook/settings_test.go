@@ -44,6 +44,12 @@ func TestWriteHooksFile(t *testing.T) {
 		batonPath = resolved
 	}
 
+	// PreToolUse must have matcher="*" so Claude fires it for all tool calls;
+	// lifecycle hooks (SessionStart, Stop, etc.) need no matcher.
+	wantMatcher := map[string]string{
+		"PreToolUse": "*",
+	}
+
 	for _, event := range wantEvents {
 		matchers, ok := parsed.Hooks[event]
 		if !ok {
@@ -53,6 +59,9 @@ func TestWriteHooksFile(t *testing.T) {
 		if len(matchers) != 1 {
 			t.Errorf("event %q: expected 1 matcher, got %d", event, len(matchers))
 			continue
+		}
+		if m := wantMatcher[event]; m != "" && matchers[0].Matcher != m {
+			t.Errorf("event %q: expected matcher %q, got %q", event, m, matchers[0].Matcher)
 		}
 		if len(matchers[0].Hooks) != 1 {
 			t.Errorf("event %q: expected 1 hook, got %d", event, len(matchers[0].Hooks))
