@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,13 @@ import (
 	bpty "github.com/devenjarvis/baton/internal/pty"
 	"github.com/devenjarvis/baton/internal/vt"
 )
+
+// TodoItem represents a single entry from a TodoWrite tool call.
+type TodoItem struct {
+	Content    string `json:"content"`
+	Status     string `json:"status"`
+	ActiveForm string `json:"activeForm"`
+}
 
 // Agent ties together a PTY and VT terminal into a managed unit.
 // Agents do not own worktrees — sessions do.
@@ -43,6 +51,9 @@ type Agent struct {
 	chimedForTurn    bool
 	sessionStartedAt time.Time
 	cleanExit        bool
+
+	todos          []TodoItem
+	todosUpdatedAt time.Time
 
 	done          chan struct{}
 	writeLoopDone chan struct{}
@@ -526,11 +537,23 @@ func (a *Agent) OnHookEvent(e hook.Event) (statusChanged bool) {
 			return false
 		}
 		a.waitingReason = ""
+		todosChanged := false
+		if e.ToolName == "TodoWrite" && len(e.ToolInput) > 0 {
+			var inp struct {
+				Todos []TodoItem `json:"todos"`
+			}
+			if err := json.Unmarshal(e.ToolInput, &inp); err == nil {
+				a.todos = make([]TodoItem, len(inp.Todos))
+				copy(a.todos, inp.Todos)
+				a.todosUpdatedAt = time.Now()
+				todosChanged = true
+			}
+		}
 		if a.status != StatusActive {
 			a.status = StatusActive
 			return true
 		}
-		return false
+		return todosChanged
 	}
 	return false
 }
@@ -798,4 +821,34 @@ func (a *Agent) SetClaudeName(v bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.hasClaudeName = v
+}
+
+// Todos returns a snapshot of the agent's current todo list. Returns nil when
+// no TodoWrite has been received yet.
+func (a *Agent) Todos() []TodoItem {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if len(a.todos) == 0 {
+		return nil
+	}
+	out := make([]TodoItem, len(a.todos))
+	copy(out, a.todos)
+	return out
+}
+
+// SetTodos replaces the agent's todo list and records the update timestamp.
+func (a *Agent) SetTodos(items []TodoItem) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.todos = make([]TodoItem, len(items))
+	copy(a.todos, items)
+	a.todosUpdatedAt = time.Now()
+}
+
+// TodosUpdatedAt returns the time of the most recent SetTodos call, or the
+// zero value if no TodoWrite has been received.
+func (a *Agent) TodosUpdatedAt() time.Time {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.todosUpdatedAt
 }
