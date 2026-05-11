@@ -207,12 +207,12 @@ type App struct {
 	diffStatsCache      map[string]*diffStatsEntry // keyed by session ID
 	diffRefreshInFlight bool
 
-	ghClient        *github.Client
-	prCache         map[string]*prCacheEntry   // keyed by session ID
-	prPollStates    map[string]*prSessionState // keyed by session ID
-	prPollsInFlight int                        // count of concurrent in-flight polls
-	prDraftInFlight   bool   // true while startPRDraftCmd is running; prevents double-trigger
-	prDraftSessionID  string // ID of the session whose PR draft is in flight; "" when idle
+	ghClient         *github.Client
+	prCache          map[string]*prCacheEntry   // keyed by session ID
+	prPollStates     map[string]*prSessionState // keyed by session ID
+	prPollsInFlight  int                        // count of concurrent in-flight polls
+	prDraftInFlight  bool                       // true while startPRDraftCmd is running; prevents double-trigger
+	prDraftSessionID string                     // ID of the session whose PR draft is in flight; "" when idle
 
 	// PR compose modal and its associated session context.
 	prComposeModal   prComposeModal
