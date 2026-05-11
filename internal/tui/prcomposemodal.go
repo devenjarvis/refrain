@@ -103,7 +103,7 @@ func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
 		case "esc":
 			m.Close()
 			return func() tea.Msg { return prComposeCancelMsg{} }
-		case "enter":
+		case "ctrl+enter":
 			title := strings.TrimSpace(m.titleArea.Value())
 			if title == "" {
 				return nil
@@ -123,7 +123,7 @@ func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
 			m.focused = 0
 			m.bodyArea.Blur()
 			return m.titleArea.Focus()
-		case "d":
+		case "ctrl+d":
 			m.draft = !m.draft
 			return nil
 		}
@@ -195,9 +195,9 @@ func prComposeFooter() string {
 	desc := func(s string) string { return StyleSubtle.Render(s) }
 	line1 := fmt.Sprintf(
 		"%s %s   %s %s   %s %s   %s %s",
-		chip("↵"), desc("create"),
+		chip("ctrl+↵"), desc("create"),
 		chip("⇥"), desc("switch field"),
-		chip("d"), desc("toggle draft"),
+		chip("ctrl+d"), desc("toggle draft"),
 		chip("esc"), desc("cancel"),
 	)
 	return line1
