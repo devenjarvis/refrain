@@ -283,7 +283,7 @@ func TestRenderTaskList_NoDiffFoundBadge(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false)
 
 	if !strings.Contains(output, "Write tests") {
 		t.Error("must render a row for task 2 even though it has no commits")
