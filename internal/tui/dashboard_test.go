@@ -606,3 +606,32 @@ func TestPlanningStatusBadge_PhaseTransitions(t *testing.T) {
 type errAnything struct{}
 
 func (errAnything) Error() string { return "anything" }
+
+// TestRenderQueueRow_PRDraftBadge verifies that the "drafting PR…" spinner
+// badge appears on line 2 of a REVIEWING row when prDraftSessionID matches,
+// and that clearing prDraftSessionID restores the normal task display.
+func TestRenderQueueRow_PRDraftBadge(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-1", "fix-auth")
+	sess.SetOriginalPrompt("Fix the auth bug")
+	sess.MarkDone()
+
+	// With prDraftSessionID matching the session: badge should appear.
+	d := dashboardModel{prDraftSessionID: sess.ID}
+	rows := d.renderQueueRow(sess, "", false, ColorWarning, 80)
+	if len(rows) < 2 {
+		t.Fatalf("renderQueueRow returned %d lines, want 2", len(rows))
+	}
+	if !strings.Contains(ansi.Strip(rows[1]), "drafting PR") {
+		t.Errorf("in-flight row line 2 = %q, want 'drafting PR…'", rows[1])
+	}
+
+	// With prDraftSessionID cleared: normal prompt should appear.
+	d.prDraftSessionID = ""
+	rows = d.renderQueueRow(sess, "", false, ColorWarning, 80)
+	if strings.Contains(ansi.Strip(rows[1]), "drafting PR") {
+		t.Error("cleared state must not show badge; got 'drafting PR' on line 2")
+	}
+	if !strings.Contains(ansi.Strip(rows[1]), "Fix the auth bug") {
+		t.Errorf("cleared state line 2 = %q, want original prompt", rows[1])
+	}
+}
