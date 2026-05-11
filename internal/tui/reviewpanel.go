@@ -259,6 +259,8 @@ func renderTaskList(entry *reviewDiffEntry, width, availHeight, cursor int) []st
 						errStr = truncateVisible(v.err.Error(), 30)
 					}
 					verdictPart = failStyle.Render("✗ " + errStr)
+				case verdictNoDiff:
+					verdictPart = StyleSubtle.Render("no diff found")
 				}
 			}
 		}

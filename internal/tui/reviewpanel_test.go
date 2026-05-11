@@ -182,6 +182,45 @@ func TestReviewTaskGroupAtCursor(t *testing.T) {
 	}
 }
 
+// TestRenderTaskList_NoDiffFoundBadge verifies that a plan task with no matching
+// commit group renders a "no diff found" verdict badge instead of being silent,
+// when other tasks do have commit groups (i.e. verdicts map is initialised).
+func TestRenderTaskList_NoDiffFoundBadge(t *testing.T) {
+	entry := &reviewDiffEntry{
+		files:     []git.FileStat{{Path: "auth.go", Status: "M", Insertions: 5, Deletions: 1}},
+		aggregate: &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "Add auth middleware", Done: false},
+			{Index: 2, Text: "Write tests", Done: false},
+		},
+		groups: []taskReviewGroup{
+			{
+				taskIndex: 1,
+				commits:   []git.Commit{{Hash: "abc123", Subject: "[task 1] add middleware"}},
+				stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
+			},
+		},
+		// task 2 has no group — verdictNoDiff should be auto-populated
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictPending},
+			2: {state: verdictNoDiff},
+		},
+	}
+
+	sess := agent.NewSessionForTest("sess-1", "fix-auth")
+	sess.SetOriginalPrompt("Fix the auth bug")
+	sess.MarkDone()
+
+	output := renderReviewPanel(sess, entry, 120, 40, 0)
+
+	if !strings.Contains(output, "Write tests") {
+		t.Error("must render a row for task 2 even though it has no commits")
+	}
+	if !strings.Contains(output, "no diff found") {
+		t.Error("task with no commit group must show 'no diff found' badge")
+	}
+}
+
 // TestReviewTaskCount verifies task row counting including the "other" bucket.
 func TestReviewTaskCount(t *testing.T) {
 	tests := []struct {

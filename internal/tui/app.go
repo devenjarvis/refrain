@@ -4433,6 +4433,7 @@ const (
 	verdictRunning                     // reviewer subprocess in flight
 	verdictDone                        // reviewer returned a verdict
 	verdictErr                         // reviewer subprocess errored
+	verdictNoDiff                      // task has no matching commits — nothing to review
 )
 
 // taskVerdictRecord holds the verdict state for one task row.
@@ -4525,6 +4526,13 @@ func (a App) fetchReviewDiffCmd(sess *agent.Session) tea.Cmd {
 						rawDiff:   rawDiff,
 					})
 					entry.verdicts[cg.TaskIndex] = &taskVerdictRecord{state: verdictPending}
+				}
+				// Mark plan tasks that have no matching commit group so the review
+				// panel can surface the gap instead of silently omitting the row.
+				for _, t := range entry.tasks {
+					if _, matched := entry.verdicts[t.Index]; !matched {
+						entry.verdicts[t.Index] = &taskVerdictRecord{state: verdictNoDiff}
+					}
 				}
 			}
 		}
