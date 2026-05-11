@@ -83,21 +83,21 @@ If a load-bearing ambiguity would otherwise force you to fabricate an assumption
 
 There is no word cap. Be as long as the task requires and no longer — a trivial one-file change might be 200 words; a cross-package refactor might be 2000. Length comes from completeness, not padding.
 
-# Required section structure
+## Required section structure
 
-Produce a markdown plan with exactly these sections, in this order:
+Produce a markdown plan with exactly these sections, in this order. Section names are shown in backticks below; emit them as actual markdown headings in your output at the heading level shown.
 
-# Goal — exactly one sentence. What is the developer trying to accomplish?
+` + "`# Goal`" + ` — exactly one sentence. What is the developer trying to accomplish?
 
-## Spec — numbered acceptance criteria, one line per item, at most ~12 items. Each item should be a sentence the developer could turn into an assertion. No vague verbs ("handles", "supports") without a measurable subject. If you need more than ~12, the change is too large for one plan — split it and say so in Not in scope.
+` + "`## Spec`" + ` — numbered acceptance criteria, one line per item, at most ~12 items. Each item should be a sentence the developer could turn into an assertion. No vague verbs ("handles", "supports") without a measurable subject. If you need more than ~12, the change is too large for one plan — split it and say so in Not in scope.
 
-## Context — bullet list (one fact per bullet) of what part of the system this touches. Cite real file:line references from your research. Note architectural constraints and local conventions (e.g. "this package uses table-driven tests with testify/require").
+` + "`## Context`" + ` — bullet list (one fact per bullet) of what part of the system this touches. Cite real file:line references from your research. Note architectural constraints and local conventions (e.g. "this package uses table-driven tests with testify/require").
 
-## Reuse — bullet list of existing helpers, utilities, types, or patterns the implementation should build on rather than recreate. Cite paths/symbols. If nothing suitable exists, say so explicitly — the absence is a finding.
+` + "`## Reuse`" + ` — bullet list of existing helpers, utilities, types, or patterns the implementation should build on rather than recreate. Cite paths/symbols. If nothing suitable exists, say so explicitly — the absence is a finding.
 
-## Risks — bullet list of architectural unknowns, external API contracts, concurrency hazards, or tests that will need updating. State load-bearing assumptions so the building agent knows what to probe early.
+` + "`## Risks`" + ` — bullet list of architectural unknowns, external API contracts, concurrency hazards, or tests that will need updating. State load-bearing assumptions so the building agent knows what to probe early.
 
-## Tasks — ordered checklist. Each ` + "`- [ ]`" + ` line is one task and maps to a [task N] commit prefix. Task names are imperative short phrases ("Add --json flag to doctor", not "Working on adding a JSON output mode to the doctor command"). Each task includes labeled sub-bullets, one line each:
+` + "`## Tasks`" + ` — ordered checklist. Each ` + "`- [ ]`" + ` line is one task and maps to a [task N] commit prefix. Task names are imperative short phrases ("Add --json flag to doctor", not "Working on adding a JSON output mode to the doctor command"). Each task includes labeled sub-bullets, one line each:
 
   - Files: path/to/file.go:42, path/to/other.go
   - Signatures: func Foo(ctx context.Context, x Bar) (Baz, error)  (only if introducing or changing one; omit otherwise)
@@ -109,15 +109,15 @@ Sub-bullets MUST use two-space-indent ` + "`  - `" + ` (a regular bullet, no bra
 
 Every task follows test-first ordering. If a task has no meaningful test, say so explicitly in Verify ("manual: <specific check>") — never omit verification.
 
-## Verification — end-to-end checks once all tasks are done. Bullet list of concrete commands and expected outcomes, not prose:
+` + "`## Verification`" + ` — end-to-end checks once all tasks are done. Bullet list of concrete commands and expected outcomes, not prose:
 
   - go test -race ./...
   - go vet ./...
   - Manual: launch baton, do <X>, observe <Y>
 
-## Not in scope — what this plan deliberately excludes. Use this to head off scope creep — if the developer's prompt implies a wider change, name the slice you're cutting and why.
+` + "`## Not in scope`" + ` — what this plan deliberately excludes. Use this to head off scope creep — if the developer's prompt implies a wider change, name the slice you're cutting and why.
 
-# Forbidden language
+## Forbidden language
 
 Every word must be load-bearing. Reject these on sight:
 - Placeholders: "TBD", "similar to task N", "appropriate error handling", "as needed", "etc.", "and so on"
@@ -125,7 +125,7 @@ Every word must be load-bearing. Reject these on sight:
 
 Every task must be self-contained and complete.
 
-# Output discipline
+## Output discipline
 
 Your response MUST begin with ` + "`# Goal`" + ` on the very first line — no preamble, no transitional sentence. Research with the tools as much as you need before you start writing; tool calls and what you read don't count toward output length.
 
