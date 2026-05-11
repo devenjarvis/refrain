@@ -168,13 +168,13 @@ func (c *Client) GetPR(ctx context.Context, owner, repo, branch string) (*PRStat
 	return prToState(prs[0]), nil
 }
 
-// GetPRBySHA finds the PR associated with a commit SHA. This is invariant to
-// branch renames: after a local `git branch -m`, the commit's association with
-// its PR on GitHub is preserved, so SHA lookup still finds it.
+// GetPRBySHA finds the open PR associated with a commit SHA. This is invariant
+// to branch renames: after a local `git branch -m`, the commit's association
+// with its PR on GitHub is preserved, so SHA lookup still finds it.
 //
 // Semantics:
 //   - fork PRs (head repo != owner/repo) are filtered out.
-//   - prefers open PRs; if none are open, returns the most recent (closed/merged).
+//   - only open PRs are returned; closed/merged PRs are ignored.
 //   - 404/422 (commit not yet pushed to GitHub) return (nil, nil), not an error.
 func (c *Client) GetPRBySHA(ctx context.Context, owner, repo, sha string) (*PRState, error) {
 	if sha == "" {
@@ -199,26 +199,14 @@ func (c *Client) GetPRBySHA(ctx context.Context, owner, repo, sha string) (*PRSt
 	}
 
 	headRepo := owner + "/" + repo
-	var openPR *gh.PullRequest
-	var mostRecent *gh.PullRequest
 	for _, pr := range prs {
 		// Drop PRs whose head is in a fork repo sharing the SHA.
 		if pr.GetHead().GetRepo().GetFullName() != headRepo {
 			continue
 		}
-		if openPR == nil && pr.GetState() == "open" {
-			openPR = pr
+		if pr.GetState() == "open" {
+			return prToState(pr), nil
 		}
-		if mostRecent == nil ||
-			pr.GetUpdatedAt().After(mostRecent.GetUpdatedAt().Time) {
-			mostRecent = pr
-		}
-	}
-	if openPR != nil {
-		return prToState(openPR), nil
-	}
-	if mostRecent != nil {
-		return prToState(mostRecent), nil
 	}
 	return nil, nil
 }
@@ -366,6 +354,29 @@ func (c *Client) GetReviews(ctx context.Context, owner, repo string, number int)
 	}
 
 	return status, nil
+}
+
+// CreatePR opens a new pull request on GitHub. head is the branch to merge,
+// base is the target branch. If draft is true the PR is created as a draft.
+// Returns the newly created PRState on success.
+func (c *Client) CreatePR(ctx context.Context, owner, repo, head, base, title, body string, draft bool) (*PRState, error) {
+	var pr *gh.PullRequest
+	err := c.doWithRetry(ctx, func() (*gh.Response, error) {
+		var resp *gh.Response
+		var err error
+		pr, resp, err = c.gh.PullRequests.Create(ctx, owner, repo, &gh.NewPullRequest{
+			Title: gh.Ptr(title),
+			Body:  gh.Ptr(body),
+			Head:  gh.Ptr(head),
+			Base:  gh.Ptr(base),
+			Draft: gh.Ptr(draft),
+		})
+		return resp, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating PR: %w", err)
+	}
+	return prToState(pr), nil
 }
 
 // prToState converts a GitHub API PullRequest to our PRState type.

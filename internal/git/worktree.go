@@ -283,6 +283,51 @@ func ListWorktrees(repoPath, branchPrefix string) ([]*WorktreeInfo, error) {
 	return worktrees, nil
 }
 
+// FindPRTemplate searches worktreePath for a GitHub PR template file and
+// returns its contents verbatim, or "" if none is found. Search order:
+//  1. .github/PULL_REQUEST_TEMPLATE.md
+//  2. docs/PULL_REQUEST_TEMPLATE.md
+//  3. PULL_REQUEST_TEMPLATE.md (repo root)
+//
+// The filename is matched case-insensitively within each directory by scanning
+// directory entries, so both "PULL_REQUEST_TEMPLATE.md" and
+// "pull_request_template.md" are found.
+func FindPRTemplate(worktreePath string) string {
+	candidates := []struct{ dir, name string }{
+		{filepath.Join(worktreePath, ".github"), "pull_request_template.md"},
+		{filepath.Join(worktreePath, "docs"), "pull_request_template.md"},
+		{worktreePath, "pull_request_template.md"},
+	}
+	for _, c := range candidates {
+		entries, err := os.ReadDir(c.dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if strings.EqualFold(e.Name(), c.name) {
+				data, err := os.ReadFile(filepath.Join(c.dir, e.Name()))
+				if err == nil {
+					return string(data)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// Push pushes branch to origin from the given worktreePath, setting the remote
+// tracking ref on the first push (--set-upstream). Force-with-lease is NOT
+// used so the push is safe for first-time publishing of a feature branch.
+// Callers must ensure any commits on the branch are ready to share before
+// calling — there is no additional safety gate inside this function.
+func Push(worktreePath, branch string) error {
+	_, err := runGit(worktreePath, "push", "--set-upstream", "origin", branch)
+	if err != nil {
+		return fmt.Errorf("push %q: %w", branch, err)
+	}
+	return nil
+}
+
 // GetRemoteURL returns the URL for the "origin" remote of the repo at repoPath.
 func GetRemoteURL(repoPath string) (string, error) {
 	return runGit(repoPath, "remote", "get-url", "origin")

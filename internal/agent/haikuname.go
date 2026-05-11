@@ -11,6 +11,97 @@ import (
 	"time"
 )
 
+// PRDraft holds the AI-generated pull request title and description.
+type PRDraft struct {
+	Title string
+	Body  string
+}
+
+// PRDrafter drafts a GitHub PR title and body from commit log, diff stats,
+// the original task prompt, and an optional PR template. The returned PRDraft
+// has both Title and Body populated; an error is returned if the model
+// response is malformed or the subprocess fails.
+type PRDrafter func(ctx context.Context, commits, diffstat, prompt, template string) (*PRDraft, error)
+
+// DefaultPRDraftPrompt is the instruction sent to Haiku to draft a PR title
+// and body. The {commits}, {diffstat}, {prompt}, and {template} tokens are
+// substituted before the call. Users can override via the pr_body_prompt key
+// in global or per-repo config.
+const DefaultPRDraftPrompt = `Draft a GitHub pull request for the following changes.
+
+Task description:
+{prompt}
+
+Commits (oldest first):
+{commits}
+
+Diff statistics:
+{diffstat}
+
+PR template (fill every section):
+{template}
+
+Respond ONLY in this exact format (no other text):
+TITLE: <concise title under 72 characters>
+
+BODY:
+<PR description filling in the template sections>`
+
+// DefaultPRDrafter returns a PRDrafter that shells out to
+// `claude -p --model claude-haiku-4-5` to draft a PR title and body.
+// Slots {commits}, {diffstat}, {prompt}, and {template} in DefaultPRDraftPrompt
+// are substituted before the call. The response is parsed as:
+//
+//	TITLE: <title>
+//
+//	BODY:
+//	<body>
+//
+// Returns ErrClaudeNotFound when claude is absent from PATH.
+func DefaultPRDrafter() PRDrafter {
+	return func(ctx context.Context, commits, diffstat, prompt, template string) (*PRDraft, error) {
+		claudePath, err := exec.LookPath("claude")
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrClaudeNotFound, err)
+		}
+		instruction := strings.NewReplacer(
+			"{commits}", commits,
+			"{diffstat}", diffstat,
+			"{prompt}", prompt,
+			"{template}", template,
+		).Replace(DefaultPRDraftPrompt)
+		raw, err := runClaudeHaikuText(ctx, claudePath, instruction)
+		if err != nil {
+			return nil, err
+		}
+		return parsePRDraft(raw)
+	}
+}
+
+// parsePRDraft extracts title and body from Haiku's structured response.
+// Expected format:
+//
+//	TITLE: <title>
+//
+//	BODY:
+//	<body...>
+func parsePRDraft(raw string) (*PRDraft, error) {
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	const titlePrefix = "TITLE: "
+	const bodySep = "BODY:\n"
+	if !strings.HasPrefix(raw, titlePrefix) {
+		return nil, fmt.Errorf("pr draft: response does not start with %q: %q", titlePrefix, raw)
+	}
+	rest := raw[len(titlePrefix):]
+	idx := strings.Index(rest, bodySep)
+	if idx < 0 {
+		return nil, fmt.Errorf("pr draft: response missing %q separator: %q", bodySep, raw)
+	}
+	title := strings.TrimSpace(rest[:idx])
+	body := strings.TrimSpace(rest[idx+len(bodySep):])
+	return &PRDraft{Title: title, Body: body}, nil
+}
+
 // BranchNamer asynchronously summarizes a user prompt into a branch-slug
 // suitable for concatenation with the configured branch prefix. The instruction
 // passed in is the fully rendered template (the user's BranchNamePrompt with

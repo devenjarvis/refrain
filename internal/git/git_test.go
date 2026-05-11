@@ -269,6 +269,73 @@ func initTestRepoWithRemote(t *testing.T) (string, string) {
 	return work, bare
 }
 
+func TestFindPRTemplate_GithubDir(t *testing.T) {
+	dir := t.TempDir()
+	ghDir := filepath.Join(dir, ".github")
+	if err := os.MkdirAll(ghDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ghDir, "PULL_REQUEST_TEMPLATE.md"), []byte("## Summary\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := git.FindPRTemplate(dir)
+	if got != "## Summary\n" {
+		t.Errorf("FindPRTemplate = %q, want %q", got, "## Summary\n")
+	}
+}
+
+func TestFindPRTemplate_DocsDir(t *testing.T) {
+	dir := t.TempDir()
+	docsDir := filepath.Join(dir, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "PULL_REQUEST_TEMPLATE.md"), []byte("## Changes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := git.FindPRTemplate(dir)
+	if got != "## Changes\n" {
+		t.Errorf("FindPRTemplate = %q, want %q", got, "## Changes\n")
+	}
+}
+
+func TestFindPRTemplate_RootLevel(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "PULL_REQUEST_TEMPLATE.md"), []byte("## Root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := git.FindPRTemplate(dir)
+	if got != "## Root\n" {
+		t.Errorf("FindPRTemplate = %q, want %q", got, "## Root\n")
+	}
+}
+
+func TestFindPRTemplate_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	got := git.FindPRTemplate(dir)
+	if got != "" {
+		t.Errorf("FindPRTemplate with no template = %q, want empty string", got)
+	}
+}
+
+func TestFindPRTemplate_PrefersGithubDir(t *testing.T) {
+	dir := t.TempDir()
+	ghDir := filepath.Join(dir, ".github")
+	if err := os.MkdirAll(ghDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ghDir, "PULL_REQUEST_TEMPLATE.md"), []byte("github\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "PULL_REQUEST_TEMPLATE.md"), []byte("root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := git.FindPRTemplate(dir)
+	if got != "github\n" {
+		t.Errorf("FindPRTemplate should prefer .github/ dir, got %q", got)
+	}
+}
+
 func TestUpdateBaseBranch(t *testing.T) {
 	work, bare := initTestRepoWithRemote(t)
 
@@ -650,6 +717,60 @@ func TestRenameBranch_Idempotent(t *testing.T) {
 	}
 	if got != wt.Branch {
 		t.Errorf("expected %q unchanged, got %q", wt.Branch, got)
+	}
+}
+
+func TestPush(t *testing.T) {
+	work, bare := initTestRepoWithRemote(t)
+
+	// Create a worktree on a new branch.
+	wt, err := git.CreateWorktree(work, "push-agent", "", "", "")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+
+	// Commit something in the worktree.
+	if err := os.WriteFile(filepath.Join(wt.Path, "pushed.txt"), []byte("pushed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "pushed.txt"},
+		{"git", "commit", "-m", "add pushed.txt"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = wt.Path
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@test.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Push the branch to origin.
+	if err := git.Push(wt.Path, wt.Branch); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// Verify the branch now exists on the bare remote.
+	cmd := exec.Command("git", "branch", "--list", wt.Branch)
+	cmd.Dir = bare
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch list on bare: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), wt.Branch) {
+		t.Errorf("expected branch %q on origin, branch list: %s", wt.Branch, out)
+	}
+
+	// Verify the upstream tracking was set (--set-upstream-to).
+	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	cmd.Dir = wt.Path
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("upstream check failed: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "origin/"+wt.Branch {
+		t.Errorf("expected upstream origin/%s, got %q", wt.Branch, got)
 	}
 }
 

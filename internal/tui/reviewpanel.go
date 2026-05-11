@@ -111,7 +111,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 		taskHint = "   " + lipgloss.NewStyle().Foreground(lipgloss.Color("#f0c060")).Render("enter") + StyleSubtle.Render(" — view task diff")
 	}
 	hints := "  " +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#5ab58a")).Render("p") + StyleSubtle.Render(" — open PR in GitHub") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#5ab58a")).Render("p") + StyleSubtle.Render(" — create or open PR") +
 		"   " + lipgloss.NewStyle().Foreground(lipgloss.Color("#7ec8e3")).Render("t") + StyleSubtle.Render(" — open agent terminal") +
 		"   " + StyleSubtle.Render("c — mark complete") +
 		"   " + StyleSubtle.Render("e — open in editor") +
