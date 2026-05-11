@@ -823,8 +823,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.planEditor != nil && a.planEditor.HasPendingQuestion() {
 			a.planEditor.resolveQuestion("")
 		}
-		var repoPath string
-		if a.planEditor != nil {
+		repoPath := msg.repoPath
+		if repoPath == "" && a.planEditor != nil {
 			repoPath = a.planEditor.repoPath
 		}
 		if repoPath == "" {
@@ -862,8 +862,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.planEditor.plan = val
 			a.planEditor.dirty = false
 		}
-		var repoPath string
-		if a.planEditor != nil {
+		repoPath := msg.repoPath
+		if repoPath == "" && a.planEditor != nil {
 			repoPath = a.planEditor.repoPath
 		}
 		if repoPath == "" {
@@ -3279,8 +3279,8 @@ func (a *App) openPlanEditor(sess *agent.Session, repoPath string) {
 // agent with the configured BuildFromPlanPrompt. The plan text is already
 // on disk by the time this fires (the editor's `a` handler writes it).
 func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd) {
-	var repoPath string
-	if a.planEditor != nil {
+	repoPath := msg.repoPath
+	if repoPath == "" && a.planEditor != nil {
 		repoPath = a.planEditor.repoPath
 	}
 	if repoPath == "" {
