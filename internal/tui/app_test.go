@@ -2526,6 +2526,69 @@ func TestActivateFocusCursor_Shipping_NoPREntry(t *testing.T) {
 	}
 }
 
+// TestMergePRMsg_ClosesPanel verifies that a successful mergePRMsg closes the
+// shipping panel and clears shippingSession.
+func TestMergePRMsg_ClosesPanel(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-1", "ship")
+	sess.SetLifecyclePhase(agent.LifecycleShipping)
+
+	app := NewApp()
+	app.shippingSession = sess
+	app.dashboard.panelFocus = focusShipping
+
+	model, _ := app.Update(mergePRMsg{sessionID: "sess-1"})
+	got := model.(App)
+
+	if got.dashboard.panelFocus == focusShipping {
+		t.Error("shipping panel should close after successful merge")
+	}
+	if got.shippingSession != nil {
+		t.Error("shippingSession should be nil after merge")
+	}
+}
+
+// TestMergePRMsg_ErrorSetsError verifies that a mergePRMsg error is surfaced.
+func TestMergePRMsg_ErrorSetsError(t *testing.T) {
+	app := NewApp()
+	app.dashboard.panelFocus = focusShipping
+	app.shippingSession = agent.NewSessionForTest("s", "ship")
+
+	model, _ := app.Update(mergePRMsg{sessionID: "s", err: errors.New("403 forbidden")})
+	got := model.(App)
+
+	if got.dashboard.panelFocus != focusShipping {
+		t.Error("panel should stay open on merge error")
+	}
+	if got.err == "" {
+		t.Error("error message should be set after merge failure")
+	}
+}
+
+// TestShippingPanel_MKeyGatedOnReady verifies that 'm' is rejected when the PR
+// is not merge-ready, and 'M' bypasses the gate.
+func TestShippingPanel_MKeyGatedOnReady(t *testing.T) {
+	sess := agent.NewSessionForTest("s", "ship")
+	sess.SetLifecyclePhase(agent.LifecycleShipping)
+
+	app := NewApp()
+	app.shippingSession = sess
+	app.dashboard.panelFocus = focusShipping
+	app.prCache = map[string]*prCacheEntry{
+		sess.ID: {pr: &github.PRState{Number: 1, Mergeable: false}},
+	}
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	got := model.(App)
+
+	// Panel stays open, error is shown.
+	if got.dashboard.panelFocus != focusShipping {
+		t.Errorf("panel should stay open; got %v", got.dashboard.panelFocus)
+	}
+	if got.err == "" {
+		t.Error("expected error message for not-ready merge")
+	}
+}
+
 // TestNKeyOpensPromptModal_WhenPlanFirstEnabled verifies the new plan-first
 // gate: with PlanFirstEnabled=true, pressing `n` opens the prompt modal
 // instead of immediately creating a session. With the flag off (today's

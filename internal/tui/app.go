@@ -116,6 +116,12 @@ type prCreatedMsg struct {
 	err                error
 }
 
+// mergePRMsg carries the result of an async PR merge attempt.
+type mergePRMsg struct {
+	sessionID string
+	err       error
+}
+
 // diffStatsEntry holds cached diff stats for a single session.
 type diffStatsEntry struct {
 	stats       *diffSummaryData
@@ -1117,6 +1123,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.updateDashboardPRCache()
 		return a, nil
 
+	case mergePRMsg:
+		if msg.err != nil {
+			a.setError("merge failed: " + msg.err.Error())
+			return a, nil
+		}
+		// Transition the session to Complete immediately rather than waiting for
+		// the next PR poll to detect the merged state.
+		repoPath := a.repoPathForSession(msg.sessionID)
+		if repoPath != "" {
+			if mgr := a.managers[repoPath]; mgr != nil {
+				if sess := mgr.GetSession(msg.sessionID); sess != nil {
+					sess.SetLifecyclePhase(agent.LifecycleComplete)
+				}
+			}
+		}
+		a.shippingSession = nil
+		a.dashboard.panelFocus = focusList
+		return a, nil
+
 	case resumeDoneMsg:
 		for _, repoPath := range msg.repoPaths {
 			_ = state.Remove(repoPath)
@@ -1668,6 +1693,22 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					a.setError("no PR URL available")
 				}
+			case "m":
+				// Merge: gated on isMergeReady.
+				entry := a.prCache[a.shippingSession.ID]
+				if !isMergeReady(entry) {
+					a.setError("not ready to merge — use M to force")
+					return a, nil
+				}
+				return a, a.mergePRCmd(a.shippingSession.ID, false)
+			case "M":
+				// Force merge: bypasses isMergeReady check.
+				entry := a.prCache[a.shippingSession.ID]
+				if entry == nil || entry.pr == nil {
+					a.setError("no PR found")
+					return a, nil
+				}
+				return a, a.mergePRCmd(a.shippingSession.ID, true)
 			}
 			return a, nil
 		}
@@ -4074,6 +4115,38 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 			threads:   threads,
 			stack:     stack,
 		}
+	}
+}
+
+// mergePRCmd returns a Cmd that merges the PR for the given session.
+// force=true bypasses the isMergeReady gate (used by the M key).
+func (a *App) mergePRCmd(sessionID string, force bool) tea.Cmd {
+	ghClient := a.ghClient
+	entry := a.prCache[sessionID]
+	if entry == nil || entry.pr == nil {
+		return func() tea.Msg { return mergePRMsg{sessionID: sessionID, err: fmt.Errorf("no PR cached")} }
+	}
+	repoPath := a.repoPathForSession(sessionID)
+	method := "squash"
+	if repoPath != "" {
+		method = a.resolvedCache[repoPath].MergeMethod
+	}
+	prNum := entry.pr.Number
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		rawURL, err := git.GetRemoteURL(repoPath)
+		if err != nil {
+			return mergePRMsg{sessionID: sessionID, err: err}
+		}
+		owner, repo, err := github.ParseRemoteURL(rawURL)
+		if err != nil {
+			return mergePRMsg{sessionID: sessionID, err: err}
+		}
+		if err := ghClient.MergePR(ctx, owner, repo, prNum, method); err != nil {
+			return mergePRMsg{sessionID: sessionID, err: err}
+		}
+		return mergePRMsg{sessionID: sessionID}
 	}
 }
 

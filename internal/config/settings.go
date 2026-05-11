@@ -16,6 +16,7 @@ const (
 	DefaultAgentProgram      = "claude"
 	DefaultWorktreeDir       = ".baton/worktrees"
 	DefaultSidebarWidth      = 30
+	DefaultMergeMethod       = "squash"
 
 	// DefaultPlanModel is the model used by the plan drafter subprocess.
 	// Sonnet (not Haiku) is intentional: planning quality compounds
@@ -139,6 +140,10 @@ type GlobalSettings struct {
 	// PR creation settings.
 	PRDraftByDefault    *bool `json:"pr_draft_by_default,omitempty"`
 	AutoOpenPRInBrowser *bool `json:"auto_open_pr_in_browser,omitempty"`
+
+	// MergeMethod controls how PRs are merged from the shipping panel.
+	// Valid values: "squash" (default), "merge", "rebase".
+	MergeMethod *string `json:"merge_method,omitempty"`
 }
 
 // RepoSettings holds per-repo overrides stored at <repo>/.baton/config.json.
@@ -159,8 +164,9 @@ type RepoSettings struct {
 	BuildSystemPrompt   *string `json:"build_system_prompt,omitempty"`
 
 	// PR creation settings.
-	PRDraftByDefault    *bool `json:"pr_draft_by_default,omitempty"`
-	AutoOpenPRInBrowser *bool `json:"auto_open_pr_in_browser,omitempty"`
+	PRDraftByDefault    *bool   `json:"pr_draft_by_default,omitempty"`
+	AutoOpenPRInBrowser *bool   `json:"auto_open_pr_in_browser,omitempty"`
+	MergeMethod         *string `json:"merge_method,omitempty"`
 }
 
 // ResolvedSettings is the fully merged configuration with no nil pointers.
@@ -203,6 +209,10 @@ type ResolvedSettings struct {
 	// PR creation settings.
 	PRDraftByDefault    bool
 	AutoOpenPRInBrowser bool
+
+	// MergeMethod is how PRs are merged from the shipping panel.
+	// "squash" | "merge" | "rebase" — defaults to "squash".
+	MergeMethod string
 }
 
 // Resolve merges global and repo settings over built-in defaults.
@@ -227,6 +237,7 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		BuildSystemPrompt:   DefaultBuildSystemPrompt,
 		PRDraftByDefault:    DefaultPRDraftByDefault,
 		AutoOpenPRInBrowser: DefaultAutoOpenPRInBrowser,
+		MergeMethod:         DefaultMergeMethod,
 	}
 
 	if global != nil {
@@ -290,6 +301,9 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		if global.AutoOpenPRInBrowser != nil {
 			r.AutoOpenPRInBrowser = *global.AutoOpenPRInBrowser
 		}
+		if global.MergeMethod != nil {
+			r.MergeMethod = *global.MergeMethod
+		}
 	}
 
 	if repo != nil {
@@ -337,6 +351,9 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if repo.AutoOpenPRInBrowser != nil {
 			r.AutoOpenPRInBrowser = *repo.AutoOpenPRInBrowser
+		}
+		if repo.MergeMethod != nil {
+			r.MergeMethod = *repo.MergeMethod
 		}
 	}
 
