@@ -5,7 +5,7 @@
 - `github.Client.CreatePR` wraps the GitHub API to create a pull request and return a `*PRState`.
 - `PRDrafter` in `internal/agent/haikuname.go` mirrors `BranchNamer`: pipes commits, diff stats, the user prompt, and the repo PR template into Haiku and returns a `{title, body}` pair.
 - PR template discovery searches `.github/PULL_REQUEST_TEMPLATE.md`, `docs/PULL_REQUEST_TEMPLATE.md`, and `PULL_REQUEST_TEMPLATE.md` (case-insensitive) and feeds the result verbatim into the drafter prompt.
-- New settings keys: `PRDraftByDefault` (default `true`), `AutoOpenPRInBrowser` (default `true`), `PRTitlePrompt`, `PRBodyPrompt`.
+- New settings keys: `PRDraftByDefault` (default `true`), `AutoOpenPRInBrowser` (default `true`).
 
 ### Fixed
 

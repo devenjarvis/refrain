@@ -103,7 +103,6 @@ type prDraftReadyMsg struct {
 	repo               string
 	head               string
 	base               string
-	worktreePath       string
 	repoPath           string
 	transitionShipping bool
 	err                error
@@ -205,15 +204,15 @@ type App struct {
 	prCache         map[string]*prCacheEntry   // keyed by session ID
 	prPollStates    map[string]*prSessionState // keyed by session ID
 	prPollsInFlight int                        // count of concurrent in-flight polls
+	prDraftInFlight bool                       // true while startPRDraftCmd is running; prevents double-trigger
 
 	// PR compose modal and its associated session context.
-	prComposeModal      prComposeModal
-	prModalSessionID    string
-	prModalOwner        string
-	prModalRepo         string
-	prModalHead         string
-	prModalBase         string
-	prModalWorktreePath string
+	prComposeModal   prComposeModal
+	prModalSessionID string
+	prModalOwner     string
+	prModalRepo      string
+	prModalHead      string
+	prModalBase      string
 	// prModalTransitionShipping is true when the modal was opened from the
 	// review panel (p key), where confirming the PR should transition the
 	// session to LifecycleShipping and close the review panel.
@@ -970,6 +969,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.submitPRComposeModal(msg)
 
 	case prDraftReadyMsg:
+		a.prDraftInFlight = false
 		if msg.err != nil {
 			a.setError("PR draft failed: " + msg.err.Error())
 			return a, nil
@@ -980,7 +980,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.prModalRepo = msg.repo
 		a.prModalHead = msg.head
 		a.prModalBase = msg.base
-		a.prModalWorktreePath = msg.worktreePath
 		a.prModalTransitionShipping = msg.transitionShipping
 		resolved := a.resolvedCache[msg.repoPath]
 		cmd := a.prComposeModal.Open(msg.title, msg.body, resolved.PRDraftByDefault)
@@ -1537,6 +1536,14 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.dashboard.panelFocus = focusList
 					a.reviewSession = nil
 				} else {
+					if a.ghClient == nil {
+						a.setError("GitHub auth not available")
+						return a, nil
+					}
+					if a.prDraftInFlight {
+						return a, nil
+					}
+					a.prDraftInFlight = true
 					repoPath := a.repoPathForSession(sess.ID)
 					a.setError("Pushing branch and drafting PR…")
 					return a, a.startPRDraftCmd(sess, repoPath, true)
@@ -2102,6 +2109,18 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.setError(err.Error())
 					}
 				} else {
+					if a.ghClient == nil {
+						a.setError("GitHub auth not available")
+						return a, nil
+					}
+					phase := sess.LifecyclePhase()
+					if phase != agent.LifecycleReadyForReview && phase != agent.LifecycleInReview {
+						return a, nil
+					}
+					if a.prDraftInFlight {
+						return a, nil
+					}
+					a.prDraftInFlight = true
 					repoPath := a.cursorSelectedRepoPath()
 					a.setError("Pushing branch and drafting PR…")
 					return a, a.startPRDraftCmd(sess, repoPath, false)
@@ -4319,7 +4338,6 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 			return prDraftReadyMsg{err: fmt.Errorf("no worktree for session")}
 		}
 	}
-	ghClient := a.ghClient
 	branch := sess.Branch()
 	worktreePath := sess.Worktree.Path
 	sessionID := sess.ID
@@ -4380,7 +4398,6 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 			taskPrompt = sess.GetDisplayName()
 		}
 
-		_ = ghClient // reserved for future: checking if draft PRs are allowed on this repo
 		drafter := agent.DefaultPRDrafter()
 		draft, err := drafter(ctx, commits, diffstat, taskPrompt, template)
 		if err != nil {
@@ -4395,7 +4412,6 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 			repo:               repo,
 			head:               branch,
 			base:               base,
-			worktreePath:       worktreePath,
 			repoPath:           repoPath,
 			transitionShipping: transitionShipping,
 		}
@@ -4406,15 +4422,17 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 // emitting a prCreatedMsg.
 func (a *App) submitPRComposeModal(msg prComposeSubmitMsg) (tea.Model, tea.Cmd) {
 	ghClient := a.ghClient
+	if ghClient == nil {
+		return a, func() tea.Msg {
+			return prCreatedMsg{sessionID: a.prModalSessionID, err: fmt.Errorf("GitHub auth not available")}
+		}
+	}
 	owner := a.prModalOwner
 	repo := a.prModalRepo
 	head := a.prModalHead
 	base := a.prModalBase
 	sessionID := a.prModalSessionID
 	transitionShipping := a.prModalTransitionShipping
-	resolved := a.resolvedCache[a.repoPathForSession(sessionID)]
-
-	_ = resolved // auto-open is handled in the prCreatedMsg handler
 	return a, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

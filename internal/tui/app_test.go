@@ -2026,6 +2026,8 @@ func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
 	app.reviewSession = sessR
 	app.dashboard.panelFocus = focusReview
+	// ghClient must be non-nil to pass the auth guard before startPRDraftCmd.
+	app.ghClient = &github.Client{}
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	app = model.(App)
@@ -2164,10 +2166,11 @@ func TestPipeline_XKey_NoSession(t *testing.T) {
 }
 
 // TestPipeline_PKey_NoPRStartsDraft verifies that pressing 'p' with no cached
-// PR on a Building session starts the push+draft pipeline (shows progress text).
+// PR on a ReadyForReview session starts the push+draft pipeline (shows progress text).
+// Building-phase sessions are excluded: p only fires for ReadyForReview/InReview.
 func TestPipeline_PKey_NoPRStartsDraft(t *testing.T) {
-	sess := agent.NewSessionForTest("s", "active-a")
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	sess := agent.NewSessionForTest("s", "ready-a")
+	sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
 
 	app := NewApp()
 	app.width = 120
@@ -2178,8 +2181,10 @@ func TestPipeline_PKey_NoPRStartsDraft(t *testing.T) {
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sess},
 	}
-	app.focusCursorSection = focusSectionBuilding
-	app.focusBuildingIdx = 0
+	app.focusCursorSection = focusSectionReview
+	app.focusReviewIdx = 0
+	// ghClient must be non-nil to pass the auth guard before startPRDraftCmd.
+	app.ghClient = &github.Client{}
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	app = model.(App)
@@ -3019,5 +3024,61 @@ func TestPlannerQuestionMsg_SkippedSessionMissing(t *testing.T) {
 	}
 	if app.planEditor != nil {
 		t.Error("expected planEditor to remain nil when session is not found")
+	}
+}
+
+// TestRefreshPRStatus_WrongRepoReturnsError verifies that refreshPRStatusForSession
+// returns a prPollMsg with an "internal" error when the caller passes a repoPath
+// that does not own the given session. This guards against programming errors
+// (e.g. passing the wrong repo path) before a real poll fires.
+func TestRefreshPRStatus_WrongRepoReturnsError(t *testing.T) {
+	dir, err := os.MkdirTemp("", "baton-pr-owner-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	run := func(args ...string) {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cmd %v: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "commit.gpgsign", "false")
+	run("git", "commit", "--allow-empty", "-m", "init")
+
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+
+	sess, _, err := mgr.CreateSessionWithCommand(agent.Config{
+		Name: "pr-owner-test", Task: "test", RepoPath: dir, Rows: 24, Cols: 80,
+	}, func(_ string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 30") })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+
+	wrongRepoPath := "/nonexistent/wrong-repo"
+	cmd := app.refreshPRStatusForSession(sess.ID, sess.Branch(), wrongRepoPath, "")
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd from refreshPRStatusForSession with wrong repo")
+	}
+
+	pollMsg := cmd()
+	poll, ok := pollMsg.(prPollMsg)
+	if !ok {
+		t.Fatalf("expected prPollMsg, got %T", pollMsg)
+	}
+	if poll.err == nil {
+		t.Fatal("expected non-nil error in prPollMsg for wrong repo path")
+	}
+	if !strings.Contains(poll.err.Error(), "internal") {
+		t.Errorf("expected error to contain %q, got: %s", "internal", poll.err.Error())
 	}
 }

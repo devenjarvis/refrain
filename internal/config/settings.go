@@ -137,10 +137,8 @@ type GlobalSettings struct {
 	BuildSystemPrompt   *string `json:"build_system_prompt,omitempty"`
 
 	// PR creation settings.
-	PRTitlePrompt       *string `json:"pr_title_prompt,omitempty"`
-	PRBodyPrompt        *string `json:"pr_body_prompt,omitempty"`
-	PRDraftByDefault    *bool   `json:"pr_draft_by_default,omitempty"`
-	AutoOpenPRInBrowser *bool   `json:"auto_open_pr_in_browser,omitempty"`
+	PRDraftByDefault    *bool `json:"pr_draft_by_default,omitempty"`
+	AutoOpenPRInBrowser *bool `json:"auto_open_pr_in_browser,omitempty"`
 }
 
 // RepoSettings holds per-repo overrides stored at <repo>/.baton/config.json.
@@ -161,10 +159,8 @@ type RepoSettings struct {
 	BuildSystemPrompt   *string `json:"build_system_prompt,omitempty"`
 
 	// PR creation settings.
-	PRTitlePrompt       *string `json:"pr_title_prompt,omitempty"`
-	PRBodyPrompt        *string `json:"pr_body_prompt,omitempty"`
-	PRDraftByDefault    *bool   `json:"pr_draft_by_default,omitempty"`
-	AutoOpenPRInBrowser *bool   `json:"auto_open_pr_in_browser,omitempty"`
+	PRDraftByDefault    *bool `json:"pr_draft_by_default,omitempty"`
+	AutoOpenPRInBrowser *bool `json:"auto_open_pr_in_browser,omitempty"`
 }
 
 // ResolvedSettings is the fully merged configuration with no nil pointers.
@@ -205,8 +201,6 @@ type ResolvedSettings struct {
 	BuildSystemPrompt string
 
 	// PR creation settings.
-	PRTitlePrompt       string
-	PRBodyPrompt        string
 	PRDraftByDefault    bool
 	AutoOpenPRInBrowser bool
 }
@@ -290,12 +284,6 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		if global.BuildSystemPrompt != nil {
 			r.BuildSystemPrompt = *global.BuildSystemPrompt
 		}
-		if global.PRTitlePrompt != nil {
-			r.PRTitlePrompt = *global.PRTitlePrompt
-		}
-		if global.PRBodyPrompt != nil {
-			r.PRBodyPrompt = *global.PRBodyPrompt
-		}
 		if global.PRDraftByDefault != nil {
 			r.PRDraftByDefault = *global.PRDraftByDefault
 		}
@@ -343,12 +331,6 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if repo.BuildSystemPrompt != nil {
 			r.BuildSystemPrompt = *repo.BuildSystemPrompt
-		}
-		if repo.PRTitlePrompt != nil {
-			r.PRTitlePrompt = *repo.PRTitlePrompt
-		}
-		if repo.PRBodyPrompt != nil {
-			r.PRBodyPrompt = *repo.PRBodyPrompt
 		}
 		if repo.PRDraftByDefault != nil {
 			r.PRDraftByDefault = *repo.PRDraftByDefault

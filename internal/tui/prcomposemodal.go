@@ -109,9 +109,10 @@ func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 			body := strings.TrimSpace(m.bodyArea.Value())
+			draft := m.draft // snapshot before Close() resets state
 			m.Close()
 			return func() tea.Msg {
-				return prComposeSubmitMsg{title: title, body: body, draft: m.draft}
+				return prComposeSubmitMsg{title: title, body: body, draft: draft}
 			}
 		case "tab", "shift+tab":
 			if m.focused == 0 {

@@ -86,6 +86,7 @@ func DefaultPRDrafter() PRDrafter {
 //	BODY:
 //	<body...>
 func parsePRDraft(raw string) (*PRDraft, error) {
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
 	const titlePrefix = "TITLE: "
 	const bodySep = "BODY:\n"
 	if !strings.HasPrefix(raw, titlePrefix) {
