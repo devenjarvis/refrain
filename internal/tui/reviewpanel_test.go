@@ -169,13 +169,13 @@ func TestRenderTaskDetailPane_VerdictStatesRender(t *testing.T) {
 		rec       *taskVerdictRecord
 		wantLabel string
 	}{
-		{"pass", &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}}, "Pass"},
-		{"concerns", &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictConcerns}}, "Concerns"},
-		{"fail", &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail}}, "Fail"},
+		{"pass", &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}}, "pass"},
+		{"concerns", &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictConcerns}}, "concerns"},
+		{"fail", &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail}}, "fail"},
 		{"pending", &taskVerdictRecord{state: verdictPending}, "Pending"},
 		{"running", &taskVerdictRecord{state: verdictRunning}, "Reviewing…"},
-		{"err", &taskVerdictRecord{state: verdictErr}, "Error"},
-		{"noDiff", &taskVerdictRecord{state: verdictNoDiff}, "No matching diff"},
+		{"err", &taskVerdictRecord{state: verdictErr}, "error"},
+		{"noDiff", &taskVerdictRecord{state: verdictNoDiff}, "no diff found"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -226,6 +226,79 @@ func TestRenderTaskDetailPane_ShowsFilesAndCommits(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("detail pane must contain %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestRenderReviewPanel_TwoPaneLayout verifies that wide rendering composes both
+// panes side-by-side: left pane task list and right pane task detail.
+func TestRenderReviewPanel_TwoPaneLayout(t *testing.T) {
+	rationale := strings.Repeat("This implementation is well structured and correct. ", 4)
+	sess := agent.NewSessionForTest("sess-1", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
+			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
+		}},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: rationale}},
+		},
+	}
+
+	output := renderReviewPanel(sess, entry, 140, 30, 0, false)
+
+	if !strings.Contains(output, "PLAN TASKS") {
+		t.Error("must contain PLAN TASKS from left pane")
+	}
+	if !strings.Contains(output, "Task 1:") {
+		t.Error("must contain 'Task 1:' from right pane detail heading")
+	}
+	if !strings.Contains(output, "[1]") {
+		t.Error("must contain [1] task index from left pane row")
+	}
+	if !strings.Contains(output, "This implementation") {
+		t.Error("must contain rationale text from right pane")
+	}
+	if !strings.Contains(output, "create or open PR") {
+		t.Error("footer must still advertise 'create or open PR'")
+	}
+}
+
+// TestRenderReviewPanel_NarrowWidthStacks verifies that at <80 cols, panes stack
+// vertically (list above detail) rather than side by side.
+func TestRenderReviewPanel_NarrowWidthStacks(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-1", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
+			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
+		}},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: "Looks good."}},
+		},
+	}
+
+	output := renderReviewPanel(sess, entry, 70, 30, 0, false)
+
+	if !strings.Contains(output, "PLAN TASKS") {
+		t.Error("must contain PLAN TASKS from list pane")
+	}
+	if !strings.Contains(output, "Task 1:") {
+		t.Error("must contain 'Task 1:' from detail pane")
+	}
+
+	// In stacked mode, no single line should contain both PLAN TASKS and Task 1:.
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "PLAN TASKS") && strings.Contains(line, "Task 1:") {
+			t.Errorf("in narrow mode panes must be stacked, not side-by-side; found both on one line: %q", line)
 		}
 	}
 }
@@ -587,31 +660,31 @@ func TestVerdictBadge(t *testing.T) {
 			name:      "verdictDone Pass",
 			rec:       &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}},
 			wantIcon:  func(s string) bool { return s == "✓" },
-			wantLabel: "Pass",
+			wantLabel: "pass",
 		},
 		{
 			name:      "verdictDone Concerns",
 			rec:       &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictConcerns}},
 			wantIcon:  func(s string) bool { return s == "!" },
-			wantLabel: "Concerns",
+			wantLabel: "concerns",
 		},
 		{
 			name:      "verdictDone Fail",
 			rec:       &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail}},
 			wantIcon:  func(s string) bool { return s == "✗" },
-			wantLabel: "Fail",
+			wantLabel: "fail",
 		},
 		{
 			name:      "verdictErr",
 			rec:       &taskVerdictRecord{state: verdictErr},
 			wantIcon:  func(s string) bool { return s == "✗" },
-			wantLabel: "Error",
+			wantLabel: "error",
 		},
 		{
 			name:      "verdictNoDiff",
 			rec:       &taskVerdictRecord{state: verdictNoDiff},
 			wantIcon:  func(s string) bool { return s == "⊘" },
-			wantLabel: "No matching diff",
+			wantLabel: "no diff found",
 		},
 	}
 	for _, tt := range tests {

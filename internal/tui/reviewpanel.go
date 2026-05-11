@@ -38,16 +38,16 @@ func verdictBadge(rec *taskVerdictRecord) (icon string, label string, style lipg
 	case verdictDone:
 		switch rec.verdict.Kind {
 		case agent.VerdictPass:
-			return "✓", "Pass", StyleSuccess
+			return "✓", "pass", StyleSuccess
 		case agent.VerdictConcerns:
-			return "!", "Concerns", StyleWarning
+			return "!", "concerns", StyleWarning
 		case agent.VerdictFail:
-			return "✗", "Fail", StyleError
+			return "✗", "fail", StyleError
 		}
 	case verdictErr:
-		return "✗", "Error", StyleError
+		return "✗", "error", StyleError
 	case verdictNoDiff:
-		return "⊘", "No matching diff", StyleSubtle
+		return "⊘", "no diff found", StyleSubtle
 	}
 	return "⋯", "Pending", StyleSubtle
 }
@@ -104,93 +104,87 @@ func renderReviewHeader(sess *agent.Session, width int) []string {
 // cursor is the currently selected task row index (0-based among all task rows).
 // prDraftInFlight, when true, shows a spinner status line and disables the p hint.
 func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool) string {
-	var lines []string
+	// Header (3–4 lines depending on prompt length).
+	headerLines := renderReviewHeader(sess, width)
 
-	// Header
-	age := ""
-	if !sess.DoneAt().IsZero() {
-		mins := int(time.Since(sess.DoneAt()).Minutes())
-		age = fmt.Sprintf("done %dm ago", mins)
+	// Footer: blank + divider + hints = 3 lines; +1 when draft in flight.
+	footerLineCount := 3
+	draftLineCount := 0
+	if prDraftInFlight {
+		draftLineCount = 1
 	}
-	headerLeft := lipgloss.NewStyle().Foreground(lipgloss.Color("#9b7fdb")).Bold(true).Render("REVIEW") +
-		"  " + StyleSubtle.Render("›") +
-		"  " + lipgloss.NewStyle().Render(sess.GetDisplayName())
-	headerRight := StyleSubtle.Render(age)
-	gap := width - ansi.StringWidth(headerLeft) - ansi.StringWidth(headerRight) - 4
-	if gap < 1 {
-		gap = 1
+	bodyH := height - len(headerLines) - footerLineCount - draftLineCount
+	if bodyH < 4 {
+		bodyH = 4
 	}
-	lines = append(lines, headerLeft+strings.Repeat(" ", gap)+headerRight)
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
 
-	// Original Intent
-	lines = append(lines, StyleSubtle.Render("ORIGINAL INTENT"))
-	prompt := sess.OriginalPrompt()
-	if prompt == "" {
-		prompt = "(no prompt recorded)"
-	}
-	intentLines := wrapText(prompt, width-6)
-	if len(intentLines) > 6 {
-		intentLines = append(intentLines[:5], StyleSubtle.Render("…"))
-	}
-	accentStyle := lipgloss.NewStyle().
-		BorderLeft(true).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#9b7fdb")).
-		PaddingLeft(1)
-	lines = append(lines, accentStyle.Render(strings.Join(intentLines, "\n")))
-	lines = append(lines, "")
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
-
-	// Body: task list (if plan exists) or legacy file-centric view.
+	// Build body lines.
+	var bodyLines []string
 	if entry == nil {
-		lines = append(lines, StyleSubtle.Render("loading diff stats…"))
-	} else if len(entry.tasks) > 0 || len(entry.groups) > 0 {
-		// Overhead: header(1) + divider(1) + "ORIGINAL INTENT"(1) + intent(≤6) +
-		// blank(1) + divider(1) + blank(1) + divider(1) + hints(1) = 14 max.
-		// +1 when prDraftInFlight adds a spinner line above the footer.
-		overhead := 14
-		if prDraftInFlight {
-			overhead++
+		bodyLines = append(bodyLines, StyleSubtle.Render("loading diff stats…"))
+	} else if width < 80 {
+		// Narrow: stack list above detail with a divider.
+		listH := bodyH / 2
+		detailH := bodyH - listH - 1
+		if listH < 2 {
+			listH = 2
 		}
-		taskListHeight := height - overhead
-		if taskListHeight < 4 {
-			taskListHeight = 4
+		if detailH < 2 {
+			detailH = 2
 		}
-		lines = append(lines, renderTaskList(entry, width, taskListHeight, cursor)...)
+		leftW := width - 2
+		bodyLines = append(bodyLines, renderTaskListPane(entry, leftW, listH, cursor)...)
+		bodyLines = append(bodyLines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, leftW, detailH)...)
 	} else {
-		// No plan — fall back to the aggregate file view.
-		leftWidth := (width - 4) / 2
-		rightWidth := width - leftWidth - 4
-		leftLines := renderFocusList(entry, leftWidth)
-		rightLines := renderReviewShape(entry, rightWidth)
-		maxRows := len(leftLines)
-		if len(rightLines) > maxRows {
-			maxRows = len(rightLines)
+		// Wide: side-by-side panes with a │ gutter.
+		leftW := width * 4 / 10
+		if leftW < 32 {
+			leftW = 32
+		}
+		// gutter: " │ " = 3 chars, but we also have 2 leading spaces on the outer,
+		// so effective layout: 2sp + leftW + " │ " + rightW
+		rightW := width - leftW - 5
+		if rightW < 20 {
+			rightW = 20
+		}
+		leftPaneLines := renderTaskListPane(entry, leftW, bodyH, cursor)
+		rightPaneLines := renderTaskDetailPane(entry, cursor, rightW, bodyH)
+
+		gutter := " " + StyleSubtle.Render("│") + " "
+		maxRows := len(leftPaneLines)
+		if len(rightPaneLines) > maxRows {
+			maxRows = len(rightPaneLines)
 		}
 		for i := 0; i < maxRows; i++ {
 			l, r := "", ""
-			if i < len(leftLines) {
-				l = leftLines[i]
+			if i < len(leftPaneLines) {
+				l = leftPaneLines[i]
 			}
-			if i < len(rightLines) {
-				r = rightLines[i]
+			if i < len(rightPaneLines) {
+				r = rightPaneLines[i]
 			}
-			pad := leftWidth - ansi.StringWidth(l)
-			if pad < 0 {
-				pad = 0
+			// Pad left cell to leftW visible columns.
+			padW := leftW - ansi.StringWidth(l)
+			if padW < 0 {
+				padW = 0
 			}
-			lines = append(lines, l+strings.Repeat(" ", pad+2)+r)
+			bodyLines = append(bodyLines, l+strings.Repeat(" ", padW)+gutter+r)
 		}
 	}
 
-	// In-flight PR draft status line
+	// Assemble full panel.
+	var lines []string
+	lines = append(lines, headerLines...)
+	lines = append(lines, bodyLines...)
+
+	// In-flight PR draft status line.
 	if prDraftInFlight {
 		draftStatus := lipgloss.NewStyle().Foreground(ColorWarning).Render(reviewSpinnerFrame() + " Pushing branch and drafting PR…")
 		lines = append(lines, draftStatus)
 	}
 
-	// Action footer
+	// Action footer.
 	lines = append(lines, "")
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
 	taskHint := ""
@@ -308,9 +302,12 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int) []str
 			label = "   "
 		}
 
-		// Stat string.
+		// Stat string — for verdictNoDiff, show the label as the stat.
 		statStr := ""
-		if r.group != nil && r.group.stats != nil {
+		if rec != nil && rec.state == verdictNoDiff {
+			_, lbl, sty := verdictBadge(rec)
+			statStr = sty.Render(lbl)
+		} else if r.group != nil && r.group.stats != nil {
 			st := r.group.stats
 			if st.Insertions > 0 || st.Deletions > 0 {
 				statStr = subtleGreen.Render(fmt.Sprintf("+%d", st.Insertions)) +
