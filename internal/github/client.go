@@ -462,7 +462,7 @@ func (c *Client) GetReviewThreads(ctx context.Context, owner, repo string, numbe
 
 	// Build threads — one per reviewer.
 	seen := make(map[string]bool)
-	var threads []ReviewThread
+	threads := make([]ReviewThread, 0, len(latestByUID))
 	for _, r := range latestByUID {
 		login := r.GetUser().GetLogin()
 		seen[login] = true

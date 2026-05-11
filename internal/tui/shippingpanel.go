@@ -135,7 +135,7 @@ func renderCheckRow(run github.CheckRun, width int) string {
 
 // renderReviewThread renders one reviewer block (state + body + inline comments).
 func renderReviewThread(thread github.ReviewThread, width int) []string {
-	var lines []string
+	lines := make([]string, 0, 2+len(thread.Comments)*2)
 
 	stateStyle := StyleSubtle
 	switch thread.State {

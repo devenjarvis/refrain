@@ -4214,7 +4214,7 @@ func buildFeedbackPrompt(entry *prCacheEntry) string {
 	if hasActionableThreads {
 		b.WriteString("## Review Feedback\n\n")
 		for _, thread := range entry.threads {
-			if thread.State != "CHANGES_REQUESTED" && !(thread.State == "COMMENTED" && len(thread.Comments) > 0) {
+			if thread.State != "CHANGES_REQUESTED" && (thread.State != "COMMENTED" || len(thread.Comments) == 0) {
 				continue
 			}
 			b.WriteString("**")
