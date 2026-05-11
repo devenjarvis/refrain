@@ -38,7 +38,8 @@ const (
 // model owns its own textarea/textinput components and reports user actions
 // back to the App via tea.Msg values declared below.
 type planEditorModel struct {
-	sess *agent.Session
+	sess     *agent.Session
+	repoPath string // repo this session belongs to; set at construction to avoid ambiguous cross-repo ID lookup
 
 	mode      planEditorMode
 	plan      string // last-loaded plan content; used in scroll mode
@@ -94,11 +95,13 @@ type displayCacheKey struct {
 // so the spawned agent reads .claude/plan.md directly.
 type planEditorApproveMsg struct {
 	sessionID string
+	repoPath  string
 }
 
 // planEditorReviseMsg is emitted when the user submits a revise critique.
 type planEditorReviseMsg struct {
 	sessionID string
+	repoPath  string
 	critique  string
 }
 
@@ -106,6 +109,7 @@ type planEditorReviseMsg struct {
 // planning session entirely.
 type planEditorAbandonMsg struct {
 	sessionID string
+	repoPath  string
 }
 
 // planEditorCloseMsg is emitted on `esc` to close the editor and return to
@@ -130,12 +134,13 @@ type planEditorSavedMsg struct {
 // newPlanEditor constructs a fresh editor model bound to sess. Plan content
 // is loaded from disk on construction; if the session is currently drafting
 // the model renders a "Drafting…" placeholder and locks input.
-func newPlanEditor(sess *agent.Session, width, height int) planEditorModel {
+func newPlanEditor(sess *agent.Session, repoPath string, width, height int) planEditorModel {
 	m := planEditorModel{
-		sess:   sess,
-		mode:   planEditorModeScroll,
-		width:  width,
-		height: height,
+		sess:     sess,
+		repoPath: repoPath,
+		mode:     planEditorModeScroll,
+		width:    width,
+		height:   height,
 	}
 
 	ta := mdtextarea.New()
@@ -481,8 +486,9 @@ func (m *planEditorModel) updateReviseInput(msg tea.KeyPressMsg) tea.Cmd {
 		m.reviseInput.Blur()
 		m.mode = planEditorModeScroll
 		sessID := m.sess.ID
+		repoPath := m.repoPath
 		return func() tea.Msg {
-			return planEditorReviseMsg{sessionID: sessID, critique: critique}
+			return planEditorReviseMsg{sessionID: sessID, repoPath: repoPath, critique: critique}
 		}
 	}
 	var cmd tea.Cmd
@@ -495,7 +501,8 @@ func (m *planEditorModel) emitApprove() tea.Cmd {
 		return nil
 	}
 	sessID := m.sess.ID
-	return func() tea.Msg { return planEditorApproveMsg{sessionID: sessID} }
+	repoPath := m.repoPath
+	return func() tea.Msg { return planEditorApproveMsg{sessionID: sessID, repoPath: repoPath} }
 }
 
 func (m *planEditorModel) emitAbandon() tea.Cmd {
@@ -503,7 +510,8 @@ func (m *planEditorModel) emitAbandon() tea.Cmd {
 		return nil
 	}
 	sessID := m.sess.ID
-	return func() tea.Msg { return planEditorAbandonMsg{sessionID: sessID} }
+	repoPath := m.repoPath
+	return func() tea.Msg { return planEditorAbandonMsg{sessionID: sessID, repoPath: repoPath} }
 }
 
 func (m *planEditorModel) emitClose() tea.Cmd {

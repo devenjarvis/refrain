@@ -73,7 +73,7 @@ func TestPlanEditor_RendersPlanFromDisk(t *testing.T) {
 		t.Fatalf("WritePlan: %v", err)
 	}
 
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 	body := testutil.StripANSI(editor.View())
 	if !strings.Contains(body, "Do X") || !strings.Contains(body, "step 1") {
 		t.Errorf("editor view missing plan content:\n%s", body)
@@ -85,7 +85,7 @@ func TestPlanEditor_EditModeSavesOnCtrlS(t *testing.T) {
 	if err := sess.WritePlan("original\n"); err != nil {
 		t.Fatal(err)
 	}
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 
 	// `i` enters edit mode.
 	cmd := editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
@@ -125,7 +125,7 @@ func TestPlanEditor_EditModeSavesOnCtrlS(t *testing.T) {
 func TestPlanEditor_EscFromEditPreservesEdits(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("orig\n")
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 	editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
 	editor.textarea.SetValue("typed but not saved\n")
 	editor.dirty = true
@@ -145,7 +145,7 @@ func TestPlanEditor_EscFromEditPreservesEdits(t *testing.T) {
 func TestPlanEditor_ApproveEmptyPlanShowsError(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("   \n\t\n")
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 
 	cmd := editor.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	if cmd != nil {
@@ -159,7 +159,7 @@ func TestPlanEditor_ApproveEmptyPlanShowsError(t *testing.T) {
 func TestPlanEditor_ApprovePersistsAndEmits(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("# initial\n")
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 
 	// User edits, doesn't ctrl+s, esc back, then approves.
 	editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
@@ -191,7 +191,7 @@ func TestPlanEditor_ApprovePersistsAndEmits(t *testing.T) {
 func TestPlanEditor_AbandonEmitsMessage(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("anything\n")
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 
 	cmd := editor.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if cmd == nil {
@@ -205,7 +205,7 @@ func TestPlanEditor_AbandonEmitsMessage(t *testing.T) {
 
 func TestPlanEditor_DraftingLocksEditAndApprove(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 	editor.SetDrafting(true)
 
 	if cmd := editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}); cmd != nil {
@@ -228,7 +228,7 @@ func TestPlanEditor_DraftingLocksEditAndApprove(t *testing.T) {
 func TestPlanEditor_ReviseInputEmitsCritique(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("# plan\n")
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 
 	editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if editor.mode != planEditorModeReviseInput {
@@ -261,7 +261,7 @@ func TestPlanEditor_ReviseInputEmitsCritique(t *testing.T) {
 func TestPlanEditor_ScrollAndEditModeUseSameWidth(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("# H\nshort\n")
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 	if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
 		t.Errorf("contentWidth=%d, textarea.Width()=%d; both modes must wrap at the same column", got, want)
 	}
@@ -287,7 +287,7 @@ func TestPlanEditor_DisplayLineCountAgreesWithRenderer(t *testing.T) {
 	if err := sess.WritePlan(plan); err != nil {
 		t.Fatal(err)
 	}
-	editor := newPlanEditor(sess, 60, 30)
+	editor := newPlanEditor(sess, "", 60, 30)
 
 	scrollLines := editor.displayLines()
 	directLines := mdrender.New("monokai").RenderLines(editor.textarea.Value(), editor.contentWidth())
@@ -308,7 +308,7 @@ func TestPlanEditor_ScrollModeStylesHeadings(t *testing.T) {
 
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("# Hello world\n")
-	editor := newPlanEditor(sess, 80, 30)
+	editor := newPlanEditor(sess, "", 80, 30)
 
 	view := editor.View()
 	stripped := testutil.StripANSI(view)

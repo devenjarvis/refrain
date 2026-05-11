@@ -660,7 +660,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				skipDisp = "skipped-session-missing"
 				for _, s := range mgr.ListSessions() {
 					if s.ID == sessionID {
-						a.openPlanEditor(s)
+						a.openPlanEditor(s, msg.repoPath)
 						// Cleared because the happy-path block below logs
 						// "auto-opened" instead. openPlanEditor always sets
 						// a.planEditor, so the happy-path check is guaranteed
@@ -823,7 +823,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.planEditor != nil && a.planEditor.HasPendingQuestion() {
 			a.planEditor.resolveQuestion("")
 		}
-		repoPath := a.repoPathForSession(msg.sessionID)
+		repoPath := msg.repoPath
+		if repoPath == "" && a.planEditor != nil {
+			repoPath = a.planEditor.repoPath
+		}
+		if repoPath == "" {
+			repoPath = a.repoPathForSession(msg.sessionID)
+		}
 		mgr := a.managers[repoPath]
 		a.dashboard.panelFocus = focusList
 		a.planEditor = nil
@@ -856,7 +862,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.planEditor.plan = val
 			a.planEditor.dirty = false
 		}
-		repoPath := a.repoPathForSession(msg.sessionID)
+		repoPath := msg.repoPath
+		if repoPath == "" && a.planEditor != nil {
+			repoPath = a.planEditor.repoPath
+		}
+		if repoPath == "" {
+			repoPath = a.repoPathForSession(msg.sessionID)
+		}
 		if repoPath == "" {
 			repoPath = a.activeRepo
 		}
@@ -3088,7 +3100,7 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		// into a focusLaunch terminal. Drafting sessions also live in the
 		// Planning section; the editor renders a "Drafting…" placeholder
 		// until the background draft lands and reloads.
-		a.openPlanEditor(sess)
+		a.openPlanEditor(sess, items[idx].repoPath)
 		return nil, true
 	case focusSectionBuilding:
 		return nil, a.openSessionInFocusLaunch(sess)
@@ -3248,12 +3260,12 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 // openPlanEditor switches the dashboard into the plan-editor overlay for
 // sess. Caller is responsible for marking the session as drafting if a
 // background draft is in flight.
-func (a *App) openPlanEditor(sess *agent.Session) {
+func (a *App) openPlanEditor(sess *agent.Session, repoPath string) {
 	if sess == nil {
 		return
 	}
 	editorH := a.height - 1 // status row reserved
-	editor := newPlanEditor(sess, a.width, editorH)
+	editor := newPlanEditor(sess, repoPath, a.width, editorH)
 	if sess.IsDrafting() {
 		editor.SetDrafting(true)
 	}
@@ -3267,7 +3279,13 @@ func (a *App) openPlanEditor(sess *agent.Session) {
 // agent with the configured BuildFromPlanPrompt. The plan text is already
 // on disk by the time this fires (the editor's `a` handler writes it).
 func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd) {
-	repoPath := a.repoPathForSession(msg.sessionID)
+	repoPath := msg.repoPath
+	if repoPath == "" && a.planEditor != nil {
+		repoPath = a.planEditor.repoPath
+	}
+	if repoPath == "" {
+		repoPath = a.repoPathForSession(msg.sessionID)
+	}
 	if repoPath == "" {
 		repoPath = a.activeRepo
 	}
