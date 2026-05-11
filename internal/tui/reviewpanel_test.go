@@ -51,6 +51,76 @@ func TestRenderReviewHeader_TwoLineIntentCap(t *testing.T) {
 	}
 }
 
+// TestRenderTaskListPane_RowFormat verifies the compact left-pane row structure.
+func TestRenderTaskListPane_RowFormat(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "Add auth middleware", Done: false},
+			{Index: 2, Text: "Write tests", Done: false},
+		},
+		groups: []taskReviewGroup{
+			{
+				taskIndex: 1,
+				commits:   []git.Commit{{Hash: "abc123", Subject: "[task 1] add middleware"}},
+				stats:     &git.DiffStats{Files: 1, Insertions: 10, Deletions: 2},
+			},
+			{
+				taskIndex: 0,
+				commits:   []git.Commit{{Hash: "def456", Subject: "other commit"}},
+				stats:     &git.DiffStats{Files: 1, Insertions: 3, Deletions: 1},
+			},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}},
+			2: {state: verdictPending},
+		},
+	}
+
+	const width, height, cursor = 40, 10, 0
+	lines := renderTaskListPane(entry, width, height, cursor)
+	out := strings.Join(lines, "\n")
+
+	if !strings.Contains(out, "PLAN TASKS") {
+		t.Error("must contain PLAN TASKS header")
+	}
+
+	// Row 0 (task 1): pass icon, [1], task text.
+	found1 := false
+	for _, l := range lines {
+		if strings.Contains(l, "✓") && strings.Contains(l, "[1]") && strings.Contains(l, "Add auth") {
+			found1 = true
+			break
+		}
+	}
+	if !found1 {
+		t.Errorf("row 0 must contain ✓, [1], and 'Add auth'; got:\n%s", out)
+	}
+
+	// Row 1 (task 2): pending icon, [2].
+	found2 := false
+	for _, l := range lines {
+		if strings.Contains(l, "⋯") && strings.Contains(l, "[2]") {
+			found2 = true
+			break
+		}
+	}
+	if !found2 {
+		t.Errorf("row 1 must contain ⋯ and [2]; got:\n%s", out)
+	}
+
+	// "Other changes" row contains [?].
+	if !strings.Contains(out, "[?]") {
+		t.Errorf("Other changes row must contain [?]; got:\n%s", out)
+	}
+
+	// No line exceeds width visible cells.
+	for i, l := range lines {
+		if vw := ansi.StringWidth(l); vw > width {
+			t.Errorf("line %d width %d exceeds %d: %q", i, vw, width, l)
+		}
+	}
+}
+
 func TestRenderReviewPanel_ShowsOriginalPrompt(t *testing.T) {
 	sess := agent.NewSessionForTest("sess-1", "fix-auth")
 	sess.SetOriginalPrompt("Fix the auth bug so tokens redirect to /login")

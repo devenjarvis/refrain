@@ -224,6 +224,136 @@ func (e *reviewDiffEntry) getGroups() []taskReviewGroup {
 	return e.groups
 }
 
+// renderTaskListPane renders the left-pane compact task list with icon, index, text, stat.
+// Row format: <icon> [N] <truncated text>  +X -Y
+func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int) []string {
+	const headerLines = 2
+	header := []string{StyleSubtle.Render("PLAN TASKS"), ""}
+
+	type row struct {
+		taskIndex int
+		taskText  string
+		group     *taskReviewGroup
+	}
+
+	groupByIdx := make(map[int]*taskReviewGroup, len(entry.groups))
+	for i := range entry.groups {
+		g := &entry.groups[i]
+		groupByIdx[g.taskIndex] = g
+	}
+
+	// Build rows: no-plan synthetic row, plan tasks, then "Other changes".
+	var rows []row
+	if len(entry.tasks) == 0 && len(entry.groups) == 0 {
+		rows = append(rows, row{taskIndex: -1, taskText: "Overview"})
+	} else {
+		for _, t := range entry.tasks {
+			g := groupByIdx[t.Index]
+			rows = append(rows, row{taskIndex: t.Index, taskText: t.Text, group: g})
+		}
+		if other, ok := groupByIdx[0]; ok {
+			rows = append(rows, row{taskIndex: 0, taskText: "Other changes", group: other})
+		}
+	}
+
+	rowsH := height - headerLines
+	if rowsH < 1 {
+		rowsH = 1
+	}
+	offset := cursor - rowsH/2
+	if offset < 0 {
+		offset = 0
+	}
+	if offset+rowsH > len(rows) {
+		offset = len(rows) - rowsH
+		if offset < 0 {
+			offset = 0
+		}
+	}
+
+	cursorStyle := lipgloss.NewStyle().Background(lipgloss.Color("#2a2a3a")).Bold(true)
+	subtleGreen := lipgloss.NewStyle().Foreground(lipgloss.Color("#7ed321"))
+	subtleRed := lipgloss.NewStyle().Foreground(lipgloss.Color("#e74c3c"))
+
+	end := offset + rowsH
+	if end > len(rows) {
+		end = len(rows)
+	}
+	lines := make([]string, 0, headerLines+end-offset)
+	lines = append(lines, header...)
+
+	for i := offset; i < end; i++ {
+		r := rows[i]
+		selected := i == cursor
+
+		// Icon from verdict badge.
+		var rec *taskVerdictRecord
+		if entry.verdicts != nil {
+			rec = entry.verdicts[r.taskIndex]
+		}
+		icon, _, style := verdictBadge(rec)
+		// For the synthetic overview row, use a dot.
+		if r.taskIndex == -1 {
+			icon = "·"
+			style = StyleSubtle
+		}
+		iconStr := style.Render(icon)
+
+		// Index label.
+		label := fmt.Sprintf("[%d]", r.taskIndex)
+		switch r.taskIndex {
+		case 0:
+			label = "[?]"
+		case -1:
+			label = "   "
+		}
+
+		// Stat string.
+		statStr := ""
+		if r.group != nil && r.group.stats != nil {
+			st := r.group.stats
+			if st.Insertions > 0 || st.Deletions > 0 {
+				statStr = subtleGreen.Render(fmt.Sprintf("+%d", st.Insertions)) +
+					" " + subtleRed.Render(fmt.Sprintf("-%d", st.Deletions))
+			}
+		}
+
+		// Text: truncate to fit remaining width.
+		iconW := ansi.StringWidth(iconStr)
+		labelW := len(label)
+		statW := ansi.StringWidth(statStr)
+		// 2 prefix spaces + icon + space + label + space + ... + 2 sep + stat
+		overhead := 2 + iconW + 1 + labelW + 1 + 2 + statW
+		maxTextW := width - overhead
+		if maxTextW < 4 {
+			maxTextW = 4
+		}
+		textStr := truncateVisible(r.taskText, maxTextW)
+
+		// Assemble row.
+		rowText := iconStr + " " + StyleSubtle.Render(label) + " " + textStr
+		if statStr != "" {
+			usedW := iconW + 1 + labelW + 1 + ansi.StringWidth(textStr)
+			padW := width - 2 - usedW - 2 - statW
+			if padW < 1 {
+				padW = 1
+			}
+			rowText += strings.Repeat(" ", padW) + statStr
+		}
+
+		if selected {
+			padW := width - 2 - ansi.StringWidth(rowText)
+			if padW < 0 {
+				padW = 0
+			}
+			rowText = cursorStyle.Render(rowText + strings.Repeat(" ", padW))
+		}
+		lines = append(lines, "  "+rowText)
+	}
+
+	return lines
+}
+
 // renderTaskList renders the scrollable per-task review rows. availHeight
 // controls the visible window; the list scrolls so the cursor stays visible.
 func renderTaskList(entry *reviewDiffEntry, width, availHeight, cursor int) []string {
