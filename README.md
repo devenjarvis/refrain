@@ -71,7 +71,7 @@ The first run registers the repo and adds `.baton/` to `.gitignore`. From there:
 3. `esc` — return to the pipeline. Claude keeps running.
 4. `m` — mark a building session ready when Claude finishes its turn (it moves to REVIEWING).
 5. `r` — open the review panel; press `p` there to ship a PR (the session moves to SHIPPING).
-6. Merge or discard. Worktree is cleaned up automatically.
+6. `⏎` on a SHIPPING row — open the shipping panel: see CI check results and review threads, then `m` to merge (squash by default), `r` to address feedback with a new agent, or `p` to open the PR in the browser. Worktree is cleaned up automatically on merge.
 
 No tmux. No tab-switching. One cursor.
 
@@ -82,7 +82,7 @@ No tmux. No tab-switching. One cursor.
 | Key              | Action                                                                   |
 |------------------|--------------------------------------------------------------------------|
 | `j` / `k`        | Move the cursor across all four pipeline sections                        |
-| `⏎` / `space`    | Open the cursor-selected row (terminal, review panel, or PR by section)  |
+| `⏎` / `space`    | Open the cursor-selected row (terminal, review panel, or shipping panel) |
 | `n`              | Create a new session (lands in PLANNING)                                 |
 | `N`              | Cycle to the next registered repo                                        |
 | `b`              | On a PLANNING row: advance to BUILDING. Anywhere else: take a break      |
@@ -100,7 +100,18 @@ No tmux. No tab-switching. One cursor.
 | `X`              | Kill the entire cursor-selected session                                  |
 | `q`              | Detach and exit (prompts if agents are running)                          |
 
-Mouse: single-click on a session card moves the cursor; double-click activates (agent terminal for PLANNING / BUILDING, review panel for REVIEWING, PR-or-terminal for SHIPPING). Clicking the PR indicator on a REVIEWING or SHIPPING row opens the PR in the browser.
+Mouse: single-click on a session card moves the cursor; double-click activates (agent terminal for PLANNING / BUILDING, review panel for REVIEWING, shipping panel for SHIPPING). Clicking the PR indicator on a REVIEWING or SHIPPING row opens the PR in the browser.
+
+**Shipping panel** (opened by pressing `⏎` on a SHIPPING row, `esc` returns):
+
+| Key  | Action                                                                             |
+|------|------------------------------------------------------------------------------------|
+| `m`  | Merge the PR (squash by default; gated on CI green + approved review)              |
+| `M`  | Force merge (bypasses the merge-ready gate)                                        |
+| `r`  | Address feedback: synthesize prompt from failing checks + review comments, spawn agent |
+| `p`  | Open the PR in the browser                                                         |
+| `t`  | Open the session's agent terminal                                                  |
+| `esc`| Return to the pipeline                                                             |
 
 **Agent terminal** (opened by pressing `⏎` on a session, `esc` returns):
 
