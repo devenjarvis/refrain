@@ -2017,10 +2017,10 @@ func TestReviewPanel_TKey_NoAgents_ShowsError(t *testing.T) {
 	}
 }
 
-// TestReviewPanel_PKey_NoPR_DoesNotOrphan verifies the regression: pressing
-// "p" with no PR cached must NOT make the session unreachable. Even though
-// the session is already in LifecycleInReview, reviewQueueSessions() must
-// still surface it so the user can re-enter the panel after pressing ESC.
+// TestReviewPanel_PKey_NoPR_DoesNotOrphan verifies that pressing "p" with no
+// PR cached starts the draft flow (shows progress text) and does NOT make the
+// session unreachable. The session must still be in LifecycleInReview so
+// reviewQueueSessions() can surface it.
 func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
@@ -2030,11 +2030,10 @@ func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	app = model.(App)
 
-	if app.err == "" {
-		t.Fatal("expected error message when pressing p with no cached PR")
-	}
-	if !strings.Contains(app.err, "terminal") || !strings.Contains(app.err, "complete") {
-		t.Errorf("expected error to suggest t/c alternatives, got %q", app.err)
+	// Pressing p with no open PR now starts the push+draft pipeline.
+	// The status message should indicate progress, not an error.
+	if !strings.Contains(app.err, "Pushing") {
+		t.Errorf("expected progress message containing 'Pushing', got %q", app.err)
 	}
 
 	// Press ESC to close the panel — session stays InReview.
@@ -2164,9 +2163,9 @@ func TestPipeline_XKey_NoSession(t *testing.T) {
 	}
 }
 
-// TestPipeline_PKey_NoPRSilent verifies that 'p' with no cached PR is a no-op
-// (doesn't surface an error).
-func TestPipeline_PKey_NoPRSilent(t *testing.T) {
+// TestPipeline_PKey_NoPRStartsDraft verifies that pressing 'p' with no cached
+// PR on a Building session starts the push+draft pipeline (shows progress text).
+func TestPipeline_PKey_NoPRStartsDraft(t *testing.T) {
 	sess := agent.NewSessionForTest("s", "active-a")
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 
@@ -2184,8 +2183,9 @@ func TestPipeline_PKey_NoPRSilent(t *testing.T) {
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	app = model.(App)
-	if app.err != "" {
-		t.Errorf("expected no error from p with no cached PR, got %q", app.err)
+	// p with no cached PR starts the draft flow — progress message should appear.
+	if !strings.Contains(app.err, "Pushing") {
+		t.Errorf("expected progress message containing 'Pushing', got %q", app.err)
 	}
 }
 

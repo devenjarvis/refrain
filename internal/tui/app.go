@@ -93,6 +93,30 @@ type resumeDoneMsg struct {
 	repoPaths []string // repos whose state files should be cleaned up
 }
 
+// prDraftReadyMsg carries the result of the async push+draft pipeline.
+// On success Title/Body are non-empty. On error Err is set.
+type prDraftReadyMsg struct {
+	sessionID         string
+	title             string
+	body              string
+	owner             string
+	repo              string
+	head              string
+	base              string
+	worktreePath      string
+	repoPath          string
+	transitionShipping bool
+	err               error
+}
+
+// prCreatedMsg carries the result of the async github.Client.CreatePR call.
+type prCreatedMsg struct {
+	sessionID          string
+	pr                 *github.PRState
+	transitionShipping bool
+	err                error
+}
+
 // diffStatsEntry holds cached diff stats for a single session.
 type diffStatsEntry struct {
 	stats       *diffSummaryData
@@ -181,6 +205,19 @@ type App struct {
 	prCache         map[string]*prCacheEntry   // keyed by session ID
 	prPollStates    map[string]*prSessionState // keyed by session ID
 	prPollsInFlight int                        // count of concurrent in-flight polls
+
+	// PR compose modal and its associated session context.
+	prComposeModal      prComposeModal
+	prModalSessionID    string
+	prModalOwner        string
+	prModalRepo         string
+	prModalHead         string
+	prModalBase         string
+	prModalWorktreePath string
+	// prModalTransitionShipping is true when the modal was opened from the
+	// review panel (p key), where confirming the PR should transition the
+	// session to LifecycleShipping and close the review panel.
+	prModalTransitionShipping bool
 }
 
 func NewApp() App {
@@ -197,7 +234,8 @@ func NewApp() App {
 		prPollStates:    make(map[string]*prSessionState),
 		closingAgents:   make(map[string]bool),
 		closingSessions: make(map[string]bool),
-		promptModal:     newPromptModal(),
+		promptModal:    newPromptModal(),
+		prComposeModal: newPRComposeModal(),
 	}
 }
 
@@ -288,6 +326,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.planEditor.SetSize(msg.Width, msg.Height-1)
 			}
 			a.promptModal.SetSize(msg.Width, msg.Height-1)
+			a.prComposeModal.SetSize(msg.Width, msg.Height-1)
 		}
 
 	case initAppMsg:
@@ -924,6 +963,59 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case promptModalSubmitMsg:
 		return a.submitPromptModal(msg)
 
+	case prComposeCancelMsg:
+		return a, nil
+
+	case prComposeSubmitMsg:
+		return a.submitPRComposeModal(msg)
+
+	case prDraftReadyMsg:
+		if msg.err != nil {
+			a.setError("PR draft failed: " + msg.err.Error())
+			return a, nil
+		}
+		// Store context for the CreatePR call that follows confirmation.
+		a.prModalSessionID = msg.sessionID
+		a.prModalOwner = msg.owner
+		a.prModalRepo = msg.repo
+		a.prModalHead = msg.head
+		a.prModalBase = msg.base
+		a.prModalWorktreePath = msg.worktreePath
+		a.prModalTransitionShipping = msg.transitionShipping
+		resolved := a.resolvedCache[msg.repoPath]
+		cmd := a.prComposeModal.Open(msg.title, msg.body, resolved.PRDraftByDefault)
+		return a, cmd
+
+	case prCreatedMsg:
+		if msg.err != nil {
+			a.setError("create PR failed: " + msg.err.Error())
+			return a, nil
+		}
+		a.prCache[msg.sessionID] = &prCacheEntry{pr: msg.pr}
+		if msg.transitionShipping {
+			if sess := a.sessionByID(msg.sessionID); sess != nil {
+				sess.SetLifecyclePhase(agent.LifecycleShipping)
+				if a.reviewSession != nil && a.reviewSession.ID == msg.sessionID {
+					a.dashboard.panelFocus = focusList
+					a.reviewSession = nil
+				}
+			}
+		}
+		a.updateDashboardPRCache()
+		// Re-arm a burst poll so the new PR is discovered quickly.
+		if ps := a.prPollStates[msg.sessionID]; ps != nil {
+			ps.burstUntil = time.Now().Add(60 * time.Second)
+		}
+		// Auto-open in browser if configured.
+		repoPath := a.repoPathForSession(msg.sessionID)
+		resolved := a.resolvedCache[repoPath]
+		if resolved.AutoOpenPRInBrowser && msg.pr != nil && msg.pr.URL != "" {
+			if err := openURL(msg.pr.URL); err != nil {
+				a.setError(err.Error())
+			}
+		}
+		return a, nil
+
 	case diffStatsMsg:
 		a.diffRefreshInFlight = false
 		// Always update cache timestamp to prevent tight retry loops on persistent errors.
@@ -1188,6 +1280,10 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := a.promptModal.Update(msg)
 			return a, cmd
 		}
+		if a.prComposeModal.Active() {
+			cmd := a.prComposeModal.Update(msg)
+			return a, cmd
+		}
 		if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
 			a.focusLaunchAgent.Paste(msg.Content)
 			return a, nil
@@ -1198,6 +1294,11 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Submit/cancel emit dedicated messages handled below.
 		if a.promptModal.Active() {
 			cmd := a.promptModal.Update(msg)
+			return a, cmd
+		}
+		// PR compose modal consumes all keys while open.
+		if a.prComposeModal.Active() {
+			cmd := a.prComposeModal.Update(msg)
 			return a, cmd
 		}
 		// focusLaunch: forward all keys to the launch agent; esc/ctrl+e returns to focus pipeline.
@@ -1421,7 +1522,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.reviewSession = nil
 				return a, nil
 			case "p":
-				// Ship: open PR URL if one exists, transition to Shipping.
+				// Ship: if an open PR exists, open it in the browser and transition
+				// to Shipping. If no open PR, push the branch and draft a new one.
 				// TODO(stacked-PR): when entry.stack is non-empty, offer a way
 				// to cycle through stack entries instead of always opening the
 				// head PR.
@@ -1435,7 +1537,9 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.dashboard.panelFocus = focusList
 					a.reviewSession = nil
 				} else {
-					a.setError("no open PR yet — press t to open the agent terminal or c to mark complete")
+					repoPath := a.repoPathForSession(sess.ID)
+					a.setError("Pushing branch and drafting PR…")
+					return a, a.startPRDraftCmd(sess, repoPath, true)
 				}
 				return a, nil
 			case "t":
@@ -1989,13 +2093,18 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "p":
-			// Open the cursor-selected session's PR in the browser.
+			// Open the cursor-selected session's PR in the browser, or push
+			// and draft a new one if no open PR exists yet.
 			sess := a.cursorSelectedSession()
 			if sess != nil {
 				if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
 					if err := openURL(entry.pr.URL); err != nil {
 						a.setError(err.Error())
 					}
+				} else {
+					repoPath := a.cursorSelectedRepoPath()
+					a.setError("Pushing branch and drafting PR…")
+					return a, a.startPRDraftCmd(sess, repoPath, false)
 				}
 			}
 			return a, nil
@@ -3409,6 +3518,10 @@ func (a App) View() tea.View {
 		if a.promptModal.Active() {
 			body = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.promptModal.View())
 		}
+		// PR compose modal overlay.
+		if a.prComposeModal.Active() {
+			body = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
+		}
 		// Agent-limit modal overlay: replace body with centered modal when active.
 		if a.agentLimitModalActive {
 			modalW := a.width / 2
@@ -4195,6 +4308,122 @@ func ensureGitignore(path string) {
 		_, _ = f.WriteString("\n")
 	}
 	_, _ = f.WriteString(entry + "\n")
+}
+
+// startPRDraftCmd returns an async Cmd that pushes sess's branch and calls the
+// PRDrafter. On completion it emits a prDraftReadyMsg. repoPath is the parent
+// repo; worktreePath is used for git operations inside the worktree.
+func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionShipping bool) tea.Cmd {
+	if sess == nil || sess.Worktree == nil {
+		return func() tea.Msg {
+			return prDraftReadyMsg{err: fmt.Errorf("no worktree for session")}
+		}
+	}
+	ghClient := a.ghClient
+	branch := sess.Branch()
+	worktreePath := sess.Worktree.Path
+	sessionID := sess.ID
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		// Resolve owner/repo from the parent repo's remote URL.
+		rawURL, err := git.GetRemoteURL(repoPath)
+		if err != nil {
+			return prDraftReadyMsg{sessionID: sessionID, err: fmt.Errorf("get remote url: %w", err)}
+		}
+		owner, repo, err := github.ParseRemoteURL(rawURL)
+		if err != nil {
+			return prDraftReadyMsg{sessionID: sessionID, err: fmt.Errorf("parse remote url: %w", err)}
+		}
+
+		// Push the branch (first push sets upstream tracking).
+		if pushErr := git.Push(worktreePath, branch); pushErr != nil {
+			return prDraftReadyMsg{sessionID: sessionID, err: fmt.Errorf("push branch: %w", pushErr)}
+		}
+
+		// Determine base branch.
+		base := sess.Worktree.BaseBranch
+		if base == "" {
+			base = "main"
+		}
+
+		// Gather commits against base for the drafter context.
+		commits := ""
+		if cs, logErr := git.LogCommitsAgainstBase(sess.Worktree); logErr == nil && len(cs) > 0 {
+			var sb strings.Builder
+			for _, c := range cs {
+				sb.WriteString(c.Subject)
+				sb.WriteString("\n")
+				if c.Body != "" {
+					sb.WriteString(c.Body)
+					sb.WriteString("\n")
+				}
+			}
+			commits = strings.TrimSpace(sb.String())
+		}
+
+		// Diff stats for context.
+		diffstat := ""
+		if stats, statsErr := git.GetDiffStats(repoPath, sess.Worktree); statsErr == nil {
+			diffstat = fmt.Sprintf("%d file(s) changed, +%d -%d lines",
+				stats.Files, stats.Insertions, stats.Deletions)
+		}
+
+		// PR template (optional).
+		template := git.FindPRTemplate(worktreePath)
+
+		// Session's original task prompt for drafter context.
+		taskPrompt := sess.TaskSummary()
+		if taskPrompt == "" {
+			taskPrompt = sess.GetDisplayName()
+		}
+
+		_ = ghClient // reserved for future: checking if draft PRs are allowed on this repo
+		drafter := agent.DefaultPRDrafter()
+		draft, err := drafter(ctx, commits, diffstat, taskPrompt, template)
+		if err != nil {
+			return prDraftReadyMsg{sessionID: sessionID, err: fmt.Errorf("draft PR: %w", err)}
+		}
+
+		return prDraftReadyMsg{
+			sessionID:          sessionID,
+			title:              draft.Title,
+			body:               draft.Body,
+			owner:              owner,
+			repo:               repo,
+			head:               branch,
+			base:               base,
+			worktreePath:       worktreePath,
+			repoPath:           repoPath,
+			transitionShipping: transitionShipping,
+		}
+	}
+}
+
+// submitPRComposeModal handles a prComposeSubmitMsg by calling CreatePR and
+// emitting a prCreatedMsg.
+func (a *App) submitPRComposeModal(msg prComposeSubmitMsg) (tea.Model, tea.Cmd) {
+	ghClient := a.ghClient
+	owner := a.prModalOwner
+	repo := a.prModalRepo
+	head := a.prModalHead
+	base := a.prModalBase
+	sessionID := a.prModalSessionID
+	transitionShipping := a.prModalTransitionShipping
+	resolved := a.resolvedCache[a.repoPathForSession(sessionID)]
+
+	_ = resolved // auto-open is handled in the prCreatedMsg handler
+	return a, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		pr, err := ghClient.CreatePR(ctx, owner, repo, head, base, msg.title, msg.body, msg.draft)
+		if err != nil {
+			return prCreatedMsg{sessionID: sessionID, err: err}
+		}
+		return prCreatedMsg{sessionID: sessionID, pr: pr, transitionShipping: transitionShipping}
+	}
 }
 
 // openURL opens the given URL in the system's default browser. Fire-and-forget.
