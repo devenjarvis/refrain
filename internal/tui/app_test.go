@@ -2589,6 +2589,68 @@ func TestShippingPanel_MKeyGatedOnReady(t *testing.T) {
 	}
 }
 
+// TestBuildFeedbackPrompt_FailingChecksAndComments verifies that the synthesized
+// prompt includes failing check names and reviewer feedback.
+func TestBuildFeedbackPrompt_FailingChecksAndComments(t *testing.T) {
+	entry := &prCacheEntry{
+		checks: &github.CheckStatus{
+			Failed: 1,
+			Runs: []github.CheckRun{
+				{Name: "lint", Conclusion: "failure", URL: "https://ci/run/1"},
+				{Name: "tests", Conclusion: "success"},
+			},
+		},
+		threads: []github.ReviewThread{
+			{
+				Reviewer: "alice",
+				State:    "CHANGES_REQUESTED",
+				Body:     "Needs refactor.",
+				Comments: []github.ReviewComment{
+					{Path: "main.go", Body: "rename this", Line: 5},
+				},
+			},
+		},
+	}
+	prompt := buildFeedbackPrompt(entry)
+
+	if !strings.Contains(prompt, "lint") {
+		t.Errorf("prompt missing failing check name: %q", prompt)
+	}
+	if !strings.Contains(prompt, "https://ci/run/1") {
+		t.Errorf("prompt missing check URL: %q", prompt)
+	}
+	if !strings.Contains(prompt, "alice") {
+		t.Errorf("prompt missing reviewer: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Needs refactor") {
+		t.Errorf("prompt missing review body: %q", prompt)
+	}
+	if !strings.Contains(prompt, "main.go:5") {
+		t.Errorf("prompt missing inline comment location: %q", prompt)
+	}
+}
+
+// TestBuildFeedbackPrompt_NilEntry verifies that a nil entry returns "".
+func TestBuildFeedbackPrompt_NilEntry(t *testing.T) {
+	if got := buildFeedbackPrompt(nil); got != "" {
+		t.Errorf("expected empty prompt for nil entry, got: %q", got)
+	}
+}
+
+// TestBuildFeedbackPrompt_ApprovedOnly verifies no prompt for approved PRs.
+func TestBuildFeedbackPrompt_ApprovedOnly(t *testing.T) {
+	entry := &prCacheEntry{
+		checks:  &github.CheckStatus{State: "success"},
+		reviews: &github.ReviewStatus{State: "approved"},
+		threads: []github.ReviewThread{
+			{Reviewer: "bob", State: "APPROVED", Body: "LGTM"},
+		},
+	}
+	if got := buildFeedbackPrompt(entry); got != "" {
+		t.Errorf("expected empty prompt when no actionable feedback, got: %q", got)
+	}
+}
+
 // TestNKeyOpensPromptModal_WhenPlanFirstEnabled verifies the new plan-first
 // gate: with PlanFirstEnabled=true, pressing `n` opens the prompt modal
 // instead of immediately creating a session. With the flag off (today's

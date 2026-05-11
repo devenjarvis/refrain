@@ -1709,6 +1709,9 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 				return a, a.mergePRCmd(a.shippingSession.ID, true)
+			case "r":
+				// Address feedback: synthesize a prompt and spawn a new agent.
+				return a.addressFeedback(a.shippingSession)
 			}
 			return a, nil
 		}
@@ -4116,6 +4119,135 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 			stack:     stack,
 		}
 	}
+}
+
+// addressFeedback synthesizes a prompt from failing CI checks and unresolved
+// review comments, spawns a new agent in the session's existing worktree, and
+// transitions the session back to LifecycleInProgress. The PR stays open.
+func (a *App) addressFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
+	if sess == nil {
+		return a, nil
+	}
+	repoPath := a.repoPathForSession(sess.ID)
+	if repoPath == "" {
+		a.setError("no repo found for session")
+		return a, nil
+	}
+	mgr := a.managers[repoPath]
+	if mgr == nil {
+		a.setError("session manager not found")
+		return a, nil
+	}
+
+	entry := a.prCache[sess.ID]
+	prompt := buildFeedbackPrompt(entry)
+	if prompt == "" {
+		prompt = "Address the CI failures and review feedback on this PR."
+	}
+
+	resolved := a.resolvedCache[repoPath]
+	fixedW := a.dashboard.fixedTermWidth()
+	fixedH := a.dashboard.fixedTermHeight()
+	if fixedW <= 0 || fixedH <= 0 {
+		a.setError("terminal size not yet known; try again")
+		return a, nil
+	}
+	cfg := agent.Config{
+		Rows:              fixedH,
+		Cols:              fixedW,
+		BypassPermissions: resolved.BypassPermissions,
+		AgentProgram:      resolved.AgentProgram,
+		AgentModel:        resolved.AgentModel,
+		BuildSystemPrompt: resolved.BuildSystemPrompt,
+		Task:              prompt,
+	}
+
+	sessID := sess.ID
+	a.shippingSession = nil
+	a.dashboard.panelFocus = focusList
+	return a, func() tea.Msg {
+		ag, err := mgr.AddAgent(sessID, cfg)
+		if err != nil {
+			return createResultMsg{err: err}
+		}
+		sess.SetLifecyclePhase(agent.LifecycleInProgress)
+		return createResultMsg{sessionID: sessID, agentID: ag.ID}
+	}
+}
+
+// buildFeedbackPrompt synthesizes an agent prompt from the failing CI checks
+// and unresolved review comments in entry. Returns "" when nothing is actionable.
+func buildFeedbackPrompt(entry *prCacheEntry) string {
+	if entry == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("The following issues need to be addressed on this PR:\n\n")
+	wrote := false
+
+	if entry.checks != nil && entry.checks.Failed > 0 {
+		b.WriteString("## Failing CI Checks\n\n")
+		for _, run := range entry.checks.Runs {
+			if run.Conclusion != "failure" && run.Conclusion != "cancelled" && run.Conclusion != "timed_out" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(run.Name)
+			if run.URL != "" {
+				b.WriteString(" (see ")
+				b.WriteString(run.URL)
+				b.WriteString(")")
+			}
+			b.WriteByte('\n')
+		}
+		b.WriteByte('\n')
+		wrote = true
+	}
+
+	var changesRequested bool
+	for _, thread := range entry.threads {
+		if thread.State == "CHANGES_REQUESTED" {
+			changesRequested = true
+			break
+		}
+	}
+	if len(entry.threads) > 0 && changesRequested {
+		b.WriteString("## Review Feedback\n\n")
+		for _, thread := range entry.threads {
+			if thread.State != "CHANGES_REQUESTED" && thread.State != "COMMENTED" {
+				continue
+			}
+			b.WriteString("**")
+			b.WriteString(thread.Reviewer)
+			b.WriteString("**")
+			if thread.State == "CHANGES_REQUESTED" {
+				b.WriteString(" (changes requested)")
+			}
+			b.WriteString(":\n")
+			if thread.Body != "" {
+				b.WriteString(thread.Body)
+				b.WriteByte('\n')
+			}
+			for _, c := range thread.Comments {
+				b.WriteString("- ")
+				b.WriteString(c.Path)
+				if c.Line > 0 {
+					b.WriteString(fmt.Sprintf(":%d", c.Line))
+				}
+				b.WriteString(": ")
+				b.WriteString(c.Body)
+				b.WriteByte('\n')
+			}
+			b.WriteByte('\n')
+		}
+		wrote = true
+	}
+
+	if !wrote {
+		return ""
+	}
+	b.WriteString("Please fix each issue, commit your changes, and push.")
+	return b.String()
 }
 
 // mergePRCmd returns a Cmd that merges the PR for the given session.
