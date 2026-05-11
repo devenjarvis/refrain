@@ -38,7 +38,8 @@ const (
 // model owns its own textarea/textinput components and reports user actions
 // back to the App via tea.Msg values declared below.
 type planEditorModel struct {
-	sess *agent.Session
+	sess     *agent.Session
+	repoPath string // repo this session belongs to; set at construction to avoid ambiguous cross-repo ID lookup
 
 	mode      planEditorMode
 	plan      string // last-loaded plan content; used in scroll mode
@@ -130,12 +131,13 @@ type planEditorSavedMsg struct {
 // newPlanEditor constructs a fresh editor model bound to sess. Plan content
 // is loaded from disk on construction; if the session is currently drafting
 // the model renders a "Drafting…" placeholder and locks input.
-func newPlanEditor(sess *agent.Session, width, height int) planEditorModel {
+func newPlanEditor(sess *agent.Session, repoPath string, width, height int) planEditorModel {
 	m := planEditorModel{
-		sess:   sess,
-		mode:   planEditorModeScroll,
-		width:  width,
-		height: height,
+		sess:     sess,
+		repoPath: repoPath,
+		mode:     planEditorModeScroll,
+		width:    width,
+		height:   height,
 	}
 
 	ta := mdtextarea.New()

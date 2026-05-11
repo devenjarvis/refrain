@@ -2820,7 +2820,7 @@ func TestPlannerQuestionMsg_DoesNotReplaceOpenEditor(t *testing.T) {
 	app.dashboard.width = 120
 	app.dashboard.height = 39
 
-	editorA := newPlanEditor(sessA, 120, 39)
+	editorA := newPlanEditor(sessA, "", 120, 39)
 	app.planEditor = &editorA
 	app.dashboard.panelFocus = focusPlanEditor
 
