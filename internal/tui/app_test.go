@@ -2463,16 +2463,11 @@ func TestBKey_OutsidePlanning_FallsThroughToBreak(t *testing.T) {
 	}
 }
 
-// TestActivateFocusCursor_Shipping_OpensPRWhenURLCached verifies that pressing
-// enter (or double-clicking) a Shipping row with a cached PR URL takes the
-// PR-open branch: it returns ok=true without dropping the user into
-// focusLaunch, so they end up in the browser rather than back-to-back agent
-// terminal + browser tab.
-func TestActivateFocusCursor_Shipping_OpensPRWhenURLCached(t *testing.T) {
-	origOpenURL := openURL
-	openURL = func(string) error { return nil }
-	defer func() { openURL = origOpenURL }()
-
+// TestActivateFocusCursor_Shipping_OpensShippingPanel verifies that pressing
+// enter on a Shipping row opens the shipping panel (focusShipping) regardless
+// of whether a PR URL is cached. The browser is reached via the 'p' key inside
+// the panel rather than being opened directly on activation.
+func TestActivateFocusCursor_Shipping_OpensShippingPanel(t *testing.T) {
 	sessS := agent.NewSessionForTest("s", "ship-s")
 	sessS.SetLifecyclePhase(agent.LifecycleShipping)
 
@@ -2493,23 +2488,20 @@ func TestActivateFocusCursor_Shipping_OpensPRWhenURLCached(t *testing.T) {
 
 	_, ok := app.activateFocusCursor()
 	if !ok {
-		t.Fatal("expected activateFocusCursor on Shipping with cached URL to return ok=true")
+		t.Fatal("expected activateFocusCursor on Shipping to return ok=true")
 	}
-	if app.dashboard.panelFocus == focusLaunch {
-		t.Fatalf("expected panelFocus to stay out of focusLaunch when PR URL was opened, got %v", app.dashboard.panelFocus)
+	if app.dashboard.panelFocus != focusShipping {
+		t.Fatalf("expected panelFocus=focusShipping, got %v", app.dashboard.panelFocus)
+	}
+	if app.shippingSession != sessS {
+		t.Fatalf("expected shippingSession to be set to the selected session")
 	}
 }
 
-// TestActivateFocusCursor_Shipping_FallsBackToTerminalWithoutURL verifies that
-// activating a Shipping row whose PR isn't cached yet (or has no URL) falls
-// through to openSessionInFocusLaunch instead of silently no-op'ing — so the
-// user can still drive the agent (e.g. run gh pr create manually). With a test
-// session that has zero agents, openSessionInFocusLaunch returns false; we
-// only need to assert that the PR-open early return is NOT taken (panelFocus
-// would stay out of focusLaunch in either case, but ok=false distinguishes
-// "no agents to open" from the URL-present "ok=true and skipped focusLaunch"
-// path above).
-func TestActivateFocusCursor_Shipping_FallsBackToTerminalWithoutURL(t *testing.T) {
+// TestActivateFocusCursor_Shipping_NoPREntry verifies that activating a
+// Shipping row with no cached PR entry still opens the shipping panel so the
+// user can see the "fetching PR status" placeholder instead of a no-op.
+func TestActivateFocusCursor_Shipping_NoPREntry(t *testing.T) {
 	sessS := agent.NewSessionForTest("s", "ship-s")
 	sessS.SetLifecyclePhase(agent.LifecycleShipping)
 
@@ -2522,15 +2514,15 @@ func TestActivateFocusCursor_Shipping_FallsBackToTerminalWithoutURL(t *testing.T
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessS},
 	}
-	// No prCache entry: the URL branch is unreachable so activate falls
-	// through to openSessionInFocusLaunch, which returns false because the
-	// test session has no agents — exactly the dispatch we want to pin.
 	app.focusCursorSection = focusSectionShipping
 	app.focusShippingIdx = 0
 
 	_, ok := app.activateFocusCursor()
-	if ok {
-		t.Fatalf("expected ok=false from openSessionInFocusLaunch fallback (no agents), got ok=true")
+	if !ok {
+		t.Fatal("expected ok=true even without a cached PR")
+	}
+	if app.dashboard.panelFocus != focusShipping {
+		t.Fatalf("expected focusShipping, got %v", app.dashboard.panelFocus)
 	}
 }
 

@@ -179,6 +179,7 @@ type App struct {
 	reviewDiffCache        map[string]*reviewDiffEntry // keyed by session ID
 	reviewSession          *agent.Session              // session currently open in review panel
 	reviewTaskCursor       int                         // selected task row in the review task list
+	shippingSession        *agent.Session              // session currently open in shipping panel
 	planEditor             *planEditorModel            // non-nil while panelFocus == focusPlanEditor
 	promptModal            promptModalModel            // overlay for plan-first new-session prompt
 
@@ -1646,8 +1647,33 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Shipping panel key handling.
+		if a.dashboard.panelFocus == focusShipping && a.shippingSession != nil {
+			switch msg.String() {
+			case "esc":
+				a.dashboard.panelFocus = focusList
+				a.shippingSession = nil
+			case "t":
+				sess := a.shippingSession
+				a.shippingSession = nil
+				a.dashboard.panelFocus = focusList
+				if !a.openSessionInFocusLaunch(sess) {
+					a.setError("session has no agents to open")
+				}
+			case "p":
+				if entry := a.prCache[a.shippingSession.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
+					if err := openURL(entry.pr.URL); err != nil {
+						a.setError(err.Error())
+					}
+				} else {
+					a.setError("no PR URL available")
+				}
+			}
+			return a, nil
+		}
+
 		// Pipeline view key handling (the only dashboard mode).
-		if a.dashboard.panelFocus != focusReview {
+		if a.dashboard.panelFocus != focusReview && a.dashboard.panelFocus != focusShipping {
 			switch msg.String() {
 			case "up", "k":
 				a.moveFocusCursorUp()
@@ -3243,13 +3269,9 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		}
 		return nil, true
 	case focusSectionShipping:
-		if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
-			if err := openURL(entry.pr.URL); err != nil {
-				a.setError(err.Error())
-			}
-			return nil, true
-		}
-		return nil, a.openSessionInFocusLaunch(sess)
+		a.shippingSession = sess
+		a.dashboard.panelFocus = focusShipping
+		return nil, true
 	}
 	return nil, false
 }
@@ -3491,6 +3513,12 @@ func (a App) View() tea.View {
 		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
 			entry := a.reviewDiffCache[a.reviewSession.ID]
 			v := tea.NewView(renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor))
+			v.AltScreen = true
+			return v
+		}
+		if a.dashboard.panelFocus == focusShipping && a.shippingSession != nil {
+			entry := a.prCache[a.shippingSession.ID]
+			v := tea.NewView(renderShippingPanel(a.shippingSession, entry, a.width, a.height))
 			v.AltScreen = true
 			return v
 		}
