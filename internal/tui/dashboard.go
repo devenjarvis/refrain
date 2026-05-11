@@ -461,6 +461,15 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ finished — awaiting prompt")
 	}
 	if sess.LifecyclePhase() == agent.LifecycleInProgress {
+		if plan, present := sess.CachedPlan(); present {
+			if total, done := planTaskCounts(plan); total > 0 {
+				badge := fmt.Sprintf("▸ %d/%d", done, total)
+				if activeCount > 0 {
+					badge += fmt.Sprintf(" · %d active", activeCount)
+				}
+				return StyleSubtle.Render(badge)
+			}
+		}
 		if ag := sess.PrimaryAgent(); ag != nil {
 			if badge := buildingProgressBadge(ag.Todos(), activeCount); badge != "" {
 				return badge

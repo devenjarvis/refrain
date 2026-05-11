@@ -421,3 +421,85 @@ func TestRenderQueueRow_RepoPrefix(t *testing.T) {
 		t.Errorf("empty repoName should not emit › separator, got %q", ansi.Strip(bare[0]))
 	}
 }
+
+// TestSessionFocusStatus_BuildingWithPlanShowsProgressBadge verifies that a
+// Building session backed by a plan file shows "▸ done/total · N active" on
+// the badge, not the plain "N active, M idle" fallback.
+func TestSessionFocusStatus_BuildingWithPlanShowsProgressBadge(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	if err := sess.WritePlan("- [x] one\n- [ ] two\n- [ ] three\n"); err != nil {
+		t.Fatal(err)
+	}
+	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	if !strings.Contains(badge, "1/3") {
+		t.Errorf("expected plan progress badge '1/3', got %q", badge)
+	}
+	if !strings.Contains(badge, "1 active") {
+		t.Errorf("expected '1 active' in plan badge, got %q", badge)
+	}
+}
+
+// TestSessionFocusStatus_BuildingWithPlanPreemptedByError verifies that an
+// error badge still wins over the plan-derived progress badge.
+func TestSessionFocusStatus_BuildingWithPlanPreemptedByError(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	if err := sess.WritePlan("- [x] one\n- [ ] two\n- [ ] three\n"); err != nil {
+		t.Fatal(err)
+	}
+	ag := sess.AddTestAgent("a-1", false, agent.StatusError)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	if !strings.Contains(badge, "error") {
+		t.Errorf("expected error badge to preempt plan progress, got %q", badge)
+	}
+	if strings.Contains(badge, "1/3") {
+		t.Errorf("plan progress badge must not appear when agent has error, got %q", badge)
+	}
+}
+
+// TestSessionFocusStatus_BuildingWithPlanAllDoneReviewablePrefersReviewBadge
+// verifies that when all plan tasks are done and the session is reviewable, the
+// "✓ idle — press m to review" badge wins over the plan "done/total" badge
+// (Spec #6).
+func TestSessionFocusStatus_BuildingWithPlanAllDoneReviewablePrefersReviewBadge(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	if err := sess.WritePlan("- [x] one\n- [x] two\n"); err != nil {
+		t.Fatal(err)
+	}
+	// Idle agent → IsReviewable() == true and DoneAt is zero.
+	ag := sess.AddTestAgent("a-1", false, agent.StatusIdle)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	if !strings.Contains(badge, "press m to review") {
+		t.Errorf("expected review badge to win when all tasks done + reviewable, got %q", badge)
+	}
+	if strings.Contains(badge, "2/2") {
+		t.Errorf("plan progress badge must not appear when reviewable, got %q", badge)
+	}
+}
