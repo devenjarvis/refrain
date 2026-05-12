@@ -1518,9 +1518,19 @@ func (m *Manager) Detach() *state.BatonState {
 	}
 	m.mu.RUnlock()
 
-	// Snapshot state before killing agents.
-	sessionStates := make([]state.SessionState, 0, len(sessions))
+	// Partition: complete sessions are cleaned up; others are snapshotted.
+	var toSnapshot, toClean []*Session
 	for _, s := range sessions {
+		if s.LifecyclePhase() == LifecycleComplete {
+			toClean = append(toClean, s)
+		} else {
+			toSnapshot = append(toSnapshot, s)
+		}
+	}
+
+	// Snapshot state before killing agents.
+	sessionStates := make([]state.SessionState, 0, len(toSnapshot))
+	for _, s := range toSnapshot {
 		var doneAt *time.Time
 		if t := s.DoneAt(); !t.IsZero() {
 			doneAt = &t
@@ -1551,10 +1561,22 @@ func (m *Manager) Detach() *state.BatonState {
 		sessionStates = append(sessionStates, ss)
 	}
 
-	// Kill all agents but do NOT call Cleanup (preserve worktrees).
+	// Kill complete sessions and remove their worktrees.
+	var cleanWg sync.WaitGroup
+	cleanWg.Add(len(toClean))
+	for _, s := range toClean {
+		go func() {
+			defer cleanWg.Done()
+			s.KillAll()
+			_ = s.Cleanup(m.repoPath)
+		}()
+	}
+	cleanWg.Wait()
+
+	// Kill agents for snapshotted sessions but do NOT call Cleanup (preserve worktrees).
 	var wg sync.WaitGroup
-	wg.Add(len(sessions))
-	for _, s := range sessions {
+	wg.Add(len(toSnapshot))
+	for _, s := range toSnapshot {
 		go func() {
 			defer wg.Done()
 			s.KillAll()
