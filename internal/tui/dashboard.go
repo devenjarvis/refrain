@@ -495,18 +495,23 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ finished — awaiting prompt")
 	}
 	if sess.LifecyclePhase() == agent.LifecycleInProgress {
+		const barWidth = 20
 		if plan, present := sess.CachedPlan(); present {
 			if total, done := planTaskCounts(plan); total > 0 {
-				badge := fmt.Sprintf("▸ %d/%d", done, total)
-				if activeCount > 0 {
-					badge += fmt.Sprintf(" · %d active", activeCount)
-				}
-				return StyleSubtle.Render(badge)
+				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
 			}
 		}
 		if ag := sess.PrimaryAgent(); ag != nil {
-			if badge := buildingProgressBadge(ag.Todos(), activeCount); badge != "" {
-				return badge
+			todos := ag.Todos()
+			if len(todos) > 0 {
+				total := len(todos)
+				done := 0
+				for _, t := range todos {
+					if t.Status == "completed" {
+						done++
+					}
+				}
+				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
 			}
 		}
 	}
@@ -875,28 +880,6 @@ func planProgressLine(sess *agent.Session, budget int) string {
 	return truncateVisible(text, budget)
 }
 
-// buildingProgressBadge returns a styled "▸ done/total · N active" badge for
-// a Building-phase session that has received ≥1 TodoWrite. Returns "" when
-// todos is empty so the caller can fall back to the normal "N active, M idle"
-// string. Status conditions (error/waiting/asking) must preempt this badge —
-// the caller is responsible for that guard.
-func buildingProgressBadge(todos []agent.TodoItem, activeCount int) string {
-	if len(todos) == 0 {
-		return ""
-	}
-	total := len(todos)
-	done := 0
-	for _, t := range todos {
-		if t.Status == "completed" {
-			done++
-		}
-	}
-	badge := fmt.Sprintf("▸ %d/%d", done, total)
-	if activeCount > 0 {
-		badge += fmt.Sprintf(" · %d active", activeCount)
-	}
-	return StyleSubtle.Render(badge)
-}
 
 // focusTaskDescription chooses the description lines for a session card in
 // focus mode and reports whether they should render in pending (italic) style.

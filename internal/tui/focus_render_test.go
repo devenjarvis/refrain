@@ -208,42 +208,37 @@ func TestRenderFocusSessionCard_RepoPrefix(t *testing.T) {
 	}
 }
 
-// TestBuildingProgressBadge verifies the badge string for various todo states.
+// TestBuildingProgressBadge verifies renderCardProgressBar for various todo-count states.
 func TestBuildingProgressBadge(t *testing.T) {
 	tests := []struct {
-		name        string
-		todos       []agent.TodoItem
-		activeCount int
-		wantEmpty   bool
-		wantSubstr  string
+		name      string
+		done      int
+		total     int
+		wantEmpty bool
+		wantStr   string
 	}{
 		{
 			name:      "no todos returns empty",
-			todos:     nil,
+			done:      0,
+			total:     0,
 			wantEmpty: true,
 		},
 		{
-			name:        "2/5 with 1 active",
-			todos:       makeTodos(5, 2),
-			activeCount: 1,
-			wantSubstr:  "2/5",
+			name:    "2/5 shows correct counts",
+			done:    2,
+			total:   5,
+			wantStr: "2/5",
 		},
 		{
-			name:        "active count included",
-			todos:       makeTodos(3, 0),
-			activeCount: 2,
-			wantSubstr:  "2 active",
-		},
-		{
-			name:        "no active count omitted when zero",
-			todos:       makeTodos(3, 1),
-			activeCount: 0,
-			wantSubstr:  "1/3",
+			name:    "1/3 shows correct counts",
+			done:    1,
+			total:   3,
+			wantStr: "1/3",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildingProgressBadge(tc.todos, tc.activeCount)
+			got := renderCardProgressBar(tc.done, tc.total, 20, ColorPrimary)
 			if tc.wantEmpty {
 				if got != "" {
 					t.Errorf("expected empty badge, got %q", got)
@@ -251,8 +246,8 @@ func TestBuildingProgressBadge(t *testing.T) {
 				return
 			}
 			plain := ansi.Strip(got)
-			if !strings.Contains(plain, tc.wantSubstr) {
-				t.Errorf("expected badge to contain %q, got %q", tc.wantSubstr, plain)
+			if !strings.Contains(plain, tc.wantStr) {
+				t.Errorf("expected badge to contain %q, got %q", tc.wantStr, plain)
 			}
 		})
 	}
@@ -533,9 +528,13 @@ func TestRenderFocusSessionCard_NoPlanStaysFourLines(t *testing.T) {
 }
 
 // TestSessionFocusStatus_BuildingWithPlanShowsProgressBadge verifies that a
-// Building session backed by a plan file shows "▸ done/total · N active" on
-// the badge, not the plain "N active, M idle" fallback.
+// Building session backed by a plan file shows a progress bar with done/total,
+// not the plain "N active, M idle" fallback.
 func TestSessionFocusStatus_BuildingWithPlanShowsProgressBadge(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
@@ -550,12 +549,23 @@ func TestSessionFocusStatus_BuildingWithPlanShowsProgressBadge(t *testing.T) {
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := ansi.Strip(d.sessionFocusStatus(sess))
-	if !strings.Contains(badge, "1/3") {
-		t.Errorf("expected plan progress badge '1/3', got %q", badge)
+	badge := d.sessionFocusStatus(sess)
+	stripped := ansi.Strip(badge)
+	// Must contain the "1/3" count.
+	if !strings.Contains(stripped, "1/3") {
+		t.Errorf("expected plan progress badge '1/3', got %q", stripped)
 	}
-	if !strings.Contains(badge, "1 active") {
-		t.Errorf("expected '1 active' in plan badge, got %q", badge)
+	// Must contain a progress bar block rune (▌ or █ or ░).
+	if !strings.ContainsAny(badge, "▌█░") {
+		t.Errorf("expected progress bar glyph (▌/█/░) in badge, got %q", badge)
+	}
+	// Must NOT contain the legacy "▸ " prefix.
+	if strings.Contains(stripped, "▸ ") {
+		t.Errorf("legacy ▸ prefix must not appear in new badge, got %q", stripped)
+	}
+	// Must NOT contain "· N active" suffix.
+	if strings.Contains(stripped, "active") {
+		t.Errorf("legacy '· N active' suffix must not appear in new badge, got %q", stripped)
 	}
 }
 
