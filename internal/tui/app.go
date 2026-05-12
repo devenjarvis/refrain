@@ -1086,6 +1086,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			threads: msg.threads,
 			stack:   msg.stack,
 		}
+		// Auto-promote to Shipping when an open PR is discovered externally.
+		if msg.pr != nil && msg.pr.State == "open" {
+			if sess := a.sessionByID(msg.sessionID); sess != nil {
+				switch sess.LifecyclePhase() {
+				case agent.LifecycleInProgress, agent.LifecycleReadyForReview, agent.LifecycleInReview:
+					sess.SetLifecyclePhase(agent.LifecycleShipping)
+					if a.reviewSession != nil && a.reviewSession.ID == msg.sessionID {
+						a.dashboard.panelFocus = focusList
+						a.reviewSession = nil
+					}
+				}
+			}
+		}
 		// Detect PR merge/close and transition to Complete lifecycle phase.
 		if msg.pr != nil && (msg.pr.State == "merged" || msg.pr.State == "closed") {
 			repoPath := a.repoPathForSession(msg.sessionID)
