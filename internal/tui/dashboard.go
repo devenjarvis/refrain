@@ -461,6 +461,15 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ finished — awaiting prompt")
 	}
 	if sess.LifecyclePhase() == agent.LifecycleInProgress {
+		if plan, present := sess.CachedPlan(); present {
+			if total, done := planTaskCounts(plan); total > 0 {
+				badge := fmt.Sprintf("▸ %d/%d", done, total)
+				if activeCount > 0 {
+					badge += fmt.Sprintf(" · %d active", activeCount)
+				}
+				return StyleSubtle.Render(badge)
+			}
+		}
 		if ag := sess.PrimaryAgent(); ag != nil {
 			if badge := buildingProgressBadge(ag.Todos(), activeCount); badge != "" {
 				return badge
@@ -537,16 +546,17 @@ func (d dashboardModel) sessionFocusStripeColor(sess *agent.Session) lipgloss.Co
 	}
 }
 
-// renderFocusSessionCard returns exactly 4 lines for a session card in focus
-// mode. Each line begins with a colored vertical stripe (▎) whose color encodes
-// the dominant session state via sessionFocusStripeColor; the selected card
-// brightens the stripe to ColorSecondary. The card has fixed height so the
-// list layout is predictable regardless of summary length.
+// renderFocusSessionCard returns 4 lines for a session card in focus mode, or
+// 5 lines when a Building session has unfinished plan tasks. Each line begins
+// with a colored vertical stripe (▎) whose color encodes the dominant session
+// state via sessionFocusStripeColor; the selected card brightens the stripe to
+// ColorSecondary.
 //
 // Line 1: <stripe> <name (bold, ColorText)>     ... right-aligned <status badge>
 // Line 2: <stripe>   <description line 1 (muted; italic if pending)>
 // Line 3: <stripe>   <description line 2 or empty>  (always reserved)
-// Line 4: <stripe>   <branch [· detail]>        ... right-aligned <elapsed>
+// Line 4: <stripe>   ▸ <first open task> [· next: <second open>]  (plan-backed building only)
+// Line 4/5: <stripe>   <branch [· detail]>      ... right-aligned <elapsed>
 func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName string, selected bool, width int) []string {
 	stripeColor := d.sessionFocusStripeColor(sess)
 	if selected {
@@ -658,6 +668,10 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	}
 	line4 := rightAlign(bottomLeft, StyleSubtle.Render(elapsedStr), width)
 
+	if progress := planProgressLine(sess, descBudget); progress != "" {
+		progressLine := stripe + indent + StyleSubtle.Render(progress)
+		return []string{line1, line2, line3, progressLine, line4}
+	}
 	return []string{line1, line2, line3, line4}
 }
 
@@ -770,6 +784,61 @@ func firstUncompletedTask(plan string) string {
 		return text
 	}
 	return ""
+}
+
+// secondUncompletedTask returns the text of the second "- [ ]" line in plan,
+// or "" if fewer than two open tasks exist. Uses the same whitespace-trimming
+// and blank-body-skipping rules as firstUncompletedTask so both helpers agree
+// on what constitutes a valid open task. The "second open task" approximation
+// is intentional — deriving the truly-in-flight task from git commits would
+// require per-tick git I/O that the plan cache exists to avoid.
+func secondUncompletedTask(plan string) string {
+	count := 0
+	for _, raw := range strings.Split(plan, "\n") {
+		line := strings.TrimLeft(raw, " \t")
+		if !strings.HasPrefix(line, "- [ ]") {
+			continue
+		}
+		text := strings.TrimSpace(strings.TrimPrefix(line, "- [ ]"))
+		if text == "" {
+			continue
+		}
+		count++
+		if count == 2 {
+			return text
+		}
+	}
+	return ""
+}
+
+// planProgressLine returns the text content for the optional task-progress
+// line on a Building session card ("▸ first open · next: second open"),
+// truncated to budget display cells. Returns "" when the line should be
+// omitted: session is not LifecycleInProgress, it is reviewable (all tasks
+// done), it has no plan, the plan has no task lines, or all tasks are already
+// done (firstUncompletedTask returns ""). The first-open-task approximation is
+// intentional — deriving the in-flight task from git commits would require
+// per-tick git I/O that the plan cache avoids.
+func planProgressLine(sess *agent.Session, budget int) string {
+	if sess.LifecyclePhase() != agent.LifecycleInProgress {
+		return ""
+	}
+	if sess.IsReviewable() {
+		return ""
+	}
+	plan, present := sess.CachedPlan()
+	if !present {
+		return ""
+	}
+	first := firstUncompletedTask(plan)
+	if first == "" {
+		return ""
+	}
+	text := "▸ " + first
+	if second := secondUncompletedTask(plan); second != "" {
+		text += " · next: " + second
+	}
+	return truncateVisible(text, budget)
 }
 
 // buildingProgressBadge returns a styled "▸ done/total · N active" badge for

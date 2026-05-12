@@ -3100,7 +3100,7 @@ func (a *App) focusSectionItems(s focusSection) []listItem {
 //	rows 2..5:             pipeline widget (4 rows)
 //	row 6:                 blank
 //	(per non-empty section, in order Planning → Building → Reviewing → Shipping:)
-//	  label row + N rows per row (4 for Planning/Building cards, 2 for Reviewing/Shipping)
+//	  label row + N rows per item (4 for Planning, 4–5 for Building cards depending on plan progress, 2 for Reviewing/Shipping)
 //	  blank row between rows; trailing blank row before next section
 //
 // Returns (section, index, true) when the click landed on a session row,
@@ -3132,8 +3132,11 @@ func (a *App) pipelineHitTest(dashboardContentY int) (focusSection, int, bool) {
 			continue
 		}
 		cursor += labelRows
-		rowH := rowsPerItem(section)
-		for i := range items {
+		for i, item := range items {
+			rowH := rowsPerItem(section)
+			if section == focusSectionBuilding && item.session != nil && planProgressLine(item.session, 1) != "" {
+				rowH++
+			}
 			start := cursor
 			end := start + rowH
 			if dashboardContentY >= start && dashboardContentY < end {

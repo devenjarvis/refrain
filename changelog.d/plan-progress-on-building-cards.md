@@ -1,0 +1,3 @@
+### Changed
+
+- Building-phase session cards now surface plan progress when a `.claude/plan.md` is present. The line-1 badge shows `▸ done/total · N active` derived from the plan's checkbox state, and a new line (directly above the branch row) shows `▸ <first open task> · next: <second open task>`, collapsing to `▸ <first open task>` when only one task remains and disappearing entirely when all tasks are done. The existing task-summary description on lines 2–3 is preserved. Sessions without a plan file (or where the plan has no checkbox lines) continue to use the TodoWrite-driven badge and description unchanged.
