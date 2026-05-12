@@ -2017,6 +2017,32 @@ func TestReviewPanel_TKey_NoAgents_ShowsError(t *testing.T) {
 	}
 }
 
+// TestReviewPanel_ComposeModalRendersOverPanel verifies that when the
+// prComposeModal is active while panelFocus == focusReview, View() renders the
+// modal centered over the panel instead of the bare review panel.
+func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
+	sessR := agent.NewSessionForTest("s", "ship-it")
+	sessR.SetLifecyclePhase(agent.LifecycleInReview)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.reviewSession = sessR
+	app.dashboard.panelFocus = focusReview
+	app.prComposeModal.SetSize(120, 39)
+	_ = app.prComposeModal.Open("My PR Title", "My PR Body", false)
+
+	v := app.View()
+	if !strings.Contains(v.Content, "My PR Title") {
+		t.Errorf("expected view to contain %q, got content: %q", "My PR Title", v.Content)
+	}
+	if !strings.Contains(v.Content, "CREATE PR") {
+		t.Errorf("expected view to contain %q, got content: %q", "CREATE PR", v.Content)
+	}
+}
+
 // TestReviewPanel_PKey_NoPR_DoesNotOrphan verifies that pressing "p" with no
 // PR cached starts the draft flow (shows progress text) and does NOT make the
 // session unreachable. The session must still be in LifecycleInReview so

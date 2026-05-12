@@ -3614,7 +3614,11 @@ func (a App) View() tea.View {
 	case ViewDashboard:
 		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
 			entry := a.reviewDiffCache[a.reviewSession.ID]
-			v := tea.NewView(renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID))
+			panelStr := renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID)
+			if a.prComposeModal.Active() {
+				panelStr = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
+			}
+			v := tea.NewView(panelStr)
 			v.AltScreen = true
 			return v
 		}
