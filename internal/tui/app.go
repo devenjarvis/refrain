@@ -3612,9 +3612,11 @@ func (a App) View() tea.View {
 	case ViewDashboard:
 		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
 			entry := a.reviewDiffCache[a.reviewSession.ID]
-			panelStr := renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID)
+			var panelStr string
 			if a.prComposeModal.Active() {
 				panelStr = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
+			} else {
+				panelStr = renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID)
 			}
 			v := tea.NewView(panelStr)
 			v.AltScreen = true
@@ -4714,6 +4716,12 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 		worktree := sess.Worktree
 
 		// Push and draft concurrently; total latency = max(push, drafter).
+		// innerCtx is cancelled by push failure so a fast push error (e.g. auth
+		// failure) immediately aborts the expensive Haiku subprocess rather than
+		// waiting out the full 90s parent timeout.
+		innerCtx, innerCancel := context.WithCancel(ctx)
+		defer innerCancel()
+
 		var (
 			pushErr  error
 			draftErr error
@@ -4726,6 +4734,7 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 			defer wg.Done()
 			if err := git.Push(worktreePath, branch); err != nil {
 				pushErr = fmt.Errorf("push branch: %w", err)
+				innerCancel()
 			}
 		}()
 		go func() {
@@ -4759,16 +4768,15 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 
 			drafter := agent.DefaultPRDrafter()
 			var err error
-			draft, err = drafter(ctx, commits, diffstat, taskPrompt, template)
+			draft, err = drafter(innerCtx, commits, diffstat, taskPrompt, template)
 			if err != nil {
 				draftErr = fmt.Errorf("draft PR: %w", err)
 			}
 		}()
 		wg.Wait()
 
-		if pushErr != nil && draftErr != nil {
-			return prDraftReadyMsg{sessionID: sessionID, err: errors.Join(pushErr, draftErr)}
-		}
+		// If push failed, drafter may have been cancelled via innerCtx — return
+		// only the push error; the drafter error is expected noise in that case.
 		if pushErr != nil {
 			return prDraftReadyMsg{sessionID: sessionID, err: pushErr}
 		}
