@@ -1375,6 +1375,42 @@ func TestSession_CachedPlan_LazyLoadsFromDisk(t *testing.T) {
 	}
 }
 
+func TestSession_CachedPlan_RereadsOnExternalMtimeChange(t *testing.T) {
+	// The build agent edits plan.md directly via Claude's Edit tool, bypassing
+	// WritePlan. CachedPlan must detect the mtime change and re-read the file.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const body1 = "# Goal\noriginal\n\n- [ ] task one\n"
+	planPath := filepath.Join(dir, ".claude", "plan.md")
+	if err := os.WriteFile(planPath, []byte(body1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
+	plan, present := s.CachedPlan()
+	if !present || plan != body1 {
+		t.Fatalf("CachedPlan() = (%q, %v), want (%q, true)", plan, present, body1)
+	}
+
+	// Simulate build agent toggling a checkbox via external file write.
+	const body2 = "# Goal\noriginal\n\n- [x] task one\n"
+	if err := os.WriteFile(planPath, []byte(body2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Bump mtime to the future so even coarse-grained filesystems detect the change.
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(planPath, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	plan2, _ := s.CachedPlan()
+	if plan2 != body2 {
+		t.Errorf("after external mtime bump, CachedPlan() = %q, want %q", plan2, body2)
+	}
+}
+
 func TestSession_CachedPlan_RestorePrevPlanRefreshesCache(t *testing.T) {
 	dir := t.TempDir()
 	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
