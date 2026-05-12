@@ -585,6 +585,32 @@ func TestSessionFocusStatus_BuildingWithPlanPreemptedByError(t *testing.T) {
 	}
 }
 
+// TestSessionFocusStatus_BuildingWithPlanPreemptedByWaiting verifies that a
+// waiting badge still wins over the plan-derived progress badge.
+func TestSessionFocusStatus_BuildingWithPlanPreemptedByWaiting(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	if err := sess.WritePlan("- [x] one\n- [ ] two\n- [ ] three\n"); err != nil {
+		t.Fatal(err)
+	}
+	ag := sess.AddTestAgent("a-1", false, agent.StatusWaiting)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	if !strings.Contains(badge, "waiting") {
+		t.Errorf("expected waiting badge to preempt plan progress, got %q", badge)
+	}
+	if strings.Contains(badge, "1/3") {
+		t.Errorf("plan progress badge must not appear when agent is waiting, got %q", badge)
+	}
+}
+
 // TestSessionFocusStatus_BuildingWithPlanAllDoneReviewablePrefersReviewBadge
 // verifies that when all plan tasks are done and the session is reviewable, the
 // "✓ idle — press m to review" badge wins over the plan "done/total" badge

@@ -830,10 +830,6 @@ func planProgressLine(sess *agent.Session, budget int) string {
 	if !present {
 		return ""
 	}
-	total, _ := planTaskCounts(plan)
-	if total == 0 {
-		return ""
-	}
 	first := firstUncompletedTask(plan)
 	if first == "" {
 		return ""
