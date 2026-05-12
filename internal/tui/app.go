@@ -1593,7 +1593,6 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.prDraftInFlight = true
 					a.prDraftSessionID = sess.ID
 					repoPath := a.repoPathForSession(sess.ID)
-					a.setError("Pushing branch and drafting PR…")
 					return a, a.startPRDraftCmd(sess, repoPath, true)
 				}
 				return a, nil
@@ -2215,7 +2214,6 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.prDraftInFlight = true
 					a.prDraftSessionID = sess.ID
 					repoPath := a.cursorSelectedRepoPath()
-					a.setError("Pushing branch and drafting PR…")
 					return a, a.startPRDraftCmd(sess, repoPath, false)
 				}
 			}
@@ -3627,7 +3625,13 @@ func (a App) View() tea.View {
 	case ViewDashboard:
 		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
 			entry := a.reviewDiffCache[a.reviewSession.ID]
-			v := tea.NewView(renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID))
+			var panelStr string
+			if a.prComposeModal.Active() {
+				panelStr = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
+			} else {
+				panelStr = renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID)
+			}
+			v := tea.NewView(panelStr)
 			v.AltScreen = true
 			return v
 		}
@@ -4717,52 +4721,80 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 			return prDraftReadyMsg{sessionID: sessionID, err: fmt.Errorf("parse remote url: %w", err)}
 		}
 
-		// Push the branch (first push sets upstream tracking).
-		if pushErr := git.Push(worktreePath, branch); pushErr != nil {
-			return prDraftReadyMsg{sessionID: sessionID, err: fmt.Errorf("push branch: %w", pushErr)}
-		}
-
-		// Determine base branch.
+		// Determine base branch (local, no network).
 		base := sess.Worktree.BaseBranch
 		if base == "" {
 			base = "main"
 		}
+		worktree := sess.Worktree
 
-		// Gather commits against base for the drafter context.
-		commits := ""
-		if cs, logErr := git.LogCommitsAgainstBase(sess.Worktree); logErr == nil && len(cs) > 0 {
-			var sb strings.Builder
-			for _, c := range cs {
-				sb.WriteString(c.Subject)
-				sb.WriteString("\n")
-				if c.Body != "" {
-					sb.WriteString(c.Body)
-					sb.WriteString("\n")
-				}
+		// Push and draft concurrently; total latency = max(push, drafter).
+		// innerCtx is cancelled by push failure so a fast push error (e.g. auth
+		// failure) immediately aborts the expensive Haiku subprocess rather than
+		// waiting out the full 90s parent timeout.
+		innerCtx, innerCancel := context.WithCancel(ctx)
+		defer innerCancel()
+
+		var (
+			pushErr  error
+			draftErr error
+			draft    *agent.PRDraft
+			wg       sync.WaitGroup
+		)
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if err := git.Push(worktreePath, branch); err != nil {
+				pushErr = fmt.Errorf("push branch: %w", err)
+				innerCancel()
 			}
-			commits = strings.TrimSpace(sb.String())
+		}()
+		go func() {
+			defer wg.Done()
+			commits := ""
+			if cs, logErr := git.LogCommitsAgainstBase(worktree); logErr == nil && len(cs) > 0 {
+				var sb strings.Builder
+				for _, c := range cs {
+					sb.WriteString(c.Subject)
+					sb.WriteString("\n")
+					if c.Body != "" {
+						sb.WriteString(c.Body)
+						sb.WriteString("\n")
+					}
+				}
+				commits = strings.TrimSpace(sb.String())
+			}
+
+			diffstat := ""
+			if stats, statsErr := git.GetDiffStats(repoPath, worktree); statsErr == nil {
+				diffstat = fmt.Sprintf("%d file(s) changed, +%d -%d lines",
+					stats.Files, stats.Insertions, stats.Deletions)
+			}
+
+			template := git.FindPRTemplate(worktreePath)
+
+			taskPrompt := sess.TaskSummary()
+			if taskPrompt == "" {
+				taskPrompt = sess.GetDisplayName()
+			}
+
+			drafter := agent.DefaultPRDrafter()
+			var err error
+			draft, err = drafter(innerCtx, commits, diffstat, taskPrompt, template)
+			if err != nil {
+				draftErr = fmt.Errorf("draft PR: %w", err)
+			}
+		}()
+		wg.Wait()
+
+		// If push failed, drafter may have been cancelled via innerCtx — return
+		// only the push error; the drafter error is expected noise in that case.
+		if pushErr != nil {
+			return prDraftReadyMsg{sessionID: sessionID, err: pushErr}
 		}
-
-		// Diff stats for context.
-		diffstat := ""
-		if stats, statsErr := git.GetDiffStats(repoPath, sess.Worktree); statsErr == nil {
-			diffstat = fmt.Sprintf("%d file(s) changed, +%d -%d lines",
-				stats.Files, stats.Insertions, stats.Deletions)
-		}
-
-		// PR template (optional).
-		template := git.FindPRTemplate(worktreePath)
-
-		// Session's original task prompt for drafter context.
-		taskPrompt := sess.TaskSummary()
-		if taskPrompt == "" {
-			taskPrompt = sess.GetDisplayName()
-		}
-
-		drafter := agent.DefaultPRDrafter()
-		draft, err := drafter(ctx, commits, diffstat, taskPrompt, template)
-		if err != nil {
-			return prDraftReadyMsg{sessionID: sessionID, err: fmt.Errorf("draft PR: %w", err)}
+		if draftErr != nil {
+			return prDraftReadyMsg{sessionID: sessionID, err: draftErr}
 		}
 
 		return prDraftReadyMsg{
