@@ -2350,6 +2350,23 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// focusReview: left-pane row clicks move the review task cursor.
+		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
+			entry := a.reviewDiffCache[a.reviewSession.ID]
+			if entry != nil && a.width >= 80 {
+				headerH := len(renderReviewHeader(a.reviewSession, a.width))
+				leftW := a.width * 4 / 10
+				if leftW < 32 {
+					leftW = 32
+				}
+				paneTop := dashboardTopY + headerH
+				if rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, leftW); rowIdx >= 0 {
+					a.reviewTaskCursor = rowIdx
+					return a, nil
+				}
+			}
+		}
+
 		// Pipeline view: click on a session card moves the cursor; double-click
 		// activates (focusLaunch for active sessions, review panel for queue).
 		// PR-indicator click on a queue row opens the PR in the browser.

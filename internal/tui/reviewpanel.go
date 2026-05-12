@@ -217,6 +217,27 @@ func (e *reviewDiffEntry) getGroups() []taskReviewGroup {
 	return e.groups
 }
 
+// reviewListPaneRowAt returns the 0-based task row index at (mouseX, mouseY) within the
+// left task-list pane, or -1 if the click is outside the pane or in the PLAN TASKS header.
+// paneTop is the Y coordinate of the first line of the pane (including the 2-line header).
+// paneLeft/paneWidth define the horizontal bounds.
+func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLeft, paneWidth int) int {
+	const listHeaderLines = 2 // PLAN TASKS + blank
+	if mouseX < paneLeft || mouseX >= paneLeft+paneWidth {
+		return -1
+	}
+	taskRowStart := paneTop + listHeaderLines
+	if mouseY < taskRowStart {
+		return -1
+	}
+	rowIdx := mouseY - taskRowStart
+	nRows := reviewTaskCount(entry)
+	if rowIdx >= nRows {
+		return -1
+	}
+	return rowIdx
+}
+
 // renderTaskListPane renders the left-pane compact task list with icon, index, text, stat.
 // Row format: <icon> [N] <truncated text>  +X -Y
 func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int) []string {

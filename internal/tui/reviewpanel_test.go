@@ -364,6 +364,45 @@ func TestRenderReviewPanel_UsesThemeColors(t *testing.T) {
 	}
 }
 
+// TestReviewListPaneRowAt verifies the click hit-test for the left task list pane.
+func TestReviewListPaneRowAt(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "Task one"},
+			{Index: 2, Text: "Task two"},
+			{Index: 3, Text: "Task three"},
+		},
+		groups: []taskReviewGroup{},
+	}
+
+	const paneTop, paneLeft, paneWidth = 4, 0, 40
+
+	tests := []struct {
+		name    string
+		mouseX  int
+		mouseY  int
+		wantRow int
+	}{
+		{"click row 0", 5, paneTop + 2, 0},
+		{"click row 1", 5, paneTop + 3, 1},
+		{"click row 2", 5, paneTop + 4, 2},
+		{"Y below rows", 5, paneTop + 5, -1},
+		{"in PLAN TASKS header", 5, paneTop, -1},
+		{"in blank header line", 5, paneTop + 1, -1},
+		{"X past right edge", paneLeft + paneWidth, paneTop + 2, -1},
+		{"X before left edge", paneLeft - 1, paneTop + 2, -1},
+		{"Y above pane", 5, paneTop - 1, -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := reviewListPaneRowAt(entry, tt.mouseX, tt.mouseY, paneTop, paneLeft, paneWidth)
+			if got != tt.wantRow {
+				t.Errorf("reviewListPaneRowAt(x=%d, y=%d) = %d, want %d", tt.mouseX, tt.mouseY, got, tt.wantRow)
+			}
+		})
+	}
+}
+
 // TestRenderReviewPanel_NoPlanShowsOverview verifies the no-plan (overview) path.
 func TestRenderReviewPanel_NoPlanShowsOverview(t *testing.T) {
 	sess := agent.NewSessionForTest("sess-1", "fix-auth")
