@@ -585,13 +585,53 @@ func (d dashboardModel) sessionFocusStripeColor(sess *agent.Session) lipgloss.Co
 	}
 }
 
+// sessionStatusGlyph returns a single-rune glyph and color that mirrors the
+// dominant session state. Used on line 1 of the card, between the stripe and
+// the session name, so the reader can identify state at a glance even when ANSI
+// colors are unavailable. planningPhase callers pass true to suppress the glyph
+// when the right-side badge already begins with one.
+func (d dashboardModel) sessionStatusGlyph(sess *agent.Session) (glyph string, col lipgloss.Color) {
+	var hasError, hasWaiting, hasIdleAsking, hasActive bool
+	for _, item := range d.items {
+		if item.kind != listItemAgent || item.agent == nil || item.agent.IsShell || item.session != sess {
+			continue
+		}
+		switch item.agent.Status() {
+		case agent.StatusError:
+			hasError = true
+		case agent.StatusWaiting:
+			hasWaiting = true
+		case agent.StatusActive:
+			hasActive = true
+		case agent.StatusIdle:
+			if item.agent.AskingQuestion() {
+				hasIdleAsking = true
+			}
+		}
+	}
+	switch {
+	case hasError:
+		return "✗", ColorError
+	case hasWaiting:
+		return "⏸", ColorWaiting
+	case hasIdleAsking:
+		return "?", ColorWarning
+	case sess.IsReviewable() || !sess.DoneAt().IsZero():
+		return "✓", ColorSuccess
+	case hasActive:
+		return "⚡", ColorSecondary
+	default:
+		return "○", ColorMuted
+	}
+}
+
 // renderFocusSessionCard returns 4 lines for a session card in focus mode, or
 // 5 lines when a Building session has unfinished plan tasks. Each line begins
 // with a colored vertical stripe (▎) whose color encodes the dominant session
 // state via sessionFocusStripeColor; the selected card brightens the stripe to
 // ColorSecondary.
 //
-// Line 1: <stripe> <name (bold, ColorText)>     ... right-aligned <status badge>
+// Line 1: <stripe> <glyph> <name (bold, ColorText)>   ... right-aligned <status badge>
 // Line 2: <stripe>   <description line 1 (muted; italic if pending)>
 // Line 3: <stripe>   <description line 2 or empty>  (always reserved)
 // Line 4: <stripe>   ▸ <first open task> [· next: <second open>]  (plan-backed building only)
@@ -627,6 +667,13 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 		badge = planningStatusBadge(sess)
 	} else {
 		badge = d.sessionFocusStatus(sess)
+	}
+	// Status glyph: prepend between stripe and name for non-planning cards.
+	// Planning cards suppress the glyph because the badge already leads with ✎/✗/○.
+	if !planningPhase {
+		glyph, glyphColor := d.sessionStatusGlyph(sess)
+		glyphStyled := lipgloss.NewStyle().Foreground(glyphColor).Render(glyph)
+		nameStyled = glyphStyled + " " + nameStyled
 	}
 	line1 := rightAlign(stripe+" "+nameStyled, badge, width)
 

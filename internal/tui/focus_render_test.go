@@ -693,3 +693,94 @@ func TestRenderCardProgressBar_DoneTotalAndColor(t *testing.T) {
 		t.Errorf("<100%%: expected ColorPrimary (124;58;237) in output, got %q", out)
 	}
 }
+
+// TestRenderFocusSessionCard_StatusGlyphMapping verifies that line 1 of each
+// card carries the correct status glyph for each lifecycle/agent-state combination.
+func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	tests := []struct {
+		name      string
+		setup     func() (*agent.Session, []listItem)
+		wantGlyph string
+	}{
+		{
+			name: "error → ✗",
+			setup: func() (*agent.Session, []listItem) {
+				sess := agent.NewSessionForTest("s", "my-session")
+				sess.SetLifecyclePhase(agent.LifecycleInProgress)
+				ag := sess.AddTestAgent("a-1", false, agent.StatusError)
+				return sess, []listItem{
+					{kind: listItemSession, repoPath: "/r", session: sess},
+					{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+				}
+			},
+			wantGlyph: "✗",
+		},
+		{
+			name: "waiting → ⏸",
+			setup: func() (*agent.Session, []listItem) {
+				sess := agent.NewSessionForTest("s", "my-session")
+				sess.SetLifecyclePhase(agent.LifecycleInProgress)
+				ag := sess.AddTestAgent("a-1", false, agent.StatusWaiting)
+				return sess, []listItem{
+					{kind: listItemSession, repoPath: "/r", session: sess},
+					{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+				}
+			},
+			wantGlyph: "⏸",
+		},
+		{
+			name: "active → ⚡",
+			setup: func() (*agent.Session, []listItem) {
+				sess := agent.NewSessionForTest("s", "my-session")
+				sess.SetLifecyclePhase(agent.LifecycleInProgress)
+				ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
+				return sess, []listItem{
+					{kind: listItemSession, repoPath: "/r", session: sess},
+					{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+				}
+			},
+			wantGlyph: "⚡",
+		},
+		{
+			name: "reviewable → ✓",
+			setup: func() (*agent.Session, []listItem) {
+				sess := agent.NewSessionForTest("s", "my-session")
+				sess.SetLifecyclePhase(agent.LifecycleInProgress)
+				ag := sess.AddTestAgent("a-1", false, agent.StatusIdle)
+				return sess, []listItem{
+					{kind: listItemSession, repoPath: "/r", session: sess},
+					{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+				}
+			},
+			wantGlyph: "✓",
+		},
+		{
+			name: "idle, no agents → ○",
+			setup: func() (*agent.Session, []listItem) {
+				sess := agent.NewSessionForTest("s", "my-session")
+				sess.SetLifecyclePhase(agent.LifecycleInProgress)
+				return sess, []listItem{
+					{kind: listItemSession, repoPath: "/r", session: sess},
+				}
+			},
+			wantGlyph: "○",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sess, items := tc.setup()
+			d := newDashboardModel()
+			d.items = items
+			card := d.renderFocusSessionCard(sess, "", false, 100)
+			line1 := ansi.Strip(card[0])
+			if !strings.Contains(line1, tc.wantGlyph) {
+				t.Errorf("line 1 should contain glyph %q, got %q", tc.wantGlyph, line1)
+			}
+		})
+	}
+}
