@@ -406,7 +406,7 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 				lines = append(lines, StyleSubtle.Render(fmt.Sprintf("  … %d more files", len(sorted)-8)))
 			}
 		}
-		return lines
+		return capLines(lines, height)
 	}
 
 	// Resolve selected task and group using same row order as renderTaskListPane.
