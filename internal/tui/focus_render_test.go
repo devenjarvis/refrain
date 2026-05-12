@@ -639,3 +639,47 @@ func TestSessionFocusStatus_BuildingWithPlanAllDoneReviewablePrefersReviewBadge(
 		t.Errorf("plan progress badge must not appear when reviewable, got %q", badge)
 	}
 }
+
+// TestRenderCardProgressBar_DoneTotalAndColor verifies the renderCardProgressBar
+// helper contract:
+//
+//	(a) returns "" when total == 0
+//	(b) rendered string contains the "done/total" count suffix
+//	(c) ansi.StringWidth of the output equals the requested width
+//	(d) at 100% the rendered output uses ColorSuccess's hex
+//	(e) at <100% it uses the passed primary color's hex
+func TestRenderCardProgressBar_DoneTotalAndColor(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	// (a) total==0 → empty string
+	if got := renderCardProgressBar(0, 0, 20, ColorPrimary); got != "" {
+		t.Errorf("total==0: want \"\", got %q", got)
+	}
+
+	const width = 24
+	// (b) contains "2/7" count suffix
+	out := renderCardProgressBar(2, 7, width, ColorPrimary)
+	if !strings.Contains(ansi.Strip(out), "2/7") {
+		t.Errorf("expected \"2/7\" in output, got %q", ansi.Strip(out))
+	}
+
+	// (c) display width equals requested width
+	if w := ansi.StringWidth(out); w != width {
+		t.Errorf("display width = %d, want %d; raw=%q", w, width, out)
+	}
+
+	// (d) at 100% uses ColorSuccess (#10B981 → decimal 16;185;129 in ANSI).
+	full := renderCardProgressBar(7, 7, width, ColorPrimary)
+	// ColorSuccess = #10B981 → R=16, G=185, B=129.
+	if !strings.Contains(full, "16;185;129") {
+		t.Errorf("100%%: expected ColorSuccess (16;185;129) in output, got %q", full)
+	}
+
+	// (e) at <100% uses the passed primary color (#7C3AED → 124;58;237).
+	// ColorPrimary = #7C3AED → R=124, G=58, B=237.
+	if !strings.Contains(out, "124;58;237") {
+		t.Errorf("<100%%: expected ColorPrimary (124;58;237) in output, got %q", out)
+	}
+}

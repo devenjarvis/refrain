@@ -413,6 +413,40 @@ func (d dashboardModel) buildingSessions() []listItem {
 	return result
 }
 
+// renderCardProgressBar returns a progress bar + muted "done/total" suffix
+// right-padded to exactly width display cells. Returns "" when total == 0.
+// At 100% the bar is colored ColorSuccess; otherwise it uses primary.
+func renderCardProgressBar(done, total, width int, primary lipgloss.Color) string {
+	if total == 0 {
+		return ""
+	}
+	pct := float64(done) / float64(total)
+	suffix := StyleSubtle.Render(fmt.Sprintf("%d/%d", done, total))
+	suffixWidth := ansi.StringWidth(suffix)
+	// Reserve at least 1 cell for the bar (plus a separating space).
+	barWidth := width - suffixWidth - 1
+	if barWidth < 1 {
+		barWidth = 1
+	}
+	bar := progress.New(
+		progress.WithoutPercentage(),
+		progress.WithColorFunc(func(_, _ float64) color.Color {
+			if done == total && total > 0 {
+				return ColorSuccess
+			}
+			return primary
+		}),
+	)
+	bar.SetWidth(barWidth)
+	rendered := bar.ViewAs(pct) + " " + suffix
+	// Pad or trim to exactly width cells so callers can right-align predictably.
+	got := ansi.StringWidth(rendered)
+	if got < width {
+		rendered += strings.Repeat(" ", width-got)
+	}
+	return rendered
+}
+
 // sessionFocusStatus returns a styled inline status badge for a session row in
 // the unified SESSIONS list. Priority: Error > Waiting > May Need Input >
 // idle-but-reviewable > finished (DoneAt set) > normal (N active, M idle).
