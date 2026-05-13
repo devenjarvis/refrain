@@ -227,13 +227,13 @@ func TestBuildingProgressBadge(t *testing.T) {
 			name:    "2/5 shows correct counts",
 			done:    2,
 			total:   5,
-			wantStr: "2/5",
+			wantStr: "2/5 tasks",
 		},
 		{
 			name:    "1/3 shows correct counts",
 			done:    1,
 			total:   3,
-			wantStr: "1/3",
+			wantStr: "1/3 tasks",
 		},
 	}
 	for _, tc := range tests {
@@ -694,10 +694,10 @@ func TestRenderCardProgressBar_DoneTotalAndColor(t *testing.T) {
 	}
 
 	const width = 24
-	// (b) contains "2/7" count suffix
+	// (b) contains "2/7 tasks" count suffix
 	out := renderCardProgressBar(2, 7, width, ColorPrimary)
-	if !strings.Contains(ansi.Strip(out), "2/7") {
-		t.Errorf("expected \"2/7\" in output, got %q", ansi.Strip(out))
+	if !strings.Contains(ansi.Strip(out), "2/7 tasks") {
+		t.Errorf("expected \"2/7 tasks\" in output, got %q", ansi.Strip(out))
 	}
 
 	// (c) display width equals requested width

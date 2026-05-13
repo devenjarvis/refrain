@@ -421,7 +421,7 @@ func renderCardProgressBar(done, total, width int, primary lipgloss.Color) strin
 		return ""
 	}
 	pct := float64(done) / float64(total)
-	suffix := StyleSubtle.Render(fmt.Sprintf("%d/%d", done, total))
+	suffix := StyleSubtle.Render(fmt.Sprintf("%d/%d tasks", done, total))
 	suffixWidth := ansi.StringWidth(suffix)
 	// Reserve at least 1 cell for the bar (plus a separating space).
 	barWidth := width - suffixWidth - 1
