@@ -745,28 +745,39 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 			waitingReason = item.agent.WaitingReason()
 		}
 	}
-	bottomLeftText := branch
+	// Build the detail string (idle time or waiting reason) shown after the chip.
+	var detailStr string
 	switch {
 	case waitingReason != "":
-		if branch != "" {
-			bottomLeftText = branch + " · " + waitingReason
-		} else {
-			bottomLeftText = waitingReason
-		}
+		detailStr = waitingReason
 	case anyAgent && allIdle && !sess.LastOutputTime().IsZero():
-		idleStr := fmt.Sprintf("idle %dm", int(time.Since(sess.LastOutputTime()).Minutes()))
-		if branch != "" {
-			bottomLeftText = branch + " · " + idleStr
-		} else {
-			bottomLeftText = idleStr
+		detailStr = fmt.Sprintf("idle %dm", int(time.Since(sess.LastOutputTime()).Minutes()))
+	}
+
+	// Build the left part of line 4 using a branch chip when a branch is set.
+	chip := renderBranchChip(branch)
+	var bottomLeft string
+	if chip != "" {
+		chipWidth := lipgloss.Width(chip)
+		// Reserve space: stripe(1) + indent(3) + chip + space + detail + some room for elapsed.
+		detailBudget := width - stripeIndentWidth - chipWidth - 13
+		if detailBudget < 0 {
+			detailBudget = 0
 		}
+		var detailRendered string
+		if detailStr != "" && detailBudget > 1 {
+			detailRendered = " " + StyleSubtle.Render(truncateVisible(detailStr, detailBudget))
+		}
+		bottomLeft = stripe + indent + chip + detailRendered
+	} else {
+		// No branch: fall back to plain subtle text (waiting reason or idle).
+		bottomLeftText := detailStr
+		bottomBudget := width - 12
+		if bottomBudget < 1 {
+			bottomBudget = 1
+		}
+		bottomLeft = stripe + indent + StyleSubtle.Render(truncateVisible(bottomLeftText, bottomBudget))
 	}
-	bottomBudget := width - 12
-	if bottomBudget < 1 {
-		bottomBudget = 1
-	}
-	bottomLeftText = truncateVisible(bottomLeftText, bottomBudget)
-	bottomLeft := stripe + indent + StyleSubtle.Render(bottomLeftText)
 
 	totalMins := int(sess.Elapsed().Minutes())
 	var elapsedStr string
@@ -775,9 +786,24 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	} else {
 		elapsedStr = fmt.Sprintf("%dm", totalMins)
 	}
-	line4 := rightAlign(bottomLeft, StyleSubtle.Render(elapsedStr), width)
+	line4 := rightAlign(bottomLeft, StyleSubtle.Render("⏱ "+elapsedStr), width)
 
 	return []string{line1, line2, line3, line4}
+}
+
+// renderBranchChip returns a visually-tinted chip string for a branch name,
+// prefixed with 🌿. The chip has a 1-cell horizontal padding on each side and
+// a dark background (#1F2937, matching the status bar). Returns "" for an
+// empty branch so callers can omit it cleanly.
+func renderBranchChip(branch string) string {
+	if branch == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(ColorText).
+		Background(lipgloss.Color("#1F2937")).
+		Padding(0, 1).
+		Render("🌿 " + branch)
 }
 
 // planningStatusBadge renders the right-aligned status badge for a Planning

@@ -822,3 +822,65 @@ func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderFocusSessionCard_BranchChipAndElapsedGlyph verifies that line 4
+// contains a 🌿 chip before the branch name (with a background tint), ⏱ before
+// the elapsed token, and no chip when the branch is empty.
+func TestRenderFocusSessionCard_BranchChipAndElapsedGlyph(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	dir := t.TempDir()
+	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	sess.UpdateBranch("baton/add-dark-mode")
+	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	card := d.renderFocusSessionCard(sess, "", false, 120)
+	if len(card) != 4 {
+		t.Fatalf("expected 4-line card, got %d", len(card))
+	}
+
+	line4Raw := card[3]
+	line4 := ansi.Strip(line4Raw)
+
+	// 🌿 immediately before branch name.
+	if !strings.Contains(line4, "🌿") {
+		t.Errorf("line 4 should contain 🌿 glyph, got %q", line4)
+	}
+	if !strings.Contains(line4, "add-dark-mode") {
+		t.Errorf("line 4 should contain branch name, got %q", line4)
+	}
+
+	// ⏱ before the elapsed token.
+	if !strings.Contains(line4, "⏱") {
+		t.Errorf("line 4 should contain ⏱ glyph, got %q", line4)
+	}
+
+	// Branch chip carries a background color escape (48;2; = background TrueColor).
+	if !strings.Contains(line4Raw, "48;2;") {
+		t.Errorf("line 4 raw should contain background ANSI sequence (48;2;) for chip tint, got %q", line4Raw)
+	}
+
+	// No branch → no chip.
+	sessNoBranch := agent.NewSessionForTest("s2", "no-branch-session")
+	sessNoBranch.SetLifecyclePhase(agent.LifecycleInProgress)
+	ag2 := sessNoBranch.AddTestAgent("a-2", false, agent.StatusActive)
+	d2 := newDashboardModel()
+	d2.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sessNoBranch},
+		{kind: listItemAgent, repoPath: "/r", session: sessNoBranch, agent: ag2},
+	}
+	card2 := d2.renderFocusSessionCard(sessNoBranch, "", false, 120)
+	line4b := ansi.Strip(card2[3])
+	if strings.Contains(line4b, "🌿") {
+		t.Errorf("no-branch session should not render 🌿 chip, got %q", line4b)
+	}
+}
