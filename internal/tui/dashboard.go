@@ -496,11 +496,9 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 	}
 	if sess.LifecyclePhase() == agent.LifecycleInProgress {
 		const barWidth = 20
-		if plan, present := sess.CachedPlan(); present {
-			if total, done := planTaskCounts(plan); total > 0 {
-				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
-			}
-		}
+		// Check todos first to stay in sync with focusTaskDescription's priority:
+		// when both todos and a plan exist, the badge and the task text on lines
+		// 2–3 should count the same source.
 		if ag := sess.PrimaryAgent(); ag != nil {
 			todos := ag.Todos()
 			if len(todos) > 0 {
@@ -511,6 +509,11 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 						done++
 					}
 				}
+				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
+			}
+		}
+		if plan, present := sess.CachedPlan(); present {
+			if total, done := planTaskCounts(plan); total > 0 {
 				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
 			}
 		}
@@ -625,17 +628,15 @@ func (d dashboardModel) sessionStatusGlyph(sess *agent.Session) (glyph string, c
 	}
 }
 
-// renderFocusSessionCard returns 4 lines for a session card in focus mode, or
-// 5 lines when a Building session has unfinished plan tasks. Each line begins
-// with a colored vertical stripe (▎) whose color encodes the dominant session
-// state via sessionFocusStripeColor; the selected card brightens the stripe to
-// ColorSecondary.
+// renderFocusSessionCard returns exactly 4 lines for a session card in focus mode.
+// Each line begins with a colored vertical stripe (▎) whose color encodes the
+// dominant session state via sessionFocusStripeColor; the selected card
+// brightens the stripe to ColorSecondary.
 //
-// Line 1: <stripe> <glyph> <name (bold, ColorText)>   ... right-aligned <status badge>
-// Line 2: <stripe>   <description line 1 (muted; italic if pending)>
-// Line 3: <stripe>   <description line 2 or empty>  (always reserved)
-// Line 4: <stripe>   ▸ <first open task> [· next: <second open>]  (plan-backed building only)
-// Line 4/5: <stripe>   <branch [· detail]>      ... right-aligned <elapsed>
+// Line 1: <stripe> <glyph> <name (bold, ColorText)>   ... right-aligned <status badge/progress bar>
+// Line 2: <stripe>   ▸ <active task (bold)>   (building) | <description (muted/italic)> (planning/other)
+// Line 3: <stripe>   ↳ next: <next task (muted-italic)>   (building) | <description line 2 or empty>
+// Line 4: <stripe>   [🌿 branch chip] [detail]      ... right-aligned ⏱ <elapsed>
 func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName string, selected bool, width int) []string {
 	stripeColor := d.sessionFocusStripeColor(sess)
 	if selected {
@@ -704,17 +705,26 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 			line3 = stripe + indent + descStyle.Render(descLine2)
 		}
 	} else if buildingPhase {
-		// Active task: ▸ <bold text>
+		// Active task: ▸ <bold text>. Subtract 2 cells for the "▸ " prefix so
+		// the total line stays within descBudget.
 		activeLine := ""
 		if descLine1 != "" {
-			activeLine = lipgloss.NewStyle().Bold(true).Render("▸ " + descLine1)
+			activeBudget := descBudget - 2
+			if activeBudget < 0 {
+				activeBudget = 0
+			}
+			activeLine = lipgloss.NewStyle().Bold(true).Render("▸ " + truncateVisible(descLine1, activeBudget))
 		}
 		line2 = stripe + indent + activeLine
-		// Next task: ↳ next: <muted-italic text>
+		// Next task: ↳ next: <muted-italic text>. Subtract 8 cells for "↳ next: ".
 		line3 = stripe + indent
 		if descLine2 != "" {
+			nextBudget := descBudget - 8
+			if nextBudget < 0 {
+				nextBudget = 0
+			}
 			nextStyle := lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
-			line3 = stripe + indent + nextStyle.Render("↳ next: "+descLine2)
+			line3 = stripe + indent + nextStyle.Render("↳ next: "+truncateVisible(descLine2, nextBudget))
 		}
 	} else {
 		line2 = stripe + indent + StyleSubtle.Render(descLine1)
