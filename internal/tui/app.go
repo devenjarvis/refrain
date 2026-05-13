@@ -4467,7 +4467,7 @@ func (a *App) addressFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
 	}
 
 	entry := a.prCache[sess.ID]
-	prompt := buildFeedbackPrompt(entry)
+	prompt := buildFeedbackPrompt(entry, a.feedbackTriage[sess.ID])
 	if prompt == "" {
 		prompt = "Address the CI failures and review feedback on this PR."
 	}
@@ -4503,14 +4503,17 @@ func (a *App) addressFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
 }
 
 // buildFeedbackPrompt synthesizes an agent prompt from the failing CI checks
-// and unresolved review comments in entry. Returns "" when nothing is actionable.
-func buildFeedbackPrompt(entry *prCacheEntry) string {
+// and review feedback, bucketed by user triage verdicts. Returns "" when
+// nothing is actionable (all disagreed with no notes, and no failing CI).
+// triage may be nil (treats all items as neutral).
+func buildFeedbackPrompt(entry *prCacheEntry, triage map[string]*feedbackTriageEntry) string {
 	if entry == nil {
 		return ""
 	}
 	var b strings.Builder
 	wrote := false
 
+	// ── Failing CI checks (unchanged) ────────────────────────────────────────
 	if entry.checks != nil {
 		var failingRuns []github.CheckRun
 		for _, run := range entry.checks.Runs {
@@ -4538,42 +4541,79 @@ func buildFeedbackPrompt(entry *prCacheEntry) string {
 		}
 	}
 
-	hasActionableThreads := false
+	// ── Review feedback, bucketed by triage ──────────────────────────────────
+	// Pre-compute actionable threads using the same filter as the original code:
+	// CHANGES_REQUESTED always actionable; COMMENTED only when it has inline comments.
+	actionableThreads := make(map[string]bool, len(entry.threads))
 	for _, thread := range entry.threads {
 		if thread.State == "CHANGES_REQUESTED" || (thread.State == "COMMENTED" && len(thread.Comments) > 0) {
-			hasActionableThreads = true
-			break
+			actionableThreads[thread.Reviewer] = true
 		}
 	}
-	if hasActionableThreads {
-		b.WriteString("## Review Feedback\n\n")
-		for _, thread := range entry.threads {
-			if thread.State != "CHANGES_REQUESTED" && (thread.State != "COMMENTED" || len(thread.Comments) == 0) {
+
+	items := feedbackItems(entry.threads)
+	var addressItems, disputedItems []feedbackItem
+	var disputedNotes []string
+
+	for _, item := range items {
+		// Apply actionability filter.
+		if !item.IsInline && !actionableThreads[item.Reviewer] {
+			continue
+		}
+		key := feedbackItemKey(item)
+		var e *feedbackTriageEntry
+		if triage != nil {
+			e = triage[key]
+		}
+		if e != nil && e.Verdict == feedbackDisagreed {
+			if strings.TrimSpace(e.Note) == "" {
+				// Disagreed with no note: skip entirely.
 				continue
 			}
-			b.WriteString("**")
-			b.WriteString(thread.Reviewer)
-			b.WriteString("**")
-			if thread.State == "CHANGES_REQUESTED" {
-				b.WriteString(" (changes requested)")
-			}
-			b.WriteString(":\n")
-			if thread.Body != "" {
-				b.WriteString(thread.Body)
-				b.WriteByte('\n')
-			}
-			for _, c := range thread.Comments {
-				b.WriteString("- ")
-				b.WriteString(c.Path)
-				if c.Line > 0 {
-					b.WriteString(fmt.Sprintf(":%d", c.Line))
-				}
-				b.WriteString(": ")
-				b.WriteString(c.Body)
-				b.WriteByte('\n')
-			}
-			b.WriteByte('\n')
+			disputedItems = append(disputedItems, item)
+			disputedNotes = append(disputedNotes, strings.TrimSpace(e.Note))
+		} else {
+			addressItems = append(addressItems, item)
 		}
+	}
+
+	writeFeedbackItem := func(item feedbackItem) {
+		b.WriteString("- ")
+		if item.IsInline {
+			b.WriteString(item.Reviewer)
+			b.WriteString(" (")
+			b.WriteString(item.Path)
+			if item.Line > 0 {
+				b.WriteString(fmt.Sprintf(":%d", item.Line))
+			}
+			b.WriteString("): ")
+		} else {
+			b.WriteString("**")
+			b.WriteString(item.Reviewer)
+			b.WriteString("**: ")
+		}
+		b.WriteString(item.Body)
+		b.WriteByte('\n')
+	}
+
+	if len(addressItems) > 0 {
+		b.WriteString("## Feedback to address\n\n")
+		for _, item := range addressItems {
+			writeFeedbackItem(item)
+		}
+		b.WriteByte('\n')
+		wrote = true
+	}
+
+	if len(disputedItems) > 0 {
+		b.WriteString("## Disputed feedback (advisory — do not change unless you find a strong reason)\n\n")
+		for i, item := range disputedItems {
+			writeFeedbackItem(item)
+			if i < len(disputedNotes) && disputedNotes[i] != "" {
+				b.WriteString(fmt.Sprintf("  > I disagree because: %s\n", disputedNotes[i]))
+			}
+		}
+		b.WriteByte('\n')
 		wrote = true
 	}
 

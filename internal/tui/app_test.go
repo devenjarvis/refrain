@@ -2990,7 +2990,7 @@ func TestBuildFeedbackPrompt_FailingChecksAndComments(t *testing.T) {
 			},
 		},
 	}
-	prompt := buildFeedbackPrompt(entry)
+	prompt := buildFeedbackPrompt(entry, nil)
 
 	if !strings.Contains(prompt, "lint") {
 		t.Errorf("prompt missing failing check name: %q", prompt)
@@ -3011,7 +3011,7 @@ func TestBuildFeedbackPrompt_FailingChecksAndComments(t *testing.T) {
 
 // TestBuildFeedbackPrompt_NilEntry verifies that a nil entry returns "".
 func TestBuildFeedbackPrompt_NilEntry(t *testing.T) {
-	if got := buildFeedbackPrompt(nil); got != "" {
+	if got := buildFeedbackPrompt(nil, nil); got != "" {
 		t.Errorf("expected empty prompt for nil entry, got: %q", got)
 	}
 }
@@ -3025,7 +3025,7 @@ func TestBuildFeedbackPrompt_ApprovedOnly(t *testing.T) {
 			{Reviewer: "bob", State: "APPROVED", Body: "LGTM"},
 		},
 	}
-	if got := buildFeedbackPrompt(entry); got != "" {
+	if got := buildFeedbackPrompt(entry, nil); got != "" {
 		t.Errorf("expected empty prompt when no actionable feedback, got: %q", got)
 	}
 }
@@ -3045,7 +3045,7 @@ func TestBuildFeedbackPrompt_CommentedOnlyWithInlineComments(t *testing.T) {
 			},
 		},
 	}
-	prompt := buildFeedbackPrompt(entry)
+	prompt := buildFeedbackPrompt(entry, nil)
 	if prompt == "" {
 		t.Error("expected non-empty prompt for COMMENTED thread with inline comments")
 	}
@@ -3070,12 +3070,61 @@ func TestBuildFeedbackPrompt_CommentedOnlyWithoutInlineComments(t *testing.T) {
 			},
 		},
 	}
-	if got := buildFeedbackPrompt(entry); got != "" {
+	if got := buildFeedbackPrompt(entry, nil); got != "" {
 		t.Errorf("expected empty prompt for COMMENTED thread with no inline comments, got: %q", got)
 	}
 }
 
 // TestBuildReviewReworkPrompt_NilEntry verifies a nil entry returns "".
+func TestBuildFeedbackPrompt_TriagedApprovedAndDisagreed(t *testing.T) {
+	entry := &prCacheEntry{
+		threads: []github.ReviewThread{
+			{Reviewer: "alice", State: "CHANGES_REQUESTED", Body: "fix X"},
+			{Reviewer: "bob", State: "CHANGES_REQUESTED", Body: "rename Y"},
+		},
+	}
+	triage := map[string]*feedbackTriageEntry{
+		"thread:alice": {Verdict: feedbackApproved},
+		"thread:bob":   {Verdict: feedbackDisagreed, Note: "API contract"},
+	}
+	prompt := buildFeedbackPrompt(entry, triage)
+
+	if !strings.Contains(prompt, "## Feedback to address") {
+		t.Errorf("prompt missing approved section: %q", prompt)
+	}
+	if !strings.Contains(prompt, "fix X") {
+		t.Errorf("prompt missing approved body: %q", prompt)
+	}
+	if !strings.Contains(prompt, "## Disputed feedback") {
+		t.Errorf("prompt missing disputed section: %q", prompt)
+	}
+	if !strings.Contains(prompt, "bob") {
+		t.Errorf("prompt missing disputed reviewer: %q", prompt)
+	}
+	if !strings.Contains(prompt, "rename Y") {
+		t.Errorf("prompt missing disputed body: %q", prompt)
+	}
+	if !strings.Contains(prompt, "API contract") {
+		t.Errorf("prompt missing disagreement note: %q", prompt)
+	}
+}
+
+func TestBuildFeedbackPrompt_AllDisagreedNoNoteReturnsEmpty(t *testing.T) {
+	entry := &prCacheEntry{
+		threads: []github.ReviewThread{
+			{Reviewer: "alice", State: "CHANGES_REQUESTED", Body: "fix X"},
+		},
+	}
+	triage := map[string]*feedbackTriageEntry{
+		"thread:alice": {Verdict: feedbackDisagreed}, // no note
+	}
+	// All items disagreed with no note → nothing to act on, return "".
+	got := buildFeedbackPrompt(entry, triage)
+	if got != "" {
+		t.Errorf("expected empty prompt when all items disagreed with no note, got: %q", got)
+	}
+}
+
 func TestBuildReviewReworkPrompt_NilEntry(t *testing.T) {
 	if got := buildReviewReworkPrompt(nil); got != "" {
 		t.Errorf("expected empty prompt for nil entry, got: %q", got)
