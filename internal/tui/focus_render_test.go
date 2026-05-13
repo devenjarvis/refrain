@@ -762,7 +762,7 @@ func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
 			wantGlyph: "⏸",
 		},
 		{
-			name: "active → ⚡",
+			name: "active → ●",
 			setup: func() (*agent.Session, []listItem) {
 				sess := agent.NewSessionForTest("s", "my-session")
 				sess.SetLifecyclePhase(agent.LifecycleInProgress)
@@ -772,7 +772,7 @@ func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
 					{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 				}
 			},
-			wantGlyph: "⚡",
+			wantGlyph: "●",
 		},
 		{
 			name: "reviewable → ✓",

@@ -622,7 +622,7 @@ func (d dashboardModel) sessionStatusGlyph(sess *agent.Session) (glyph string, c
 	case sess.IsReviewable() || !sess.DoneAt().IsZero():
 		return "✓", ColorSuccess
 	case hasActive:
-		return "⚡", ColorSecondary
+		return "●", ColorSecondary
 	default:
 		return "○", ColorMuted
 	}
