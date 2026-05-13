@@ -83,6 +83,71 @@ func TestDetachEmptyReturnsNil(t *testing.T) {
 	}
 }
 
+func TestDetachSkipsCompleteSessionsAndCleansWorktree(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+
+	cfg := Config{Task: "test", Rows: 24, Cols: 80}
+	sessComplete, _, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+		return exec.Command("bash", "-c", "sleep 60")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessKeep, _, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+		return exec.Command("bash", "-c", "sleep 60")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	completePath := sessComplete.Worktree.Path
+	keepPath := sessKeep.Worktree.Path
+	keepID := sessKeep.ID
+
+	sessComplete.SetLifecyclePhase(LifecycleComplete)
+
+	bs := mgr.Detach()
+	if bs == nil {
+		t.Fatal("expected non-nil BatonState when one non-complete session remains")
+	}
+	if len(bs.Sessions) != 1 {
+		t.Fatalf("expected 1 session in snapshot, got %d", len(bs.Sessions))
+	}
+	if bs.Sessions[0].ID != keepID {
+		t.Errorf("expected snapshotted session ID %s, got %s", keepID, bs.Sessions[0].ID)
+	}
+
+	// Complete session's worktree must be removed.
+	if _, err := os.Stat(completePath); !os.IsNotExist(err) {
+		t.Errorf("complete session worktree should have been removed, but Stat returned: %v", err)
+	}
+
+	// Non-complete session's worktree must be preserved.
+	if _, err := os.Stat(keepPath); os.IsNotExist(err) {
+		t.Error("non-complete session worktree should still exist after detach")
+	}
+}
+
+func TestDetachAllCompleteReturnsNil(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+
+	cfg := Config{Task: "test", Rows: 24, Cols: 80}
+	sess, _, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+		return exec.Command("bash", "-c", "sleep 60")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.SetLifecyclePhase(LifecycleComplete)
+
+	bs := mgr.Detach()
+	if bs != nil {
+		t.Errorf("expected nil BatonState when all sessions are complete, got %+v", bs)
+	}
+}
+
 func TestDetachSaveLoadRoundTrip(t *testing.T) {
 	repo := setupTestRepo(t)
 	mgr := NewManager(repo, defaultTestSettings())

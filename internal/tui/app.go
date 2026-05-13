@@ -76,6 +76,16 @@ type killResultMsg struct {
 	err       error
 }
 
+// filterNotFound returns nil if err wraps agent.ErrSessionNotFound, otherwise
+// returns err unchanged. Used to suppress benign double-cleanup races where two
+// concurrent paths both try to KillSession the same session.
+func filterNotFound(err error) error {
+	if errors.Is(err, agent.ErrSessionNotFound) {
+		return nil
+	}
+	return err
+}
+
 // diffStatsMsg carries the result of an async diff stats refresh.
 type diffStatsMsg struct {
 	sessionID string
@@ -1099,18 +1109,36 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Detect PR merge/close and transition to Complete lifecycle phase.
+		// Detect PR merge/close and trigger async session cleanup.
+		var cmds []tea.Cmd
 		if msg.pr != nil && (msg.pr.State == "merged" || msg.pr.State == "closed") {
 			repoPath := a.repoPathForSession(msg.sessionID)
 			if repoPath != "" {
 				if mgr := a.managers[repoPath]; mgr != nil {
 					if sess := mgr.GetSession(msg.sessionID); sess != nil {
 						if sess.LifecyclePhase() == agent.LifecycleShipping {
-							sess.SetLifecyclePhase(agent.LifecycleComplete)
-							// Close the shipping panel if this session is currently open in it.
-							if a.shippingSession != nil && a.shippingSession.ID == msg.sessionID {
-								a.shippingSession = nil
-								a.dashboard.panelFocus = focusList
+							sessID := msg.sessionID
+							if !a.closingSessions[sessID] {
+								sess.SetLifecyclePhase(agent.LifecycleComplete)
+								// Close the shipping panel if this session is currently open in it.
+								if a.shippingSession != nil && a.shippingSession.ID == sessID {
+									a.shippingSession = nil
+									a.dashboard.panelFocus = focusList
+								}
+								var agentIDs []string
+								for _, ag := range sess.Agents() {
+									agentIDs = append(agentIDs, ag.ID)
+									a.closingAgents[ag.ID] = true
+								}
+								a.closingSessions[sessID] = true
+								cmds = append(cmds, func() tea.Msg {
+									return killResultMsg{
+										scope:     killScopeSession,
+										sessionID: sessID,
+										agentIDs:  agentIDs,
+										err:       filterNotFound(mgr.KillSession(sessID)),
+									}
+								})
 							}
 						}
 					}
@@ -1141,26 +1169,40 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ps.lastCheckState = newState
 		}
 		a.updateDashboardPRCache()
-		return a, nil
+		return a, tea.Batch(cmds...)
 
 	case mergePRMsg:
 		if msg.err != nil {
 			a.setError("merge failed: " + msg.err.Error())
 			return a, nil
 		}
-		// Transition the session to Complete immediately rather than waiting for
-		// the next PR poll to detect the merged state.
-		repoPath := a.repoPathForSession(msg.sessionID)
-		if repoPath != "" {
-			if mgr := a.managers[repoPath]; mgr != nil {
-				if sess := mgr.GetSession(msg.sessionID); sess != nil {
-					sess.SetLifecyclePhase(agent.LifecycleComplete)
-				}
-			}
-		}
 		a.shippingSession = nil
 		a.dashboard.panelFocus = focusList
-		return a, nil
+		repoPath := a.repoPathForSession(msg.sessionID)
+		if repoPath == "" {
+			return a, nil
+		}
+		mgr := a.managers[repoPath]
+		sess := mgr.GetSession(msg.sessionID)
+		if mgr == nil || sess == nil || a.closingSessions[msg.sessionID] {
+			return a, nil
+		}
+		sess.SetLifecyclePhase(agent.LifecycleComplete)
+		var agentIDs []string
+		for _, ag := range sess.Agents() {
+			agentIDs = append(agentIDs, ag.ID)
+			a.closingAgents[ag.ID] = true
+		}
+		sessID := msg.sessionID
+		a.closingSessions[sessID] = true
+		return a, func() tea.Msg {
+			return killResultMsg{
+				scope:     killScopeSession,
+				sessionID: sessID,
+				agentIDs:  agentIDs,
+				err:       filterNotFound(mgr.KillSession(sessID)),
+			}
+		}
 
 	case resumeDoneMsg:
 		for _, repoPath := range msg.repoPaths {
@@ -1609,12 +1651,34 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			case "c":
 				// Mark complete without a PR (e.g. design docs, exploratory
-				// branches). Closes the panel.
+				// branches). Closes the panel and cleans up the session.
 				sess := a.reviewSession
-				sess.SetLifecyclePhase(agent.LifecycleComplete)
 				a.dashboard.panelFocus = focusList
 				a.reviewSession = nil
-				return a, nil
+				repoPath := a.repoPathForSession(sess.ID)
+				if repoPath == "" {
+					return a, nil
+				}
+				mgr := a.managers[repoPath]
+				if mgr == nil || mgr.GetSession(sess.ID) == nil || a.closingSessions[sess.ID] {
+					return a, nil
+				}
+				sess.SetLifecyclePhase(agent.LifecycleComplete)
+				var agentIDs []string
+				for _, ag := range sess.Agents() {
+					agentIDs = append(agentIDs, ag.ID)
+					a.closingAgents[ag.ID] = true
+				}
+				sessID := sess.ID
+				a.closingSessions[sessID] = true
+				return a, func() tea.Msg {
+					return killResultMsg{
+						scope:     killScopeSession,
+						sessionID: sessID,
+						agentIDs:  agentIDs,
+						err:       filterNotFound(mgr.KillSession(sessID)),
+					}
+				}
 			case "e":
 				// Open in editor — same pattern as the existing "i" key handler.
 				sess := a.reviewSession
