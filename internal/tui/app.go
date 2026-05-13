@@ -1778,30 +1778,25 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// rows the user flagged with `f`. Session returns to InProgress.
 				return a.addressReviewFeedback(a.reviewSession)
 			case "enter", "space":
-				// Drill into the selected task's diff. Opens the diff browser
-				// filtered to the commits for that task; esc returns to the
-				// task list (handled by diffCloseMsg).
-				entry := a.reviewDiffCache[a.reviewSession.ID]
-				if entry == nil || len(entry.groups) == 0 {
-					return a, nil
-				}
-				group := reviewTaskGroupAtCursor(entry, a.reviewTaskCursor)
-				if group == nil || group.rawDiff == "" {
-					return a, nil
-				}
-				m, err := diffmodel.Parse(group.rawDiff)
-				if err != nil {
-					a.setError(err.Error())
-					return a, nil
-				}
-				taskLabel := a.reviewSession.GetDisplayName()
-				if group.taskIndex > 0 {
-					taskLabel += fmt.Sprintf(" · task %d", group.taskIndex)
-				} else {
-					taskLabel += " · other changes"
-				}
-				a.view = ViewDiff
-				a.diff = newDiffModel(taskLabel, m, a.width, a.height-1)
+				// Inline diff is shown in the right pane; enter/space are no-ops here.
+				return a, nil
+			case "pgdown":
+				a.reviewDiffVP.PageDown()
+				return a, nil
+			case "pgup":
+				a.reviewDiffVP.PageUp()
+				return a, nil
+			case "ctrl+d":
+				a.reviewDiffVP.HalfPageDown()
+				return a, nil
+			case "ctrl+u":
+				a.reviewDiffVP.HalfPageUp()
+				return a, nil
+			case "g":
+				a.reviewDiffVP.GotoTop()
+				return a, nil
+			case "G":
+				a.reviewDiffVP.GotoBottom()
 				return a, nil
 			}
 			// All other keys are no-ops in review panel.

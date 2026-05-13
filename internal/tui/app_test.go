@@ -14,6 +14,7 @@ import (
 	"github.com/devenjarvis/baton/internal/agent"
 	"github.com/devenjarvis/baton/internal/audio"
 	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/baton/internal/git"
 	"github.com/devenjarvis/baton/internal/github"
 )
 
@@ -4014,5 +4015,49 @@ func TestNewApp_InitsFeedbackTriage(t *testing.T) {
 	}
 	if len(app.feedbackTriage) != 0 {
 		t.Errorf("feedbackTriage should be empty on init, got len=%d", len(app.feedbackTriage))
+	}
+}
+
+// TestReviewPanel_EnterDoesNotChangeView verifies that pressing enter or space
+// while focusReview is active does not transition to ViewDiff. The inline diff
+// is now shown inline, so the fullscreen hop is removed.
+func TestReviewPanel_EnterDoesNotChangeView(t *testing.T) {
+	sessR := agent.NewSessionForTest("r", "review-r")
+	sessR.SetLifecyclePhase(agent.LifecycleInReview)
+	sessR.SetOriginalPrompt("Fix auth")
+	sessR.MarkDone()
+
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
+			rawDiff:   "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,4 @@\n package main\n \n+// marker\n func A() {}\n",
+		}},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictPending},
+		},
+	}
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.reviewSession = sessR
+	app.dashboard.panelFocus = focusReview
+	app.reviewDiffCache[sessR.ID] = entry
+
+	for _, key := range []string{"enter", "space"} {
+		msg := tea.KeyPressMsg{Code: tea.KeyEnter, Text: key}
+		if key == "space" {
+			msg = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+		}
+		model, _ := app.Update(msg)
+		updated := model.(App)
+		if updated.view != ViewDashboard {
+			t.Errorf("%s: expected view=ViewDashboard, got %v", key, updated.view)
+		}
+		if updated.dashboard.panelFocus != focusReview {
+			t.Errorf("%s: expected panelFocus=focusReview, got %v", key, updated.dashboard.panelFocus)
+		}
 	}
 }
