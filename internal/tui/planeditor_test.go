@@ -518,6 +518,57 @@ func TestPlanEditor_ShiftZTogglesAllFolds(t *testing.T) {
 	}
 }
 
+// TestPlanEditor_ReloadPreservesFoldsByHeading verifies that after Reload(),
+// existing fold state is preserved for headings that survive the edit, and
+// new headings get their default fold policy.
+func TestPlanEditor_ReloadPreservesFoldsByHeading(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan1 = "# Goal\n## Spec\n## Tasks\n"
+	if err := sess.WritePlan(plan1); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+
+	// Manually collapse Spec (user action).
+	editor.folds["Spec"] = true
+
+	// Write a new plan with an extra section.
+	const plan2 = "# Goal\n## Spec\n## Tasks\n## Extra\n"
+	if err := sess.WritePlan(plan2); err != nil {
+		t.Fatalf("WritePlan plan2: %v", err)
+	}
+	editor.Reload()
+
+	if !editor.folds["Spec"] {
+		t.Error("folds[Spec] should remain true after Reload (user-collapsed)")
+	}
+	if editor.folds["Goal"] {
+		t.Error("folds[Goal] should remain false after Reload (H1 default)")
+	}
+	if editor.folds["Tasks"] {
+		t.Error("folds[Tasks] should remain false after Reload (default expanded)")
+	}
+	if !editor.folds["Extra"] {
+		t.Error("folds[Extra] should be true after Reload (new H2 default-collapsed)")
+	}
+}
+
+// TestPlanEditor_ScrollFooterIncludesFoldHints verifies that the footer row in
+// scroll mode mentions the fold-navigation key bindings.
+func TestPlanEditor_ScrollFooterIncludesFoldHints(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	if err := sess.WritePlan("# Goal\nsome content\n"); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	view := testutil.StripANSI(editor.View())
+	for _, want := range []string{"tab", "fold", "[", "]", "Z", "toggle all"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("footer hint %q missing from view:\n%s", want, view)
+		}
+	}
+}
+
 // TestPlanEditor_ScrollModeStylesHeadings asserts that scroll-mode rendering
 // actually emits ANSI styling for known markdown constructs. Without this,
 // a regression that silently nil-checks the renderer or short-circuits

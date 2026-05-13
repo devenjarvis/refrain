@@ -988,7 +988,10 @@ func (m *planEditorModel) renderFooter() string {
 		hints = StyleActive.Render("enter") + StyleSubtle.Render(" answer  ") +
 			StyleActive.Render("esc") + StyleSubtle.Render(" skip")
 	default:
-		hints = StyleActive.Render("i") + StyleSubtle.Render(" edit  ") +
+		hints = StyleActive.Render("tab") + StyleSubtle.Render(" fold  ") +
+			StyleActive.Render("[ ]") + StyleSubtle.Render(" sections  ") +
+			StyleActive.Render("Z") + StyleSubtle.Render(" toggle all  ") +
+			StyleActive.Render("i") + StyleSubtle.Render(" edit  ") +
 			StyleActive.Render("r") + StyleSubtle.Render(" revise  ")
 		if m.sess != nil && m.sess.HasPrevPlan() {
 			hints += StyleActive.Render("u") + StyleSubtle.Render(" undo  ")
