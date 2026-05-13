@@ -192,16 +192,16 @@ type App struct {
 	focusBreakShortWarning bool
 	focusBreakTimerUp      bool // break duration elapsed; waiting on user to resume
 	focusBreakAnimFrame    int
-	reviewDiffCache        map[string]*reviewDiffEntry // keyed by session ID
-	reviewSession          *agent.Session              // session currently open in review panel
-	reviewTaskCursor       int                         // selected task row in the review task list
-	shippingSession        *agent.Session              // session currently open in shipping panel
+	reviewDiffCache        map[string]*reviewDiffEntry                // keyed by session ID
+	reviewSession          *agent.Session                             // session currently open in review panel
+	reviewTaskCursor       int                                        // selected task row in the review task list
+	shippingSession        *agent.Session                             // session currently open in shipping panel
 	feedbackTriage         map[string]map[string]*feedbackTriageEntry // keyed by sessionID → itemKey
-	shippingFeedbackCursor int                         // cursor row in the feedback list pane
-	shippingDetailScroll   int                         // scroll offset in the feedback detail pane
-	feedbackNote           feedbackNoteModal           // overlay for adding a guidance note to a feedback item
-	planEditor             *planEditorModel            // non-nil while panelFocus == focusPlanEditor
-	promptModal            promptModalModel            // overlay for plan-first new-session prompt
+	shippingFeedbackCursor int                                        // cursor row in the feedback list pane
+	shippingDetailScroll   int                                        // scroll offset in the feedback detail pane
+	feedbackNote           feedbackNoteModal                          // overlay for adding a guidance note to a feedback item
+	planEditor             *planEditorModel                           // non-nil while panelFocus == focusPlanEditor
+	promptModal            promptModalModel                           // overlay for plan-first new-session prompt
 
 	// Wellness counters (written to log on quit).
 	agentsCreatedCount   int
