@@ -143,9 +143,8 @@ func isNotFoundOrUnprocessable(resp *gh.Response) bool {
 }
 
 // getPRDetail fetches the singular PR endpoint for the given number, which
-// populates mergeable_state (always null from list endpoints). Falls back to
-// the provided base PR if the detail fetch fails so a transient error doesn't
-// blank the panel.
+// populates mergeable_state (always null from list endpoints). Returns an
+// error if the fetch fails after retries; callers fall back to the list result.
 func (c *Client) getPRDetail(ctx context.Context, owner, repo string, number int) (*gh.PullRequest, error) {
 	var pr *gh.PullRequest
 	err := c.doWithRetry(ctx, func() (*gh.Response, error) {
