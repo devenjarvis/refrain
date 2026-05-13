@@ -590,13 +590,14 @@ func TestGetPRDetail_RetriesOn5xx(t *testing.T) {
 	}
 }
 
-func TestGetPRDetail_UnknownState(t *testing.T) {
+func TestGetPR_NullMergeableState(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/o/r/pulls":
 			_, _ = fmt.Fprintln(w, `[{"number":1,"state":"open","head":{"ref":"f"},"base":{"ref":"main"}}]`)
 		case "/repos/o/r/pulls/1":
-			// mergeable_state omitted — GitHub still computing
+			// mergeable_state field absent in JSON (null pointer) — distinct from
+			// the string "unknown" GitHub returns while computing.
 			_, _ = fmt.Fprintln(w, `{"number":1,"state":"open","head":{"ref":"f"},"base":{"ref":"main"}}`)
 		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -614,6 +615,34 @@ func TestGetPRDetail_UnknownState(t *testing.T) {
 	}
 	if pr.MergeableState != "" {
 		t.Errorf("MergeableState = %q, want \"\"", pr.MergeableState)
+	}
+}
+
+func TestGetPR_DetailExhaustsRetries_FallsBackToListResult(t *testing.T) {
+	var detailCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/pulls":
+			_, _ = fmt.Fprintln(w, `[{"number":1,"state":"open","head":{"ref":"f"},"base":{"ref":"main"}}]`)
+		case "/repos/o/r/pulls/1":
+			detailCalls.Add(1)
+			http.Error(w, "down", http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	c := newTestClient(t, srv)
+	pr, err := c.GetPR(context.Background(), "o", "r", "f")
+	if err != nil {
+		t.Fatalf("expected fallback success, got error: %v", err)
+	}
+	if pr == nil || pr.Number != 1 {
+		t.Fatalf("expected PR #1 from list fallback, got %+v", pr)
+	}
+	if pr.MergeableState != "" {
+		t.Errorf("MergeableState = %q, want \"\" for list fallback", pr.MergeableState)
+	}
+	if got := detailCalls.Load(); got != 3 {
+		t.Fatalf("expected 3 detail attempts before fallback, got %d", got)
 	}
 }
 
