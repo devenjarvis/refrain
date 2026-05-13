@@ -1567,7 +1567,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 			rs := repoStats[path]
 			var sym string
 			if rs.active > 0 {
-				sym = fmt.Sprintf("%d⚡", rs.active)
+				sym = fmt.Sprintf("%d●", rs.active)
 			} else if rs.waiting > 0 {
 				sym = fmt.Sprintf("%d⏸", rs.waiting)
 			} else {
