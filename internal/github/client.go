@@ -142,6 +142,24 @@ func isNotFoundOrUnprocessable(resp *gh.Response) bool {
 		resp.StatusCode == http.StatusUnprocessableEntity
 }
 
+// getPRDetail fetches the singular PR endpoint for the given number, which
+// populates mergeable_state (always null from list and create endpoints).
+// Returns an error if the fetch fails after retries; callers fall back to
+// their list/create result with MergeableState == "".
+func (c *Client) getPRDetail(ctx context.Context, owner, repo string, number int) (*gh.PullRequest, error) {
+	var pr *gh.PullRequest
+	err := c.doWithRetry(ctx, func() (*gh.Response, error) {
+		var resp *gh.Response
+		var err error
+		pr, resp, err = c.gh.PullRequests.Get(ctx, owner, repo, number)
+		return resp, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pr, nil
+}
+
 // GetPR finds an open pull request for the given head branch.
 // Returns nil (not an error) if no open PR exists for the branch.
 func (c *Client) GetPR(ctx context.Context, owner, repo, branch string) (*PRState, error) {
@@ -166,6 +184,9 @@ func (c *Client) GetPR(ctx context.Context, owner, repo, branch string) (*PRStat
 		return nil, nil
 	}
 
+	if detail, err := c.getPRDetail(ctx, owner, repo, prs[0].GetNumber()); err == nil {
+		return prToState(detail), nil
+	}
 	return prToState(prs[0]), nil
 }
 
@@ -206,6 +227,9 @@ func (c *Client) GetPRBySHA(ctx context.Context, owner, repo, sha string) (*PRSt
 			continue
 		}
 		if pr.GetState() == "open" {
+			if detail, err := c.getPRDetail(ctx, owner, repo, pr.GetNumber()); err == nil {
+				return prToState(detail), nil
+			}
 			return prToState(pr), nil
 		}
 	}
@@ -387,6 +411,9 @@ func (c *Client) CreatePR(ctx context.Context, owner, repo, head, base, title, b
 	if err != nil {
 		return nil, fmt.Errorf("creating PR: %w", err)
 	}
+	if detail, err := c.getPRDetail(ctx, owner, repo, pr.GetNumber()); err == nil {
+		return prToState(detail), nil
+	}
 	return prToState(pr), nil
 }
 
@@ -512,19 +539,14 @@ func prToState(pr *gh.PullRequest) *PRState {
 		state = "merged"
 	}
 
-	mergeable := false
-	if pr.Mergeable != nil {
-		mergeable = *pr.Mergeable
-	}
-
 	return &PRState{
-		Number:     pr.GetNumber(),
-		Title:      pr.GetTitle(),
-		URL:        pr.GetHTMLURL(),
-		State:      state,
-		Mergeable:  mergeable,
-		Draft:      pr.GetDraft(),
-		HeadBranch: pr.GetHead().GetRef(),
-		BaseBranch: pr.GetBase().GetRef(),
+		Number:         pr.GetNumber(),
+		Title:          pr.GetTitle(),
+		URL:            pr.GetHTMLURL(),
+		State:          state,
+		MergeableState: pr.GetMergeableState(),
+		Draft:          pr.GetDraft(),
+		HeadBranch:     pr.GetHead().GetRef(),
+		BaseBranch:     pr.GetBase().GetRef(),
 	}
 }

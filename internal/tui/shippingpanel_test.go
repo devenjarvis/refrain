@@ -25,10 +25,10 @@ func TestRenderShippingPanel_WithEntry(t *testing.T) {
 	sess := agent.NewSessionForTest("s2", "ship-it")
 	entry := &prCacheEntry{
 		pr: &github.PRState{
-			Number:     42,
-			Title:      "Add feature X",
-			BaseBranch: "main",
-			Mergeable:  true,
+			Number:         42,
+			Title:          "Add feature X",
+			BaseBranch:     "main",
+			MergeableState: "clean",
 		},
 		checks: &github.CheckStatus{
 			State:  "failure",
@@ -84,7 +84,7 @@ func TestRenderShippingPanel_WithEntry(t *testing.T) {
 func TestRenderShippingPanel_MergeReady(t *testing.T) {
 	sess := agent.NewSessionForTest("s3", "ship-it")
 	entry := &prCacheEntry{
-		pr:      &github.PRState{Number: 7, Mergeable: true},
+		pr:      &github.PRState{Number: 7, MergeableState: "clean"},
 		checks:  &github.CheckStatus{State: "success", Total: 2, Passed: 2},
 		reviews: &github.ReviewStatus{State: "approved", Approved: 1},
 	}
@@ -92,6 +92,26 @@ func TestRenderShippingPanel_MergeReady(t *testing.T) {
 	stripped := ansi.Strip(out)
 	if !strings.Contains(stripped, "Ready") {
 		t.Errorf("Ready phrase missing: %q", stripped)
+	}
+}
+
+func TestRenderShippingPanel_UnknownMergeable(t *testing.T) {
+	sess := agent.NewSessionForTest("s4", "ship-it")
+	entry := &prCacheEntry{
+		pr: &github.PRState{
+			Number:         10,
+			Title:          "WIP",
+			BaseBranch:     "main",
+			MergeableState: "unknown",
+		},
+	}
+	out := renderShippingPanel(sess, entry, 100, 30)
+	stripped := ansi.Strip(out)
+	if !strings.Contains(stripped, "checking") {
+		t.Errorf("expected 'checking' for unknown mergeable state: %q", stripped)
+	}
+	if strings.Contains(stripped, "conflicts") {
+		t.Errorf("unexpected 'conflicts' for unknown mergeable state: %q", stripped)
 	}
 }
 

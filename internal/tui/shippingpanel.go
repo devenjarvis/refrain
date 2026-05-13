@@ -45,9 +45,14 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	titleLine := "  " + lipgloss.NewStyle().Bold(true).Render(pr.Title)
 	lines = append(lines, titleLine)
 
-	mergeableLabel := lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ mergeable")
-	if !pr.Mergeable {
+	var mergeableLabel string
+	switch pr.MergeableState {
+	case "clean":
+		mergeableLabel = lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ mergeable")
+	case "dirty":
 		mergeableLabel = lipgloss.NewStyle().Foreground(ColorError).Render("✗ conflicts")
+	default:
+		mergeableLabel = StyleSubtle.Render("⋯ checking")
 	}
 	baseLine := "  " + StyleSubtle.Render("base →") + " " + pr.BaseBranch +
 		"   " + mergeableLabel
