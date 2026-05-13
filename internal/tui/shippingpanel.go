@@ -474,11 +474,17 @@ func shippingHints(mergeReady bool) string {
 	if !mergeReady {
 		mKey = StyleSubtle.Render("m")
 	}
+	blue := lipgloss.Color("#7ec8e3")
+	key := func(s string) string { return lipgloss.NewStyle().Foreground(blue).Render(s) }
 	return "  " +
 		mKey + mDesc +
 		"   " + StyleSubtle.Render("M — force merge") +
-		"   " + lipgloss.NewStyle().Foreground(lipgloss.Color("#7ec8e3")).Render("r") + StyleSubtle.Render(" — address feedback") +
-		"   " + lipgloss.NewStyle().Foreground(lipgloss.Color("#7ec8e3")).Render("p") + StyleSubtle.Render(" — open PR") +
-		"   " + lipgloss.NewStyle().Foreground(lipgloss.Color("#7ec8e3")).Render("t") + StyleSubtle.Render(" — terminal") +
+		"   " + key("a") + StyleSubtle.Render(" — approve") +
+		"   " + key("x") + StyleSubtle.Render(" — disagree") +
+		"   " + key("u") + StyleSubtle.Render(" — clear") +
+		"   " + key("n") + StyleSubtle.Render(" — note") +
+		"   " + key("r") + StyleSubtle.Render(" — address feedback") +
+		"   " + key("p") + StyleSubtle.Render(" — open PR") +
+		"   " + key("t") + StyleSubtle.Render(" — terminal") +
 		"   " + StyleSubtle.Render("ESC — back")
 }

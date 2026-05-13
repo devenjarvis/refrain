@@ -115,6 +115,29 @@ func TestRenderShippingPanel_UnknownMergeable(t *testing.T) {
 	}
 }
 
+func TestRenderShippingPanel_HintsListsTriageKeys(t *testing.T) {
+	sess := agent.NewSessionForTest("s-hints", "ship-it")
+	entry := &prCacheEntry{
+		pr: &github.PRState{
+			Number:         1,
+			Title:          "T",
+			BaseBranch:     "main",
+			MergeableState: "clean",
+		},
+	}
+	out := renderShippingPanel(sess, entry, 120, 30, 0, 0, nil)
+	stripped := ansi.Strip(out)
+	if !strings.Contains(stripped, "a — approve") {
+		t.Errorf("hint 'a — approve' missing: %q", stripped)
+	}
+	if !strings.Contains(stripped, "x — disagree") {
+		t.Errorf("hint 'x — disagree' missing: %q", stripped)
+	}
+	if !strings.Contains(stripped, "n — note") {
+		t.Errorf("hint 'n — note' missing: %q", stripped)
+	}
+}
+
 func TestRenderShippingPanel_TwoPaneFullBody(t *testing.T) {
 	sess := agent.NewSessionForTest("s5", "ship-it")
 	// 400-char body with no newlines — old truncateVisible would clip it.
