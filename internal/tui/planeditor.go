@@ -352,6 +352,10 @@ func (m *planEditorModel) reload() {
 
 // rebuildSections parses the current plan into sections and seeds folds,
 // preserving any existing fold state for headings that still exist.
+//
+// Fold state is keyed by heading text, not by position. If two H2s share the
+// same name (non-canonical but user-editable), they collapse/expand together —
+// accepted rather than introducing a positional disambiguator.
 func (m *planEditorModel) rebuildSections() {
 	v := m.textarea.Value()
 	srcLines := splitPlanLines(v)
@@ -782,11 +786,13 @@ func (m *planEditorModel) displayLines() []string {
 		}
 		headingLine := glyph + headingSegs[0]
 		if folded {
-			// Count hidden source lines, excluding a trailing empty line that is
-			// an artifact of the final \n in well-formed plan files.
+			// Count hidden source lines. Only strip a trailing "" for the last
+			// section (where strings.Split produces a spurious empty entry from
+			// the final \n). For mid-plan sections the final "" is a real blank
+			// line the user typed before the next heading and should be counted.
 			hiddenSlice := srcLines[s.headingLine+1 : s.nextLine]
 			hiddenCount := len(hiddenSlice)
-			if hiddenCount > 0 && hiddenSlice[hiddenCount-1] == "" {
+			if s.nextLine == len(srcLines) && hiddenCount > 0 && hiddenSlice[hiddenCount-1] == "" {
 				hiddenCount--
 			}
 			headingLine += StyleSubtle.Render(fmt.Sprintf("  · %d lines", hiddenCount))

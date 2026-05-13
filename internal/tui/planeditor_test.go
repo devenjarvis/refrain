@@ -381,6 +381,28 @@ func TestPlanEditor_FoldedSectionsCollapseToMarker(t *testing.T) {
 	}
 }
 
+// TestPlanEditor_FoldedSectionMidPlanCountsBlankLine verifies that a blank line
+// before the next heading is counted as a hidden line (it's real content, not a
+// strings.Split artifact). The trailing-blank strip applies only to the last
+// section whose nextLine == len(srcLines).
+func TestPlanEditor_FoldedSectionMidPlanCountsBlankLine(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	sess, _ := newEditorTestSession(t)
+	// Context has 2 content lines + 1 blank before Tasks — should show 3 lines.
+	const plan = "# Goal\n\n## Context\nctx 1\nctx 2\n\n## Tasks\ntask\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	rendered := testutil.StripANSI(strings.Join(editor.displayLines(), "\n"))
+	if !strings.Contains(rendered, "3 lines") {
+		t.Errorf("mid-plan collapsed section should show '3 lines' (including blank before next heading):\n%s", rendered)
+	}
+}
+
 // TestPlanEditor_TabTogglesFoldAtViewportTop verifies that pressing tab in
 // scroll mode toggles the fold of whichever section contains the viewport top.
 func TestPlanEditor_TabTogglesFoldAtViewportTop(t *testing.T) {
