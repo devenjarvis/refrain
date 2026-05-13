@@ -418,10 +418,8 @@ func TestRenderQueueRow_RepoPrefix(t *testing.T) {
 }
 
 // TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine verifies
-// that a Building session with a plan and open tasks produces a 5-line card
-// where the description (lines 2–3) is preserved and the new line 4 shows
-// "▸ first open · next: second open", with the branch/elapsed row moved to
-// line 5.
+// that a Building session with a plan and open tasks produces a 4-line card
+// where line 2 shows "▸ first open task" (bold) and line 3 shows "↳ next: second open".
 func TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
@@ -439,24 +437,63 @@ func TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine(t *testing
 	}
 
 	card := d.renderFocusSessionCard(sess, "", false, 100)
-	if len(card) != 5 {
-		t.Fatalf("expected 5-line card for plan-backed building session, got %d lines: %v", len(card), card)
+	if len(card) != 4 {
+		t.Fatalf("expected 4-line card for plan-backed building session, got %d lines: %v", len(card), card)
 	}
-	if !strings.Contains(ansi.Strip(card[1]), "implement oauth flow") {
-		t.Errorf("line 2 should show description (task summary), got %q", ansi.Strip(card[1]))
+	line2 := ansi.Strip(card[1])
+	if !strings.Contains(line2, "▸") {
+		t.Errorf("line 2 should contain ▸ prefix, got %q", line2)
 	}
-	line4 := ansi.Strip(card[3])
-	if !strings.Contains(line4, "write tests") {
-		t.Errorf("line 4 should contain first open task, got %q", line4)
+	if !strings.Contains(line2, "write tests") {
+		t.Errorf("line 2 should contain first open task, got %q", line2)
 	}
-	if !strings.Contains(line4, "next: open PR") {
-		t.Errorf("line 4 should contain 'next: open PR', got %q", line4)
+	line3 := ansi.Strip(card[2])
+	if !strings.Contains(line3, "↳ next:") {
+		t.Errorf("line 3 should contain ↳ next: prefix, got %q", line3)
+	}
+	if !strings.Contains(line3, "open PR") {
+		t.Errorf("line 3 should contain second open task, got %q", line3)
+	}
+}
+
+// TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan verifies that
+// when the session's primary agent has an in_progress TodoItem, that item's
+// content wins on line 2 over the plan's first uncompleted task.
+func TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	if err := sess.WritePlan("- [ ] plan task one\n- [ ] plan task two\n"); err != nil {
+		t.Fatal(err)
+	}
+	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
+	ag.SetTodos([]agent.TodoItem{
+		{Content: "todo task from agent", ActiveForm: "Running todo task", Status: "in_progress"},
+		{Content: "next pending todo", Status: "pending"},
+	})
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	card := d.renderFocusSessionCard(sess, "", false, 100)
+	if len(card) != 4 {
+		t.Fatalf("expected 4-line card, got %d", len(card))
+	}
+	line2 := ansi.Strip(card[1])
+	if !strings.Contains(line2, "Running todo task") {
+		t.Errorf("line 2 should show in_progress todo's ActiveForm, got %q", line2)
+	}
+	if strings.Contains(line2, "plan task") {
+		t.Errorf("line 2 must not show plan task when todo overrides it, got %q", line2)
 	}
 }
 
 // TestRenderFocusSessionCard_PlanWithSingleOpenTaskDropsNextSuffix verifies
-// that when only one open task remains, the task-progress line shows "▸ task"
-// without a "next:" suffix.
+// that when only one open task remains, line 2 shows "▸ last task" and line 3
+// is blank (no "↳ next:" suffix), card is exactly 4 lines.
 func TestRenderFocusSessionCard_PlanWithSingleOpenTaskDropsNextSuffix(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
@@ -473,15 +510,16 @@ func TestRenderFocusSessionCard_PlanWithSingleOpenTaskDropsNextSuffix(t *testing
 	}
 
 	card := d.renderFocusSessionCard(sess, "", false, 100)
-	if len(card) != 5 {
-		t.Fatalf("expected 5-line card with single open task, got %d lines", len(card))
+	if len(card) != 4 {
+		t.Fatalf("expected 4-line card with single open task, got %d lines", len(card))
 	}
-	line4 := ansi.Strip(card[3])
-	if !strings.Contains(line4, "last task") {
-		t.Errorf("line 4 should contain open task name, got %q", line4)
+	line2 := ansi.Strip(card[1])
+	if !strings.Contains(line2, "last task") {
+		t.Errorf("line 2 should contain open task name, got %q", line2)
 	}
-	if strings.Contains(line4, "next:") {
-		t.Errorf("line 4 must not have 'next:' with single open task, got %q", line4)
+	line3 := ansi.Strip(card[2])
+	if strings.Contains(line3, "next:") {
+		t.Errorf("line 3 must not have 'next:' with single open task, got %q", line3)
 	}
 }
 

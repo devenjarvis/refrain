@@ -691,14 +691,37 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	} else {
 		descLine1, descLine2, descPending = focusTaskDescription(sess, descBudget)
 	}
-	descStyle := StyleSubtle
-	if descPending {
-		descStyle = lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
-	}
-	line2 := stripe + indent + descStyle.Render(descLine1)
-	line3 := stripe + indent
-	if descLine2 != "" {
-		line3 = stripe + indent + descStyle.Render(descLine2)
+	var line2, line3 string
+	buildingPhase := phase == agent.LifecycleInProgress && !sess.IsReviewable()
+	if planningPhase {
+		descStyle := StyleSubtle
+		if descPending {
+			descStyle = lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
+		}
+		line2 = stripe + indent + descStyle.Render(descLine1)
+		line3 = stripe + indent
+		if descLine2 != "" {
+			line3 = stripe + indent + descStyle.Render(descLine2)
+		}
+	} else if buildingPhase {
+		// Active task: ▸ <bold text>
+		activeLine := ""
+		if descLine1 != "" {
+			activeLine = lipgloss.NewStyle().Bold(true).Render("▸ " + descLine1)
+		}
+		line2 = stripe + indent + activeLine
+		// Next task: ↳ next: <muted-italic text>
+		line3 = stripe + indent
+		if descLine2 != "" {
+			nextStyle := lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
+			line3 = stripe + indent + nextStyle.Render("↳ next: "+descLine2)
+		}
+	} else {
+		line2 = stripe + indent + StyleSubtle.Render(descLine1)
+		line3 = stripe + indent
+		if descLine2 != "" {
+			line3 = stripe + indent + StyleSubtle.Render(descLine2)
+		}
 	}
 
 	// --- Line 4: branch [· detail], right-aligned elapsed ---
@@ -754,10 +777,6 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	}
 	line4 := rightAlign(bottomLeft, StyleSubtle.Render(elapsedStr), width)
 
-	if progress := planProgressLine(sess, descBudget); progress != "" {
-		progressLine := stripe + indent + StyleSubtle.Render(progress)
-		return []string{line1, line2, line3, progressLine, line4}
-	}
 	return []string{line1, line2, line3, line4}
 }
 
@@ -930,9 +949,9 @@ func planProgressLine(sess *agent.Session, budget int) string {
 
 // focusTaskDescription chooses the description lines for a session card in
 // focus mode and reports whether they should render in pending (italic) style.
-// For Building-phase sessions that have received ≥1 TodoWrite, line1 shows the
-// active task's activeForm and line2 shows the next pending task. Otherwise
-// the text is word-wrapped into two lines by wrapTwoLines.
+// For Building-phase sessions, line1 is the active task text (raw, no "▸ " prefix
+// — the render layer adds that) and line2 is the next task text (raw, no "↳ next: "
+// prefix). Priority: in_progress TodoItem > plan firstUncompletedTask > fallback.
 func focusTaskDescription(sess *agent.Session, budget int) (line1, line2 string, pending bool) {
 	if sess.LifecyclePhase() == agent.LifecycleInProgress && !sess.IsReviewable() {
 		if ag := sess.PrimaryAgent(); ag != nil {
@@ -959,13 +978,18 @@ func focusTaskDescription(sess *agent.Session, budget int) (line1, line2 string,
 					nextPending = ""
 				}
 				if activeText != "" {
-					l1 := truncateVisible("▸ "+activeText, budget)
-					var l2 string
-					if nextPending != "" {
-						l2 = truncateVisible("next: "+nextPending, budget)
-					}
+					l1 := truncateVisible(activeText, budget)
+					l2 := truncateVisible(nextPending, budget)
 					return l1, l2, false
 				}
+			}
+		}
+		// No todos: fall back to plan checkboxes.
+		if plan, present := sess.CachedPlan(); present {
+			first := firstUncompletedTask(plan)
+			if first != "" {
+				second := secondUncompletedTask(plan)
+				return truncateVisible(first, budget), truncateVisible(second, budget), false
 			}
 		}
 	}
