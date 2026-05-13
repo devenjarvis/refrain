@@ -490,6 +490,34 @@ func TestPlanEditor_BracketsJumpBetweenSections(t *testing.T) {
 	}
 }
 
+// TestPlanEditor_ShiftZTogglesAllFolds verifies that pressing Z collapses every
+// section when any is expanded, and expands every section when all are
+// collapsed.
+func TestPlanEditor_ShiftZTogglesAllFolds(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nGoal body\n\n## Spec\nspec\n\n## Context\nctx\n\n## Reuse\nreuse\n\n## Risks\nrisks\n\n## Tasks\n- [ ] t1\n\n## Verification\nverify\n\n## Not in scope\nnot\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+
+	// Default: Goal/Spec/Tasks expanded, others collapsed. Press Z → all collapsed.
+	editor.Update(tea.KeyPressMsg{Code: 'Z', Text: "Z"})
+	for _, s := range editor.sections {
+		if !editor.folds[s.heading] {
+			t.Errorf("after first Z, folds[%q] = false, want true (all collapsed)", s.heading)
+		}
+	}
+
+	// All collapsed. Press Z again → all expanded.
+	editor.Update(tea.KeyPressMsg{Code: 'Z', Text: "Z"})
+	for _, s := range editor.sections {
+		if editor.folds[s.heading] {
+			t.Errorf("after second Z, folds[%q] = true, want false (all expanded)", s.heading)
+		}
+	}
+}
+
 // TestPlanEditor_ScrollModeStylesHeadings asserts that scroll-mode rendering
 // actually emits ANSI styling for known markdown constructs. Without this,
 // a regression that silently nil-checks the renderer or short-circuits

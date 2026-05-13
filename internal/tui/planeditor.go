@@ -513,6 +513,21 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 			m.clampScroll()
 		}
 		return nil
+	case "Z":
+		// If any section is expanded, collapse all; otherwise expand all.
+		anyExpanded := false
+		for _, s := range m.sections {
+			if !m.folds[s.heading] {
+				anyExpanded = true
+				break
+			}
+		}
+		for _, s := range m.sections {
+			m.folds[s.heading] = anyExpanded
+		}
+		m.invalidateDisplayCache()
+		m.clampScroll()
+		return nil
 	case "i":
 		if m.revising {
 			return nil
