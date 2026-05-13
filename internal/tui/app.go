@@ -1232,6 +1232,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reviewDiffMsg:
 		if msg.err == nil && msg.entry != nil {
 			a.reviewDiffCache[msg.sessionID] = msg.entry
+			// Refresh the inline diff viewport when data arrives for the open session.
+			if a.reviewSession != nil && a.reviewSession.ID == msg.sessionID && len(msg.entry.groups) > 0 {
+				a.refreshReviewDiffViewport()
+			}
 			// If the entry has task groups, dispatch a reviewer per group.
 			if len(msg.entry.groups) > 0 {
 				repoPath := a.repoPathForSession(msg.sessionID)
@@ -1731,9 +1735,10 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "j", "down":
 				// Move cursor down in the task list.
 				if entry := a.reviewDiffCache[a.reviewSession.ID]; entry != nil {
-					max := reviewTaskCount(entry) - 1
-					if a.reviewTaskCursor < max {
+					maxIdx := reviewTaskCount(entry) - 1
+					if a.reviewTaskCursor < maxIdx {
 						a.reviewTaskCursor++
+						a.refreshReviewDiffViewport()
 					}
 				}
 				return a, nil
@@ -1741,6 +1746,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Move cursor up in the task list.
 				if a.reviewTaskCursor > 0 {
 					a.reviewTaskCursor--
+					a.refreshReviewDiffViewport()
 				}
 				return a, nil
 			case "f":
@@ -2021,11 +2027,13 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sess.SetLifecyclePhase(agent.LifecycleInReview)
 				a.reviewSession = sess
 				a.reviewTaskCursor = 0
+				a.reviewDiffCacheByTask = make(map[int]*diffmodel.Model)
 				a.dashboard.panelFocus = focusReview
 				// Fetch diff stats if not already cached.
 				if _, ok := a.reviewDiffCache[sess.ID]; !ok {
 					return a, a.fetchReviewDiffCmd(sess)
 				}
+				a.refreshReviewDiffViewport()
 				return a, nil
 			case "n":
 				if a.cfg != nil && len(a.cfg.Repos) > 1 {
@@ -3546,10 +3554,12 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		sess.SetLifecyclePhase(agent.LifecycleInReview)
 		a.reviewSession = sess
 		a.reviewTaskCursor = 0
+		a.reviewDiffCacheByTask = make(map[int]*diffmodel.Model)
 		a.dashboard.panelFocus = focusReview
 		if _, ok := a.reviewDiffCache[sess.ID]; !ok {
 			return a.fetchReviewDiffCmd(sess), true
 		}
+		a.refreshReviewDiffViewport()
 		return nil, true
 	case focusSectionShipping:
 		a.shippingSession = sess
@@ -4680,6 +4690,7 @@ func (a *App) addressReviewFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
 	a.reviewSession = nil
 	a.reviewTaskCursor = 0
 	delete(a.reviewDiffCache, sessID)
+	a.reviewDiffCacheByTask = make(map[int]*diffmodel.Model)
 	a.dashboard.panelFocus = focusList
 	return a, func() tea.Msg {
 		ag, err := mgr.AddAgent(sessID, cfg)
@@ -5064,6 +5075,46 @@ func (a App) fetchReviewDiffCmd(sess *agent.Session) tea.Cmd {
 
 		return reviewDiffMsg{sessionID: sessID, entry: entry}
 	}
+}
+
+// refreshReviewDiffViewport updates the inline diff viewport content for the
+// currently selected task. This ensures scroll clamping (PageDown/PageUp) works
+// correctly. Call this whenever the task cursor changes or when the review panel
+// is first entered. Also resets the scroll to the top.
+func (a *App) refreshReviewDiffViewport() {
+	a.reviewDiffVP.GotoTop()
+	if a.reviewSession == nil {
+		a.reviewDiffVP.SetContent("")
+		return
+	}
+	entry := a.reviewDiffCache[a.reviewSession.ID]
+	if entry == nil {
+		a.reviewDiffVP.SetContent("")
+		return
+	}
+	group := reviewTaskGroupAtCursor(entry, a.reviewTaskCursor)
+	if group == nil || group.rawDiff == "" {
+		a.reviewDiffVP.SetContent("(no diff for this task)")
+		return
+	}
+	// Use cache to avoid re-parsing on each keystroke.
+	idx := a.reviewTaskCursor
+	m, ok := a.reviewDiffCacheByTask[idx]
+	if !ok {
+		var err error
+		m, err = diffmodel.Parse(group.rawDiff)
+		if err != nil || m == nil {
+			a.reviewDiffVP.SetContent("(no diff for this task)")
+			return
+		}
+		a.reviewDiffCacheByTask[idx] = m
+	}
+	// Compute right pane width: mirrors renderReviewPanel's wide-mode formula.
+	rightW := a.width*6/10 - 5
+	if rightW < 20 {
+		rightW = 20
+	}
+	a.reviewDiffVP.SetContent(renderAllFilesUnified(m, rightW))
 }
 
 // populateNoDiffVerdicts stamps verdictNoDiff on every plan task in entry that

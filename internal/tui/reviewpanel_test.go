@@ -962,6 +962,50 @@ func TestRenderReviewPanel_InlineDiffPresent(t *testing.T) {
 	}
 }
 
+// TestReviewPanel_CursorMoveSwapsDiff verifies that moving the cursor from task 1
+// to task 2 causes the inline diff area to render task 2's diff and not task 1's.
+func TestReviewPanel_CursorMoveSwapsDiff(t *testing.T) {
+	rawDiff1 := "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,4 @@\n package main\n \n+// task-one-marker\n func A() {}\n"
+	rawDiff2 := "diff --git a/b.go b/b.go\nindex 1234567..abcdefg 100644\n--- a/b.go\n+++ b/b.go\n@@ -1,3 +1,4 @@\n package main\n \n+// task-two-marker\n func B() {}\n"
+
+	sess := agent.NewSessionForTest("sess-cursor", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "Task one", Done: false},
+			{Index: 2, Text: "Task two", Done: false},
+		},
+		groups: []taskReviewGroup{
+			{taskIndex: 1, commits: []git.Commit{{Hash: "aaa1111"}}, rawDiff: rawDiff1},
+			{taskIndex: 2, commits: []git.Commit{{Hash: "bbb2222"}}, rawDiff: rawDiff2},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictPending},
+			2: {state: verdictPending},
+		},
+	}
+
+	// cursor=0 → task 1's diff
+	out0 := renderReviewPanel(sess, entry, 140, 40, 0, false, 0)
+	if !strings.Contains(out0, "task-one-marker") {
+		t.Errorf("cursor=0: expected task-one-marker in output; got:\n%s", out0)
+	}
+	if strings.Contains(out0, "task-two-marker") {
+		t.Errorf("cursor=0: must not contain task-two-marker; got:\n%s", out0)
+	}
+
+	// cursor=1 → task 2's diff
+	out1 := renderReviewPanel(sess, entry, 140, 40, 1, false, 0)
+	if !strings.Contains(out1, "task-two-marker") {
+		t.Errorf("cursor=1: expected task-two-marker in output; got:\n%s", out1)
+	}
+	if strings.Contains(out1, "task-one-marker") {
+		t.Errorf("cursor=1: must not contain task-one-marker; got:\n%s", out1)
+	}
+}
+
 // TestRenderReviewPanel_NoDiffPlaceholder verifies that when a task group has an
 // empty rawDiff, the inline diff area shows the "(no diff for this task)" placeholder.
 func TestRenderReviewPanel_NoDiffPlaceholder(t *testing.T) {
