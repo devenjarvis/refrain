@@ -3960,6 +3960,53 @@ func TestShippingPanel_VerdictKeys(t *testing.T) {
 	}
 }
 
+func TestAddressFeedback_ClearsTriage(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSessionForTest("addr-t", "ship")
+	sess.SetLifecyclePhase(agent.LifecycleShipping)
+
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+	mgr.AddSessionForTest(sess)
+
+	app := NewApp()
+	app.shippingSession = sess
+	app.dashboard.panelFocus = focusShipping
+	app.managers[dir] = mgr
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.prCache[sess.ID] = &prCacheEntry{
+		pr: &github.PRState{Number: 5, MergeableState: "clean"},
+		threads: []github.ReviewThread{
+			{Reviewer: "alice", State: "CHANGES_REQUESTED", Body: "fix it"},
+		},
+	}
+	// Seed triage.
+	app.feedbackTriage[sess.ID] = map[string]*feedbackTriageEntry{
+		"thread:alice": {Verdict: feedbackDisagreed, Note: "n/a"},
+	}
+
+	// Press 'r' → dispatches addressFeedback, which should clear triage.
+	// addressFeedback uses pointer receiver so may return *App — handle both.
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	var gotApp App
+	switch v := model.(type) {
+	case App:
+		gotApp = v
+	case *App:
+		gotApp = *v
+	default:
+		t.Fatalf("unexpected model type %T", model)
+	}
+
+	if m := gotApp.feedbackTriage[sess.ID]; len(m) != 0 {
+		t.Errorf("expected feedbackTriage[%s] cleared after r, got: %v", sess.ID, m)
+	}
+}
+
 func TestNewApp_InitsFeedbackTriage(t *testing.T) {
 	app := NewApp()
 	if app.feedbackTriage == nil {

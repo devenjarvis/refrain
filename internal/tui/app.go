@@ -4492,6 +4492,7 @@ func (a *App) addressFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
 	sessID := sess.ID
 	a.shippingSession = nil
 	a.dashboard.panelFocus = focusList
+	delete(a.feedbackTriage, sessID)
 	return a, func() tea.Msg {
 		ag, err := mgr.AddAgent(sessID, cfg)
 		if err != nil {
