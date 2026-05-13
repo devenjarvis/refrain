@@ -3739,7 +3739,8 @@ func (a App) View() tea.View {
 		}
 		if a.dashboard.panelFocus == focusShipping && a.shippingSession != nil {
 			entry := a.prCache[a.shippingSession.ID]
-			v := tea.NewView(renderShippingPanel(a.shippingSession, entry, a.width, a.height))
+			sessID := a.shippingSession.ID
+			v := tea.NewView(renderShippingPanel(a.shippingSession, entry, a.width, a.height, a.shippingFeedbackCursor, a.shippingDetailScroll, a.feedbackTriage[sessID]))
 			v.AltScreen = true
 			return v
 		}
