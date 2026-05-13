@@ -1740,12 +1740,11 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if entry == nil {
 					return a, nil
 				}
-				group := reviewTaskGroupAtCursor(entry, a.reviewTaskCursor)
-				if group == nil {
-					// Synthetic Overview row (no plan, no commits): nothing to flag.
+				idx, ok := reviewTaskIndexAtCursor(entry, a.reviewTaskCursor)
+				if !ok {
+					// Synthetic Overview row (no-plan session): nothing to flag.
 					return a, nil
 				}
-				idx := group.taskIndex
 				if entry.verdicts == nil {
 					entry.verdicts = make(map[int]*taskVerdictRecord)
 				}
@@ -3984,6 +3983,30 @@ func reviewTaskGroupAtCursor(entry *reviewDiffEntry, cursor int) *taskReviewGrou
 	return nil
 }
 
+// reviewTaskIndexAtCursor returns the task index at cursor following the same
+// row ordering as reviewTaskGroupAtCursor (plan tasks first, then the "Other
+// changes" row when present). Unlike reviewTaskGroupAtCursor, this resolves
+// even when the plan task has no associated commit group — so the user can
+// flag a never-touched task for rework. Returns (0, false) for the synthetic
+// Overview row used in no-plan sessions.
+func reviewTaskIndexAtCursor(entry *reviewDiffEntry, cursor int) (int, bool) {
+	if entry == nil || cursor < 0 {
+		return 0, false
+	}
+	if cursor < len(entry.tasks) {
+		return entry.tasks[cursor].Index, true
+	}
+	// "Other changes" row, only present when some commit has no [task N] prefix.
+	if cursor == len(entry.tasks) {
+		for i := range entry.groups {
+			if entry.groups[i].taskIndex == 0 {
+				return 0, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // reviewTaskCount returns the number of task rows in a review entry (plan tasks
 // plus the "other" group if present). For no-plan sessions with aggregate data,
 // returns 1 for the synthetic "Overview" row.
@@ -4520,6 +4543,7 @@ func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 		text       string
 		flagged    bool
 		hasVerdict bool
+		noCommits  bool
 		kind       agent.VerdictKind
 		rationale  string
 	}
@@ -4542,6 +4566,7 @@ func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 			text:       text,
 			flagged:    rec.userFlagged,
 			hasVerdict: hasVerdict,
+			noCommits:  rec.state == verdictNoDiff,
 			kind:       rec.verdict.Kind,
 			rationale:  strings.TrimSpace(rec.verdict.Rationale),
 		})
@@ -4575,6 +4600,8 @@ func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 			if r.rationale != "" {
 				fmt.Fprintf(&b, "Rationale: %s\n", r.rationale)
 			}
+		} else if r.noCommits {
+			b.WriteString("Status: no commits yet for this task.\n")
 		}
 		if r.flagged {
 			b.WriteString("Flagged by you: yes\n")

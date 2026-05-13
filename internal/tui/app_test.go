@@ -3075,6 +3075,184 @@ func TestBuildFeedbackPrompt_CommentedOnlyWithoutInlineComments(t *testing.T) {
 	}
 }
 
+// TestBuildReviewReworkPrompt_NilEntry verifies a nil entry returns "".
+func TestBuildReviewReworkPrompt_NilEntry(t *testing.T) {
+	if got := buildReviewReworkPrompt(nil); got != "" {
+		t.Errorf("expected empty prompt for nil entry, got: %q", got)
+	}
+}
+
+// TestBuildReviewReworkPrompt_NilVerdicts verifies an entry with nil verdicts
+// returns "" — there's nothing actionable to send back.
+func TestBuildReviewReworkPrompt_NilVerdicts(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks:    []agent.PlanTask{{Index: 1, Text: "Add auth"}},
+		verdicts: nil,
+	}
+	if got := buildReviewReworkPrompt(entry); got != "" {
+		t.Errorf("expected empty prompt for nil verdicts, got: %q", got)
+	}
+}
+
+// TestBuildReviewReworkPrompt_NoActionableTasks verifies that all-pass /
+// pending / unflagged verdicts produce no prompt.
+func TestBuildReviewReworkPrompt_NoActionableTasks(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "Add auth"},
+			{Index: 2, Text: "Wire login"},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: "lgtm"}},
+			2: {state: verdictPending},
+		},
+	}
+	if got := buildReviewReworkPrompt(entry); got != "" {
+		t.Errorf("expected empty prompt when no concerns/fails/flags, got: %q", got)
+	}
+}
+
+// TestBuildReviewReworkPrompt_FlaggedOnly verifies a user-flagged task with no
+// AI verdict (pending state) is included in the rework prompt without the
+// "AI reviewer verdict" / "Rationale" lines.
+func TestBuildReviewReworkPrompt_FlaggedOnly(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 3, Text: "Add logout"}},
+		verdicts: map[int]*taskVerdictRecord{
+			3: {state: verdictPending, userFlagged: true},
+		},
+	}
+	prompt := buildReviewReworkPrompt(entry)
+	if !strings.Contains(prompt, "## Task 3: Add logout") {
+		t.Errorf("prompt missing task heading: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Flagged by you: yes") {
+		t.Errorf("prompt missing user-flag note: %q", prompt)
+	}
+	if strings.Contains(prompt, "AI reviewer verdict") {
+		t.Errorf("prompt should not include AI verdict line when state is pending: %q", prompt)
+	}
+}
+
+// TestBuildReviewReworkPrompt_VerdictFail verifies a fail verdict with no
+// user flag is included with the verdict + rationale lines.
+func TestBuildReviewReworkPrompt_VerdictFail(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 2, Text: "Wire login"}},
+		verdicts: map[int]*taskVerdictRecord{
+			2: {
+				state:   verdictDone,
+				verdict: agent.ReviewVerdict{Kind: agent.VerdictFail, Rationale: "login form is missing the password field."},
+			},
+		},
+	}
+	prompt := buildReviewReworkPrompt(entry)
+	if !strings.Contains(prompt, "## Task 2: Wire login") {
+		t.Errorf("prompt missing task heading: %q", prompt)
+	}
+	if !strings.Contains(prompt, "AI reviewer verdict: fail") {
+		t.Errorf("prompt missing AI verdict: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Rationale: login form is missing the password field.") {
+		t.Errorf("prompt missing rationale: %q", prompt)
+	}
+	if strings.Contains(prompt, "Flagged by you") {
+		t.Errorf("prompt should not include flagged-by-you note when not flagged: %q", prompt)
+	}
+}
+
+// TestBuildReviewReworkPrompt_FlaggedAndConcerns verifies a single task with
+// both a user flag and an AI concerns verdict gets a single combined entry.
+func TestBuildReviewReworkPrompt_FlaggedAndConcerns(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth"}},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {
+				state:       verdictDone,
+				verdict:     agent.ReviewVerdict{Kind: agent.VerdictConcerns, Rationale: "rate limit unverified"},
+				userFlagged: true,
+			},
+		},
+	}
+	prompt := buildReviewReworkPrompt(entry)
+	if !strings.Contains(prompt, "AI reviewer verdict: concerns") {
+		t.Errorf("prompt missing AI verdict: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Flagged by you: yes") {
+		t.Errorf("prompt missing user-flag note: %q", prompt)
+	}
+	if c := strings.Count(prompt, "## Task 1:"); c != 1 {
+		t.Errorf("expected exactly one task-1 heading, got %d in: %q", c, prompt)
+	}
+}
+
+// TestBuildReviewReworkPrompt_OtherChanges verifies a flagged or fail record
+// at taskIndex=0 renders as "## Other changes" instead of "## Task 0".
+func TestBuildReviewReworkPrompt_OtherChanges(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: nil,
+		verdicts: map[int]*taskVerdictRecord{
+			0: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail, Rationale: "drive-by typo fix breaks build"}},
+		},
+	}
+	prompt := buildReviewReworkPrompt(entry)
+	if !strings.Contains(prompt, "## Other changes") {
+		t.Errorf("prompt missing 'Other changes' heading: %q", prompt)
+	}
+	if strings.Contains(prompt, "## Task 0") {
+		t.Errorf("prompt should not contain '## Task 0': %q", prompt)
+	}
+}
+
+// TestBuildReviewReworkPrompt_SortOrder verifies tasks render in ascending
+// index order, with index 0 ("Other changes") last regardless of map order.
+func TestBuildReviewReworkPrompt_SortOrder(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 2, Text: "second"},
+			{Index: 5, Text: "fifth"},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			5: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail}},
+			0: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail}},
+			2: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictConcerns}},
+		},
+	}
+	prompt := buildReviewReworkPrompt(entry)
+	pos2 := strings.Index(prompt, "## Task 2:")
+	pos5 := strings.Index(prompt, "## Task 5:")
+	posOther := strings.Index(prompt, "## Other changes")
+	if pos2 < 0 || pos5 < 0 || posOther < 0 {
+		t.Fatalf("missing one of the headings (2=%d, 5=%d, other=%d): %q", pos2, pos5, posOther, prompt)
+	}
+	if pos2 >= pos5 || pos5 >= posOther {
+		t.Errorf("expected order: task 2 < task 5 < Other changes; got positions 2=%d 5=%d other=%d",
+			pos2, pos5, posOther)
+	}
+}
+
+// TestBuildReviewReworkPrompt_FlaggedNoCommits verifies a task with
+// verdictNoDiff (no commits yet) that the human flagged is included in the
+// prompt with a clear "no commits yet" status note.
+func TestBuildReviewReworkPrompt_FlaggedNoCommits(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 4, Text: "Add metrics"}},
+		verdicts: map[int]*taskVerdictRecord{
+			4: {state: verdictNoDiff, userFlagged: true},
+		},
+	}
+	prompt := buildReviewReworkPrompt(entry)
+	if !strings.Contains(prompt, "## Task 4: Add metrics") {
+		t.Errorf("prompt missing task heading: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Status: no commits yet") {
+		t.Errorf("prompt missing no-commits note: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Flagged by you: yes") {
+		t.Errorf("prompt missing user-flag note: %q", prompt)
+	}
+}
+
 // TestNKeyOpensPromptModal_WhenPlanFirstEnabled verifies the new plan-first
 // gate: with PlanFirstEnabled=true, pressing `n` opens the prompt modal
 // instead of immediately creating a session. With the flag off (today's

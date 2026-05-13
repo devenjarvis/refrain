@@ -557,6 +557,56 @@ func TestReviewTaskGroupAtCursor(t *testing.T) {
 	}
 }
 
+// TestReviewTaskIndexAtCursor checks that the index resolves correctly for the
+// f-flag path, including plan tasks that have no commit group (which is the
+// case the cursor helper used to silently skip).
+func TestReviewTaskIndexAtCursor(t *testing.T) {
+	// Plan with two tasks; only task 2 has commits. Task 1 has no group — the
+	// reviewer might want to flag it as "never started".
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "Add metrics"},
+			{Index: 2, Text: "Wire dashboard"},
+		},
+		groups: []taskReviewGroup{
+			{taskIndex: 2, commits: []git.Commit{{Hash: "b"}}},
+			{taskIndex: 0, commits: []git.Commit{{Hash: "c"}}},
+		},
+	}
+	tests := []struct {
+		name    string
+		cursor  int
+		wantIdx int
+		wantOk  bool
+	}{
+		{"task 1 with no commits resolves", 0, 1, true},
+		{"task 2 with commits resolves", 1, 2, true},
+		{"other-changes row resolves to 0", 2, 0, true},
+		{"out of range returns false", 3, 0, false},
+		{"negative cursor returns false", -1, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx, ok := reviewTaskIndexAtCursor(entry, tt.cursor)
+			if ok != tt.wantOk {
+				t.Errorf("ok = %v, want %v", ok, tt.wantOk)
+			}
+			if idx != tt.wantIdx {
+				t.Errorf("idx = %d, want %d", idx, tt.wantIdx)
+			}
+		})
+	}
+
+	// No-plan synthetic Overview row: no tasks, no groups → never resolves.
+	emptyEntry := &reviewDiffEntry{}
+	if _, ok := reviewTaskIndexAtCursor(emptyEntry, 0); ok {
+		t.Error("expected !ok for no-plan synthetic Overview row")
+	}
+	if _, ok := reviewTaskIndexAtCursor(nil, 0); ok {
+		t.Error("expected !ok for nil entry")
+	}
+}
+
 // TestPopulateNoDiffVerdicts verifies the detection logic that stamps verdictNoDiff
 // on plan tasks with no matching commit group, leaving matched tasks untouched.
 func TestPopulateNoDiffVerdicts(t *testing.T) {
@@ -772,6 +822,20 @@ func TestVerdictBadge(t *testing.T) {
 			rec:       &taskVerdictRecord{state: verdictNoDiff},
 			wantIcon:  func(s string) bool { return s == "⊘" },
 			wantLabel: "no diff found",
+		},
+		{
+			name:      "userFlagged overrides pending",
+			rec:       &taskVerdictRecord{state: verdictPending, userFlagged: true},
+			wantIcon:  func(s string) bool { return s == "⚑" },
+			wantLabel: "flagged",
+		},
+		{
+			// Documents the intentional precedence: a human flag wins over the
+			// AI reviewer's verdict, even a passing one.
+			name:      "userFlagged overrides verdictDone pass",
+			rec:       &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}, userFlagged: true},
+			wantIcon:  func(s string) bool { return s == "⚑" },
+			wantLabel: "flagged",
 		},
 	}
 	for _, tt := range tests {
