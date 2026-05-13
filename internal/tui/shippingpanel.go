@@ -232,8 +232,6 @@ func renderFeedbackList(items []feedbackItem, cursor int, triage map[string]*fee
 		if maxLabelW < 4 {
 			maxLabelW = 4
 		}
-		// One-line body preview.
-		previewBody := strings.ReplaceAll(item.Body, "\n", " ")
 		// Truncate label; show body preview inline after a colon.
 		labelStr := truncateVisible(label, maxLabelW)
 		rowText := glyph + " " + labelStr + noteGlyph
@@ -243,7 +241,6 @@ func renderFeedbackList(items []feedbackItem, cursor int, triage map[string]*fee
 			if rw := ansi.StringWidth(rowText); rw < contentW {
 				rowText += strings.Repeat(" ", contentW-rw)
 			}
-			_ = previewBody
 			lines = append(lines, " "+cursorBar+rowText+cursorBar+" ")
 		} else {
 			lines = append(lines, "  "+rowText)
@@ -425,6 +422,8 @@ func feedbackItems(threads []github.ReviewThread) []feedbackItem {
 
 // feedbackItemKey returns the stable triage map key for an item.
 // Inline comments use "comment:<id>"; thread bodies use "thread:<reviewer>".
+// The reviewer key is unique because GetReviewThreads produces at most one
+// ReviewThread per reviewer (latest-review dedup + seen guard).
 func feedbackItemKey(item feedbackItem) string {
 	if item.IsInline {
 		return fmt.Sprintf("comment:%d", item.CommentID)

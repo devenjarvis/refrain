@@ -1831,6 +1831,9 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.shippingDetailScroll = 0
 			case "pgdown", "ctrl+d":
 				a.shippingDetailScroll += halfPane
+				if a.shippingDetailScroll < 0 { // overflow guard only; render clamps to real max
+					a.shippingDetailScroll = 0
+				}
 			case "pgup", "ctrl+u":
 				a.shippingDetailScroll -= halfPane
 				if a.shippingDetailScroll < 0 {
@@ -4558,7 +4561,7 @@ func buildFeedbackPrompt(entry *prCacheEntry, triage map[string]*feedbackTriageE
 
 	for _, item := range items {
 		// Apply actionability filter.
-		if !item.IsInline && !actionableThreads[item.Reviewer] {
+		if !actionableThreads[item.Reviewer] {
 			continue
 		}
 		key := feedbackItemKey(item)
