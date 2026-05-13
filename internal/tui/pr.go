@@ -18,7 +18,7 @@ func rowStatePhrase(entry *prCacheEntry) string {
 	if isMergeReady(entry) {
 		return "Ready"
 	}
-	if !entry.pr.Mergeable {
+	if entry.pr.MergeableState == "dirty" {
 		return "Conflicts"
 	}
 	if entry.reviews != nil && entry.reviews.State == "changes_requested" {
@@ -98,7 +98,7 @@ func isMergeReady(entry *prCacheEntry) bool {
 	// is still initializing (API may briefly return zero check runs).
 	checksOK := entry.checks != nil && entry.checks.State == "success" && entry.checks.Total > 0
 	reviewsOK := entry.reviews != nil && entry.reviews.State == "approved"
-	mergeable := entry.pr.Mergeable
+	mergeable := entry.pr.MergeableState == "clean"
 	return checksOK && reviewsOK && mergeable
 }
 

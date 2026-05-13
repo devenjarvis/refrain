@@ -236,7 +236,7 @@ func TestRowStatePhrase(t *testing.T) {
 		{
 			name: "merge ready",
 			entry: &prCacheEntry{
-				pr:      &github.PRState{Mergeable: true},
+				pr:      &github.PRState{MergeableState: "clean"},
 				checks:  &github.CheckStatus{State: "success", Total: 1, Passed: 1},
 				reviews: &github.ReviewStatus{State: "approved", Approved: 1},
 			},
@@ -245,7 +245,7 @@ func TestRowStatePhrase(t *testing.T) {
 		{
 			name: "conflicts",
 			entry: &prCacheEntry{
-				pr:      &github.PRState{Mergeable: false},
+				pr:      &github.PRState{MergeableState: "dirty"},
 				checks:  &github.CheckStatus{State: "success", Total: 1, Passed: 1},
 				reviews: &github.ReviewStatus{State: "approved", Approved: 1},
 			},
@@ -254,7 +254,7 @@ func TestRowStatePhrase(t *testing.T) {
 		{
 			name: "changes requested",
 			entry: &prCacheEntry{
-				pr:      &github.PRState{Mergeable: true},
+				pr:      &github.PRState{MergeableState: "clean"},
 				reviews: &github.ReviewStatus{State: "changes_requested"},
 			},
 			want: "Changes requested",
@@ -262,7 +262,7 @@ func TestRowStatePhrase(t *testing.T) {
 		{
 			name: "ci failing",
 			entry: &prCacheEntry{
-				pr:     &github.PRState{Mergeable: true},
+				pr:     &github.PRState{MergeableState: "clean"},
 				checks: &github.CheckStatus{State: "failure", Failed: 2, Total: 5},
 			},
 			want: "CI 2/5 failing",
@@ -270,10 +270,25 @@ func TestRowStatePhrase(t *testing.T) {
 		{
 			name: "waiting on ci",
 			entry: &prCacheEntry{
-				pr:     &github.PRState{Mergeable: true},
+				pr:     &github.PRState{MergeableState: "clean"},
 				checks: &github.CheckStatus{State: "pending"},
 			},
 			want: "Waiting on CI",
+		},
+		{
+			name: "unknown falls through to CI pending",
+			entry: &prCacheEntry{
+				pr:     &github.PRState{MergeableState: "unknown"},
+				checks: &github.CheckStatus{State: "pending"},
+			},
+			want: "Waiting on CI",
+		},
+		{
+			name: "unknown with no other signal",
+			entry: &prCacheEntry{
+				pr: &github.PRState{MergeableState: "unknown"},
+			},
+			want: "",
 		},
 	}
 	for _, tc := range cases {
@@ -289,7 +304,7 @@ func TestRowStatePhrase(t *testing.T) {
 // TestPrIndicator_StatePhrase verifies that prIndicator surfaces the state phrase.
 func TestPrIndicator_StatePhrase(t *testing.T) {
 	entry := &prCacheEntry{
-		pr:     &github.PRState{Number: 7, Mergeable: true},
+		pr:     &github.PRState{Number: 7, MergeableState: "clean"},
 		checks: &github.CheckStatus{State: "failure", Failed: 1, Total: 3},
 	}
 	ind := prIndicator(entry)
