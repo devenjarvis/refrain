@@ -370,6 +370,22 @@ func (m *planEditorModel) rebuildSections() {
 	m.folds = newFolds
 }
 
+// rebuildSectionsPreservingFolds rebuilds section boundaries from the current
+// textarea value, restoring fold state for any heading that survives the edit.
+// New headings receive the default fold policy; vanished headings are dropped.
+func (m *planEditorModel) rebuildSectionsPreservingFolds() {
+	savedFolds := make(map[string]bool, len(m.folds))
+	for heading, folded := range m.folds {
+		savedFolds[heading] = folded
+	}
+	m.rebuildSections()
+	for _, s := range m.sections {
+		if saved, ok := savedFolds[s.heading]; ok {
+			m.folds[s.heading] = saved
+		}
+	}
+}
+
 // splitPlanLines splits plan content on "\n", matching mdrender's convention.
 func splitPlanLines(plan string) []string {
 	if plan == "" {
@@ -509,6 +525,9 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 	case "]":
 		m.displayLines() // ensure sectionDisplayStart is populated
 		for _, start := range m.sectionDisplayStart {
+			// Strict > so that pressing ] from exactly on a heading advances
+			// to the *next* heading. Two presses from the same heading are a
+			// no-op on the second press, which is intentional.
 			if start > m.scrollOff {
 				m.scrollOff = start
 				m.clampScroll()
@@ -603,6 +622,7 @@ func (m *planEditorModel) updateEdit(msg tea.KeyPressMsg) tea.Cmd {
 		// the user can scroll and approve without losing typed content. The
 		// dirty indicator stays visible until ctrl+s or `a` writes to disk.
 		m.textarea.Blur()
+		m.rebuildSectionsPreservingFolds()
 		m.mode = planEditorModeScroll
 		return nil
 	case "ctrl+s":
@@ -618,6 +638,7 @@ func (m *planEditorModel) updateEdit(msg tea.KeyPressMsg) tea.Cmd {
 		m.dirty = false
 		m.saveNote = "saved"
 		m.saveAt = time.Now()
+		m.rebuildSectionsPreservingFolds()
 		sessID := m.sess.ID
 		return func() tea.Msg { return planEditorSavedMsg{sessionID: sessID} }
 	}
@@ -766,7 +787,7 @@ func (m *planEditorModel) displayLines() []string {
 	ctxs := m.renderer.LineContexts(v)
 	sectionStarts := make([]int, len(m.sections))
 
-	var out []string
+	out := make([]string, 0, len(srcLines))
 
 	// Preamble: source lines before the first section heading.
 	preambleEnd := m.sections[0].headingLine

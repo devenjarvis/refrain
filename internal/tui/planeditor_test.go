@@ -435,7 +435,7 @@ func TestPlanEditor_TabTogglesFoldAtViewportTop(t *testing.T) {
 	specDisplayLine := -1
 	for i, l := range lines {
 		stripped := testutil.StripANSI(l)
-		if strings.Contains(stripped, "Spec") && strings.Contains(stripped, "##") {
+		if strings.Contains(stripped, "Spec") && !strings.Contains(stripped, "Goal") {
 			specDisplayLine = i
 			break
 		}
