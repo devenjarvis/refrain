@@ -406,7 +406,8 @@ func TestRenderQueueRow_RepoPrefix(t *testing.T) {
 
 // TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine verifies
 // that a Building session with a plan and open tasks produces a 4-line card
-// where line 2 shows "▸ first open task" (bold) and line 3 shows "↳ next: second open".
+// where line 2 shows the first open task (bold, no leading ▸) and line 3
+// shows "next: second open" (no leading ↳).
 func TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
@@ -428,15 +429,18 @@ func TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine(t *testing
 		t.Fatalf("expected 4-line card for plan-backed building session, got %d lines: %v", len(card), card)
 	}
 	line2 := ansi.Strip(card[1])
-	if !strings.Contains(line2, "▸") {
-		t.Errorf("line 2 should contain ▸ prefix, got %q", line2)
+	if strings.Contains(line2, "▸") {
+		t.Errorf("line 2 must not contain ▸ prefix, got %q", line2)
 	}
 	if !strings.Contains(line2, "write tests") {
 		t.Errorf("line 2 should contain first open task, got %q", line2)
 	}
 	line3 := ansi.Strip(card[2])
-	if !strings.Contains(line3, "↳ next:") {
-		t.Errorf("line 3 should contain ↳ next: prefix, got %q", line3)
+	if strings.Contains(line3, "↳") {
+		t.Errorf("line 3 must not contain ↳ glyph, got %q", line3)
+	}
+	if !strings.Contains(line3, "next:") {
+		t.Errorf("line 3 should contain \"next:\" prefix, got %q", line3)
 	}
 	if !strings.Contains(line3, "open PR") {
 		t.Errorf("line 3 should contain second open task, got %q", line3)
@@ -479,8 +483,8 @@ func TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan(t *testing.
 }
 
 // TestRenderFocusSessionCard_PlanWithSingleOpenTaskDropsNextSuffix verifies
-// that when only one open task remains, line 2 shows "▸ last task" and line 3
-// is blank (no "↳ next:" suffix), card is exactly 4 lines.
+// that when only one open task remains, line 2 shows the last task (bold, no ▸)
+// and line 3 is blank (no "next:" suffix), card is exactly 4 lines.
 func TestRenderFocusSessionCard_PlanWithSingleOpenTaskDropsNextSuffix(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)

@@ -634,8 +634,8 @@ func (d dashboardModel) sessionStatusGlyph(sess *agent.Session) (glyph string, c
 // brightens the stripe to ColorSecondary.
 //
 // Line 1: <stripe> <glyph> <name (bold, ColorText)>   ... right-aligned <status badge/progress bar>
-// Line 2: <stripe>   ▸ <active task (bold)>   (building) | <description (muted/italic)> (planning/other)
-// Line 3: <stripe>   ↳ next: <next task (muted-italic)>   (building) | <description line 2 or empty>
+// Line 2: <stripe>   <active task (bold)>   (building) | <description (muted/italic)> (planning/other)
+// Line 3: <stripe>   next: <next task (muted-italic)>   (building) | <description line 2 or empty>
 // Line 4: <stripe>   [⎇ branch] [· detail]      ... right-aligned ⏱ <elapsed>
 func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName string, selected bool, width int) []string {
 	stripeColor := d.sessionFocusStripeColor(sess)
@@ -705,26 +705,21 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 			line3 = stripe + indent + descStyle.Render(descLine2)
 		}
 	} else if buildingPhase {
-		// Active task: ▸ <bold text>. Subtract 2 cells for the "▸ " prefix so
-		// the total line stays within descBudget.
+		// Active task: bold text, no leading glyph.
 		activeLine := ""
 		if descLine1 != "" {
-			activeBudget := descBudget - 2
-			if activeBudget < 0 {
-				activeBudget = 0
-			}
-			activeLine = lipgloss.NewStyle().Bold(true).Render("▸ " + truncateVisible(descLine1, activeBudget))
+			activeLine = lipgloss.NewStyle().Bold(true).Render(truncateVisible(descLine1, descBudget))
 		}
 		line2 = stripe + indent + activeLine
-		// Next task: ↳ next: <muted-italic text>. Subtract 8 cells for "↳ next: ".
+		// Next task: "next: <muted-italic text>". Subtract 6 cells for "next: ".
 		line3 = stripe + indent
 		if descLine2 != "" {
-			nextBudget := descBudget - 8
+			nextBudget := descBudget - 6
 			if nextBudget < 0 {
 				nextBudget = 0
 			}
 			nextStyle := lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
-			line3 = stripe + indent + nextStyle.Render("↳ next: "+truncateVisible(descLine2, nextBudget))
+			line3 = stripe + indent + nextStyle.Render("next: "+truncateVisible(descLine2, nextBudget))
 		}
 	} else {
 		line2 = stripe + indent + StyleSubtle.Render(descLine1)
