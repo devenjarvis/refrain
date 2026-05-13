@@ -2953,7 +2953,7 @@ func TestShippingPanel_MKeyGatedOnReady(t *testing.T) {
 	app.shippingSession = sess
 	app.dashboard.panelFocus = focusShipping
 	app.prCache = map[string]*prCacheEntry{
-		sess.ID: {pr: &github.PRState{Number: 1, Mergeable: false}},
+		sess.ID: {pr: &github.PRState{Number: 1, MergeableState: "dirty"}},
 	}
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
