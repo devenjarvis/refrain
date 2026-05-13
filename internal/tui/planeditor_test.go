@@ -334,6 +334,46 @@ func TestPlanEditor_ParsesCanonicalSectionsAndAppliesDefaults(t *testing.T) {
 	}
 }
 
+// TestPlanEditor_FoldedSectionsCollapseToMarker verifies that a collapsed
+// section renders as a single line containing the ▶ glyph, the heading, and a
+// "N lines" suffix, while its content is hidden; expanded sections show their
+// content and use the ▼ glyph.
+func TestPlanEditor_FoldedSectionsCollapseToMarker(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nGoal body\n\n## Context\nctx line 1\nctx line 2\nctx line 3\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+
+	rendered := testutil.StripANSI(strings.Join(editor.displayLines(), "\n"))
+
+	// Goal (H1) is expanded — body should be visible and ▼ present.
+	if !strings.Contains(rendered, "Goal body") {
+		t.Errorf("Goal body missing from rendered output:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "▼") {
+		t.Errorf("expand glyph ▼ missing from rendered output:\n%s", rendered)
+	}
+	// Context (H2) is collapsed by default — heading + lines count visible, content hidden.
+	if !strings.Contains(rendered, "▶") {
+		t.Errorf("collapse glyph ▶ missing from rendered output:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Context") {
+		t.Errorf("Context heading missing from rendered output:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "3 lines") {
+		t.Errorf("line-count suffix '3 lines' missing:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "ctx line 1") {
+		t.Errorf("collapsed section content 'ctx line 1' should be hidden:\n%s", rendered)
+	}
+}
+
 // TestPlanEditor_ScrollModeStylesHeadings asserts that scroll-mode rendering
 // actually emits ANSI styling for known markdown constructs. Without this,
 // a regression that silently nil-checks the renderer or short-circuits

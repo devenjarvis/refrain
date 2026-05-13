@@ -2,6 +2,7 @@ package tui
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -126,8 +127,12 @@ type planEditorModel struct {
 	// foldsHash is included in the key because a fold toggle changes the
 	// displayed lines without changing the plan content; missing this would
 	// return stale lines from cache after a toggle.
-	displayCache    []string
-	displayCacheKey displayCacheKey
+	//
+	// sectionDisplayStart[i] is the display-line index where sections[i]'s
+	// heading line appears. Recomputed with displayCache.
+	displayCache         []string
+	displayCacheKey      displayCacheKey
+	sectionDisplayStart  []int
 
 	// Planner question state. When questionAnswerCh is non-nil, the editor is
 	// in planEditorModeQuestion and mirrors the question text + a single-line
@@ -614,23 +619,133 @@ func (m *planEditorModel) emitClose() tea.Cmd {
 	return func() tea.Msg { return planEditorCloseMsg{sessionID: sessID} }
 }
 
-// displayLines returns the post-wrap, post-style ANSI display lines for the
-// current textarea content at the current width. Result is cached on the
-// model keyed by (width, valueHash); the renderer itself caches at a coarser
-// grain so cross-frame reuse is cheap even when the editor is reconstructed.
+// foldsHashFor computes a stable hash over the current fold state so it can be
+// included in displayCacheKey. The hash is built from "heading|folded\n" pairs
+// in section order so that reordering is detectable (though the canonical plan
+// format has unique names, reordering is still a content change).
+func (m *planEditorModel) foldsHashFor() [32]byte {
+	var sb strings.Builder
+	for _, s := range m.sections {
+		folded := m.folds[s.heading]
+		if folded {
+			fmt.Fprintf(&sb, "%s|1\n", s.heading)
+		} else {
+			fmt.Fprintf(&sb, "%s|0\n", s.heading)
+		}
+	}
+	return sha256.Sum256([]byte(sb.String()))
+}
+
+// invalidateDisplayCache zeroes the display cache key so the next displayLines
+// call rebuilds from scratch.
+func (m *planEditorModel) invalidateDisplayCache() {
+	m.displayCacheKey = displayCacheKey{}
+	m.displayCache = nil
+	m.sectionDisplayStart = nil
+}
+
+// displayLines returns the fold-aware, post-wrap, post-style ANSI display lines
+// for the current textarea content at the current width. Collapsed sections
+// appear as a single line with ▶ glyph, heading text, and hidden-line count.
+// Expanded sections prepend ▼ to the heading line. Preamble lines (before the
+// first H1/H2) are always shown.
+//
+// Result is cached on (width, valueHash, foldsHash); the renderer itself caches
+// at a coarser grain so cross-frame reuse is cheap.
+//
+// sectionDisplayStart is populated as a side-effect of building the cache so
+// navigation ([ and ]) and tab-fold detection can look up section positions
+// without re-scanning.
 func (m *planEditorModel) displayLines() []string {
 	v := m.textarea.Value()
 	if v == "" {
 		return nil
 	}
 	w := m.contentWidth()
-	key := displayCacheKey{width: w, valueHash: sha256.Sum256([]byte(v))}
+	key := displayCacheKey{
+		width:     w,
+		valueHash: sha256.Sum256([]byte(v)),
+		foldsHash: m.foldsHashFor(),
+	}
 	if m.displayCache != nil && m.displayCacheKey == key {
 		return m.displayCache
 	}
-	out := m.renderer.RenderLines(v, w)
+
+	// If there are no sections at all, fall back to the plain renderer path.
+	if len(m.sections) == 0 {
+		out := m.renderer.RenderLines(v, w)
+		m.displayCache = out
+		m.displayCacheKey = key
+		m.sectionDisplayStart = nil
+		return out
+	}
+
+	srcLines := splitPlanLines(v)
+	ctxs := m.renderer.LineContexts(v)
+	sectionStarts := make([]int, len(m.sections))
+
+	var out []string
+
+	// Preamble: source lines before the first section heading.
+	preambleEnd := m.sections[0].headingLine
+	for i := 0; i < preambleEnd && i < len(srcLines); i++ {
+		var ctx mdrender.LineCtx
+		if i < len(ctxs) {
+			ctx = ctxs[i]
+		}
+		out = append(out, m.renderer.StyleLine(srcLines[i], ctx, w)...)
+	}
+
+	// Sections.
+	for si, s := range m.sections {
+		sectionStarts[si] = len(out)
+		folded := m.folds[s.heading]
+
+		// Render the heading line with ▼/▶ glyph.
+		var headingCtx mdrender.LineCtx
+		if s.headingLine < len(ctxs) {
+			headingCtx = ctxs[s.headingLine]
+		}
+		headingSegs := m.renderer.StyleLine(srcLines[s.headingLine], headingCtx, w)
+		if len(headingSegs) == 0 {
+			headingSegs = []string{""}
+		}
+		glyph := StyleSubtle.Render("▼ ")
+		if folded {
+			glyph = StyleSubtle.Render("▶ ")
+		}
+		headingLine := glyph + headingSegs[0]
+		if folded {
+			// Count hidden source lines, excluding a trailing empty line that is
+			// an artifact of the final \n in well-formed plan files.
+			hiddenSlice := srcLines[s.headingLine+1 : s.nextLine]
+			hiddenCount := len(hiddenSlice)
+			if hiddenCount > 0 && hiddenSlice[hiddenCount-1] == "" {
+				hiddenCount--
+			}
+			headingLine += StyleSubtle.Render(fmt.Sprintf("  · %d lines", hiddenCount))
+		}
+		out = append(out, headingLine)
+		// Additional wrapped heading segments (rare but possible on narrow terminals).
+		out = append(out, headingSegs[1:]...)
+
+		if folded {
+			continue
+		}
+
+		// Expanded: emit all content lines within this section.
+		for i := s.headingLine + 1; i < s.nextLine && i < len(srcLines); i++ {
+			var ctx mdrender.LineCtx
+			if i < len(ctxs) {
+				ctx = ctxs[i]
+			}
+			out = append(out, m.renderer.StyleLine(srcLines[i], ctx, w)...)
+		}
+	}
+
 	m.displayCache = out
 	m.displayCacheKey = key
+	m.sectionDisplayStart = sectionStarts
 	return out
 }
 
