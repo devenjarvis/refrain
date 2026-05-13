@@ -249,7 +249,7 @@ func TestRenderReviewPanel_TwoPaneLayout(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 140, 30, 0, false)
+	output := renderReviewPanel(sess, entry, 140, 30, 0, false, 0)
 
 	if !strings.Contains(output, "PLAN TASKS") {
 		t.Error("must contain PLAN TASKS from left pane")
@@ -286,7 +286,7 @@ func TestRenderReviewPanel_NarrowWidthStacks(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 70, 30, 0, false)
+	output := renderReviewPanel(sess, entry, 70, 30, 0, false, 0)
 
 	if !strings.Contains(output, "PLAN TASKS") {
 		t.Error("must contain PLAN TASKS from list pane")
@@ -316,7 +316,7 @@ func TestRenderReviewPanel_ShowsOriginalPrompt(t *testing.T) {
 		aggregate: &git.DiffStats{Files: 2, Insertions: 213, Deletions: 34},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0)
 
 	if !strings.Contains(output, "Fix the auth bug") {
 		t.Error("review panel must show the original prompt")
@@ -331,7 +331,7 @@ func TestRenderReviewPanel_NilDiffEntry(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 
 	// nil entry — should not panic
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0)
 	if !strings.Contains(output, "Fix the auth bug") {
 		t.Error("must still show prompt even with nil diff entry")
 	}
@@ -355,7 +355,7 @@ func TestRenderReviewPanel_UsesThemeColors(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 30, 0, false)
+	output := renderReviewPanel(sess, entry, 120, 30, 0, false, 0)
 
 	// The pass verdict icon should carry the ColorSuccess ANSI escape.
 	expectedPrefix := StyleSuccess.Render("✓")
@@ -417,7 +417,7 @@ func TestRenderReviewPanel_NoPlanShowsOverview(t *testing.T) {
 		aggregate: &git.DiffStats{Files: 2, Insertions: 30, Deletions: 2},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 30, 0, false)
+	output := renderReviewPanel(sess, entry, 120, 30, 0, false, 0)
 
 	if !strings.Contains(output, "Overview") {
 		t.Error("must show 'Overview' row in list pane for no-plan session")
@@ -457,7 +457,7 @@ func TestRenderReviewPanel_FooterAdvertisesAllActions(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0)
 
 	for _, want := range []string{
 		"open PR",
@@ -500,7 +500,7 @@ func TestRenderReviewPanel_TaskListShown(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0)
 
 	if !strings.Contains(output, "PLAN TASKS") {
 		t.Error("task list view must show PLAN TASKS header")
@@ -708,7 +708,7 @@ func TestRenderReviewPanel_NoDiffFoundBadge(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0)
 
 	if !strings.Contains(output, "Write tests") {
 		t.Error("must render a row for task 2 even though it has no commits")
@@ -907,7 +907,7 @@ func TestRenderReviewPanel_PRDraftInFlight(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, true)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, true, 0)
 
 	if !strings.Contains(output, "Pushing branch and drafting PR") {
 		t.Error("in-flight state must show draft spinner line")
@@ -917,5 +917,74 @@ func TestRenderReviewPanel_PRDraftInFlight(t *testing.T) {
 	}
 	if strings.Contains(output, "create or open PR") {
 		t.Error("in-flight state must not show normal p hint")
+	}
+}
+
+// TestRenderReviewPanel_InlineDiffPresent verifies that when a task group has a
+// non-empty rawDiff, the wide-mode review panel renders an inline diff showing
+// both the verdict label and a diff hunk header.
+func TestRenderReviewPanel_InlineDiffPresent(t *testing.T) {
+	rawDiff := "diff --git a/internal/auth/handler.go b/internal/auth/handler.go\n" +
+		"index 1234567..abcdefg 100644\n" +
+		"--- a/internal/auth/handler.go\n" +
+		"+++ b/internal/auth/handler.go\n" +
+		"@@ -10,5 +10,6 @@ func Handle(w http.ResponseWriter, r *http.Request) {\n" +
+		" \ttoken := r.Header.Get(\"Authorization\")\n" +
+		" \tif token == \"\" {\n" +
+		" \t\thttp.Redirect(w, r, \"/login\", http.StatusFound)\n" +
+		"+\t\treturn\n" +
+		" \t}\n" +
+		" }\n"
+	sess := agent.NewSessionForTest("sess-diff", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth redirect")
+	sess.MarkDone()
+
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
+			stats:     &git.DiffStats{Files: 1, Insertions: 1, Deletions: 0},
+			rawDiff:   rawDiff,
+		}},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}},
+		},
+	}
+
+	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0)
+
+	if !strings.Contains(output, "pass") {
+		t.Error("must contain verdict label 'pass'")
+	}
+	if !strings.Contains(output, "@@") {
+		t.Errorf("inline diff must contain hunk header '@@'; got:\n%s", output)
+	}
+}
+
+// TestRenderReviewPanel_NoDiffPlaceholder verifies that when a task group has an
+// empty rawDiff, the inline diff area shows the "(no diff for this task)" placeholder.
+func TestRenderReviewPanel_NoDiffPlaceholder(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-nodiff", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth redirect")
+	sess.MarkDone()
+
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
+			stats:     &git.DiffStats{Files: 0, Insertions: 0, Deletions: 0},
+			rawDiff:   "",
+		}},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictNoDiff},
+		},
+	}
+
+	// Must not panic and must show the placeholder.
+	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0)
+	if !strings.Contains(output, "(no diff for this task)") {
+		t.Errorf("must show '(no diff for this task)' placeholder; got:\n%s", output)
 	}
 }

@@ -10,7 +10,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/baton/internal/agent"
+	"github.com/devenjarvis/baton/internal/diffmodel"
 	"github.com/devenjarvis/baton/internal/git"
+	"github.com/devenjarvis/baton/internal/tui/diff"
 )
 
 // spinnerFrames is the braille spinner sequence used while a verdict is running.
@@ -130,7 +132,8 @@ func renderReviewHeader(sess *agent.Session, width int) []string {
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
 // cursor is the currently selected task row index (0-based among all task rows).
 // prDraftInFlight, when true, shows a spinner status line and disables the p hint.
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool) string {
+// diffScrollOffset is the current Y scroll offset of the inline diff viewport (0 = top).
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, diffScrollOffset int) string {
 	// Header (3–4 lines depending on prompt length).
 	headerLines := renderReviewHeader(sess, width)
 
@@ -176,7 +179,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 			rightW = 20
 		}
 		leftPaneLines := renderTaskListPane(entry, leftW, bodyH, cursor)
-		rightPaneLines := renderTaskDetailPane(entry, cursor, rightW, bodyH)
+		rightPaneLines := buildRightPane(entry, cursor, rightW, bodyH, diffScrollOffset)
 
 		gutter := " " + StyleSubtle.Render("│") + " "
 		maxRows := len(leftPaneLines)
@@ -549,12 +552,107 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 		}
 	}
 
-	// (6) Diff hint.
-	if group.rawDiff != "" {
-		lines = append(lines, "", StyleSubtle.Render("enter — open task diff"))
+	return capLines(lines, height)
+}
+
+// renderTaskSummaryPane renders the summary portion of the right pane (verdict,
+// rationale, files, commits) capped to summaryH lines. It is the upper half of
+// the right pane in wide mode; the inline diff viewport occupies the lower half.
+// This is identical to renderTaskDetailPane but without the "enter — open task diff" hint.
+func renderTaskSummaryPane(entry *reviewDiffEntry, cursor, width, summaryH int) []string {
+	return renderTaskDetailPane(entry, cursor, width, summaryH)
+}
+
+// renderAllFilesUnified renders every file in a diffmodel.Model as unified
+// (non-side-by-side) text at the given width, with files joined by newlines.
+func renderAllFilesUnified(m *diffmodel.Model, width int) string {
+	if m == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(m.Files))
+	for i := range m.Files {
+		r := diff.NewRenderer(&m.Files[i])
+		parts = append(parts, r.Render(width, false))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// renderInlineDiffPane renders the diff body for the cursor task's rawDiff,
+// windowed by scrollOffset and capped to height. Returns a placeholder line
+// when the diff is empty.
+func renderInlineDiffPane(entry *reviewDiffEntry, cursor, width, height, scrollOffset int) []string {
+	rawDiff := ""
+	if entry != nil {
+		group := reviewTaskGroupAtCursor(entry, cursor)
+		// For the no-plan overview path (no tasks), fall back to the first group.
+		if group == nil && len(entry.groups) > 0 && len(entry.tasks) == 0 {
+			group = &entry.groups[0]
+		}
+		if group != nil {
+			rawDiff = group.rawDiff
+		}
 	}
 
-	return capLines(lines, height)
+	const placeholder = "(no diff for this task)"
+	if rawDiff == "" {
+		if height <= 0 {
+			return []string{StyleSubtle.Render(placeholder)}
+		}
+		out := make([]string, height)
+		out[0] = StyleSubtle.Render(placeholder)
+		return out
+	}
+
+	m, err := diffmodel.Parse(rawDiff)
+	if err != nil || m == nil || len(m.Files) == 0 {
+		out := make([]string, max(1, height))
+		out[0] = StyleSubtle.Render(placeholder)
+		return out
+	}
+
+	content := renderAllFilesUnified(m, width)
+	allLines := strings.Split(content, "\n")
+
+	if scrollOffset < 0 {
+		scrollOffset = 0
+	}
+	if scrollOffset >= len(allLines) {
+		scrollOffset = max(0, len(allLines)-1)
+	}
+	end := scrollOffset + height
+	if end > len(allLines) {
+		end = len(allLines)
+	}
+	result := allLines[scrollOffset:end]
+	// Pad to height so the pane always occupies its allocated rows.
+	for len(result) < height {
+		result = append(result, "")
+	}
+	return result
+}
+
+// buildRightPane composes the right pane for wide mode: summary on top,
+// a horizontal rule, then the inline diff below.
+func buildRightPane(entry *reviewDiffEntry, cursor, width, bodyH, diffScrollOffset int) []string {
+	if entry == nil {
+		return []string{StyleSubtle.Render("loading…")}
+	}
+	maxSummaryH := bodyH / 3
+	if maxSummaryH < 4 {
+		maxSummaryH = 4
+	}
+	summaryLines := renderTaskSummaryPane(entry, cursor, width, maxSummaryH)
+	divider := StyleSubtle.Render(strings.Repeat("─", width))
+	diffH := bodyH - len(summaryLines) - 1
+	if diffH < 1 {
+		diffH = 1
+	}
+	diffLines := renderInlineDiffPane(entry, cursor, width, diffH, diffScrollOffset)
+	result := make([]string, 0, len(summaryLines)+1+len(diffLines))
+	result = append(result, summaryLines...)
+	result = append(result, divider)
+	result = append(result, diffLines...)
+	return result
 }
 
 // capLines returns lines capped to height, with a trailing truncation note if needed.

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -195,6 +196,8 @@ type App struct {
 	reviewDiffCache        map[string]*reviewDiffEntry                // keyed by session ID
 	reviewSession          *agent.Session                             // session currently open in review panel
 	reviewTaskCursor       int                                        // selected task row in the review task list
+	reviewDiffVP           viewport.Model                             // scroll state for the inline diff viewport
+	reviewDiffCacheByTask  map[int]*diffmodel.Model                   // parsed diff per task index; cleared with reviewDiffCache
 	shippingSession        *agent.Session                             // session currently open in shipping panel
 	feedbackTriage         map[string]map[string]*feedbackTriageEntry // keyed by sessionID → itemKey
 	shippingFeedbackCursor int                                        // cursor row in the feedback list pane
@@ -250,7 +253,8 @@ func NewApp() App {
 		resolvedCache:   make(map[string]config.ResolvedSettings),
 		lastKnownStatus: make(map[string]agent.Status),
 		diffStatsCache:  make(map[string]*diffStatsEntry),
-		reviewDiffCache: make(map[string]*reviewDiffEntry),
+		reviewDiffCache:       make(map[string]*reviewDiffEntry),
+		reviewDiffCacheByTask: make(map[int]*diffmodel.Model),
 		prCache:         make(map[string]*prCacheEntry),
 		prPollStates:    make(map[string]*prSessionState),
 		closingAgents:   make(map[string]bool),
@@ -3797,7 +3801,7 @@ func (a App) View() tea.View {
 			if a.prComposeModal.Active() {
 				panelStr = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
 			} else {
-				panelStr = renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID)
+				panelStr = renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID, a.reviewDiffVP.YOffset())
 			}
 			v := tea.NewView(panelStr)
 			v.AltScreen = true
