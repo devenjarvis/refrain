@@ -475,6 +475,34 @@ func TestGetReviewThreads_CommentOnlyReviewer(t *testing.T) {
 	}
 }
 
+func TestPrToState_MergeableState(t *testing.T) {
+	t.Run("dirty state", func(t *testing.T) {
+		pr := &gh.PullRequest{
+			Number:         gh.Ptr(42),
+			State:          gh.Ptr("open"),
+			MergeableState: gh.Ptr("dirty"),
+			Head:           &gh.PullRequestBranch{Ref: gh.Ptr("feat")},
+			Base:           &gh.PullRequestBranch{Ref: gh.Ptr("main")},
+		}
+		state := prToState(pr)
+		if state.MergeableState != "dirty" {
+			t.Errorf("MergeableState = %q, want \"dirty\"", state.MergeableState)
+		}
+	})
+	t.Run("nil pointer yields empty string", func(t *testing.T) {
+		pr := &gh.PullRequest{
+			Number: gh.Ptr(1),
+			State:  gh.Ptr("open"),
+			Head:   &gh.PullRequestBranch{Ref: gh.Ptr("feat")},
+			Base:   &gh.PullRequestBranch{Ref: gh.Ptr("main")},
+		}
+		state := prToState(pr)
+		if state.MergeableState != "" {
+			t.Errorf("MergeableState = %q, want \"\"", state.MergeableState)
+		}
+	})
+}
+
 func TestMergePR_DefaultsToSquash(t *testing.T) {
 	var called bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

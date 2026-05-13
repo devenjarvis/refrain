@@ -512,19 +512,14 @@ func prToState(pr *gh.PullRequest) *PRState {
 		state = "merged"
 	}
 
-	mergeable := false
-	if pr.Mergeable != nil {
-		mergeable = *pr.Mergeable
-	}
-
 	return &PRState{
-		Number:     pr.GetNumber(),
-		Title:      pr.GetTitle(),
-		URL:        pr.GetHTMLURL(),
-		State:      state,
-		Mergeable:  mergeable,
-		Draft:      pr.GetDraft(),
-		HeadBranch: pr.GetHead().GetRef(),
-		BaseBranch: pr.GetBase().GetRef(),
+		Number:         pr.GetNumber(),
+		Title:          pr.GetTitle(),
+		URL:            pr.GetHTMLURL(),
+		State:          state,
+		MergeableState: pr.GetMergeableState(),
+		Draft:          pr.GetDraft(),
+		HeadBranch:     pr.GetHead().GetRef(),
+		BaseBranch:     pr.GetBase().GetRef(),
 	}
 }
