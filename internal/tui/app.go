@@ -256,6 +256,7 @@ func NewApp() App {
 		lastKnownStatus:       make(map[string]agent.Status),
 		diffStatsCache:        make(map[string]*diffStatsEntry),
 		reviewDiffCache:       make(map[string]*reviewDiffEntry),
+		reviewDiffVP:          viewport.New(),
 		reviewDiffCacheByTask: make(map[int]*diffmodel.Model),
 		prCache:               make(map[string]*prCacheEntry),
 		prPollStates:          make(map[string]*prSessionState),
@@ -3837,7 +3838,7 @@ func (a App) View() tea.View {
 			} else if a.prComposeModal.Active() {
 				panelStr = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
 			} else {
-				panelStr = renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID, a.reviewDiffVP.YOffset())
+				panelStr = renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID, a.reviewDiffVP.View())
 			}
 			v := tea.NewView(panelStr)
 			v.AltScreen = true
@@ -5108,8 +5109,8 @@ func (a App) fetchReviewDiffCmd(sess *agent.Session) tea.Cmd {
 // correctly. Call this whenever the task cursor changes or when the review panel
 // is first entered. Also resets the scroll to the top.
 func (a *App) refreshReviewDiffViewport() {
-	// Compute diffH using the same layout formula as buildRightPane so that
-	// PageDown/PageUp clamp correctly instead of operating on a zero-height viewport.
+	// Compute layout dimensions mirroring renderReviewPanel's wide-mode formula so
+	// that SetHeight/SetWidth are correct and View()/PageDown/PageUp clamp properly.
 	headerLines := len(renderReviewHeader(a.reviewSession, a.width))
 	footerH := 3
 	bodyH := a.height - headerLines - footerH
@@ -5124,7 +5125,12 @@ func (a *App) refreshReviewDiffViewport() {
 	if diffH < 1 {
 		diffH = 1
 	}
+	rightW := a.width*6/10 - 5
+	if rightW < 20 {
+		rightW = 20
+	}
 	a.reviewDiffVP.SetHeight(diffH)
+	a.reviewDiffVP.SetWidth(rightW)
 	a.reviewDiffVP.GotoTop()
 	if a.reviewSession == nil {
 		a.reviewDiffVP.SetContent("")
@@ -5151,11 +5157,6 @@ func (a *App) refreshReviewDiffViewport() {
 			return
 		}
 		a.reviewDiffCacheByTask[idx] = m
-	}
-	// Compute right pane width: mirrors renderReviewPanel's wide-mode formula.
-	rightW := a.width*6/10 - 5
-	if rightW < 20 {
-		rightW = 20
 	}
 	a.reviewDiffVP.SetContent(renderAllFilesUnified(m, rightW))
 }

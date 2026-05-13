@@ -133,8 +133,10 @@ func renderReviewHeader(sess *agent.Session, width int) []string {
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
 // cursor is the currently selected task row index (0-based among all task rows).
 // prDraftInFlight, when true, shows a spinner status line and disables the p hint.
-// diffScrollOffset is the current Y scroll offset of the inline diff viewport (0 = top).
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, diffScrollOffset int) string {
+// vpView is the pre-rendered viewport.View() string for the inline diff. When
+// non-empty it is used directly; when empty (tests / no data) renderInlineDiffPane
+// is called as a fallback with scrollOffset=0.
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, vpView string) string {
 	// Header (3–4 lines depending on prompt length).
 	headerLines := renderReviewHeader(sess, width)
 
@@ -180,7 +182,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 			rightW = 20
 		}
 		leftPaneLines := renderTaskListPane(entry, leftW, bodyH, cursor)
-		rightPaneLines := buildRightPane(entry, cursor, rightW, bodyH, diffScrollOffset)
+		rightPaneLines := buildRightPane(entry, cursor, rightW, bodyH, vpView)
 
 		gutter := " " + StyleSubtle.Render("│") + " "
 		maxRows := len(leftPaneLines)
@@ -623,7 +625,10 @@ func renderInlineDiffPane(entry *reviewDiffEntry, cursor, width, height, scrollO
 
 // buildRightPane composes the right pane for wide mode: summary on top,
 // a horizontal rule, then the inline diff below.
-func buildRightPane(entry *reviewDiffEntry, cursor, width, bodyH, diffScrollOffset int) []string {
+// vpView is the pre-rendered output from viewport.View(). When non-empty it is
+// used directly for the diff section (no re-parsing); when empty renderInlineDiffPane
+// is called as a fallback (used by tests that don't wire up a viewport).
+func buildRightPane(entry *reviewDiffEntry, cursor, width, bodyH int, vpView string) []string {
 	if entry == nil {
 		return []string{StyleSubtle.Render("loading…")}
 	}
@@ -637,7 +642,13 @@ func buildRightPane(entry *reviewDiffEntry, cursor, width, bodyH, diffScrollOffs
 	if diffH < 1 {
 		diffH = 1
 	}
-	diffLines := renderInlineDiffPane(entry, cursor, width, diffH, diffScrollOffset)
+	var diffLines []string
+	if vpView != "" {
+		// Use the viewport's pre-rendered content (scroll already applied, no re-parse).
+		diffLines = strings.Split(vpView, "\n")
+	} else {
+		diffLines = renderInlineDiffPane(entry, cursor, width, diffH, 0)
+	}
 	result := make([]string, 0, len(summaryLines)+1+len(diffLines))
 	result = append(result, summaryLines...)
 	result = append(result, divider)
