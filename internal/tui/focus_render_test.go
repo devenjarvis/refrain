@@ -556,6 +556,45 @@ func TestRenderFocusSessionCard_NoPlanStaysFourLines(t *testing.T) {
 	}
 }
 
+// TestSessionFocusStatus_PlanProgressBeatsStaleTodos verifies that when both a
+// plan and todos are present, the plan checkboxes drive the progress badge.
+// A session with 2/5 plan checkboxes done but todos all "pending" must show
+// "2/5", not "0/5".
+func TestSessionFocusStatus_PlanProgressBeatsStaleTodos(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	dir := t.TempDir()
+	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	if err := sess.WritePlan("- [x] one\n- [x] two\n- [ ] three\n- [ ] four\n- [ ] five\n"); err != nil {
+		t.Fatal(err)
+	}
+	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
+	ag.SetTodos([]agent.TodoItem{
+		{Content: "step one", Status: "pending"},
+		{Content: "step two", Status: "pending"},
+		{Content: "step three", Status: "pending"},
+		{Content: "step four", Status: "pending"},
+		{Content: "step five", Status: "pending"},
+	})
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	if !strings.Contains(badge, "2/5") {
+		t.Errorf("expected plan-driven badge '2/5', got %q", badge)
+	}
+	if strings.Contains(badge, "0/5") {
+		t.Errorf("stale todos must not drive the badge when plan is present, got %q", badge)
+	}
+}
+
 // TestSessionFocusStatus_BuildingWithPlanShowsProgressBadge verifies that a
 // Building session backed by a plan file shows a progress bar with done/total,
 // not the plain "N active, M idle" fallback.
