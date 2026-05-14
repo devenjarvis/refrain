@@ -4165,3 +4165,85 @@ func TestCreateResult_SkipFocusLaunch_StaysOnDashboard(t *testing.T) {
 		t.Errorf("cursor does not point at new session: got %v, want %v", got, sess.ID)
 	}
 }
+
+// TestApprovePlanAndSpawn_StaysOnDashboard verifies that approving a plan keeps
+// the user on the dashboard (panelFocus == focusList, focusLaunchAgent == nil)
+// instead of dropping into the fullscreen agent terminal.
+func TestApprovePlanAndSpawn_StaysOnDashboard(t *testing.T) {
+	dir, err := os.MkdirTemp("", "baton-approve-spawn-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup %v: %v\n%s", args, err, out)
+		}
+	}
+
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+
+	sess, err := mgr.CreateSessionForPlanning(agent.Config{
+		Rows: 24, Cols: 80, AgentProgram: "bash",
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionForPlanning: %v", err)
+	}
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = config.ResolvedSettings{
+		AgentProgram: "bash",
+	}
+
+	model, cmd := app.approvePlanAndSpawn(planEditorApproveMsg{
+		sessionID: sess.ID,
+		repoPath:  dir,
+	})
+	if m, ok := model.(*App); ok {
+		app = *m
+	} else {
+		app = model.(App)
+	}
+	if cmd == nil {
+		t.Fatal("approvePlanAndSpawn returned nil cmd; expected a deferred AddAgent closure")
+	}
+
+	// Execute the cmd synchronously to get the createResultMsg.
+	resultMsg, ok := cmd().(createResultMsg)
+	if !ok {
+		t.Fatalf("cmd() returned %T, want createResultMsg", cmd())
+	}
+	if resultMsg.err != nil {
+		t.Fatalf("createResultMsg.err: %v", resultMsg.err)
+	}
+	if !resultMsg.skipFocusLaunch {
+		t.Error("createResultMsg.skipFocusLaunch: got false, want true (plan-approve path must not open agent terminal)")
+	}
+
+	// Dispatch through Update and verify focus stays on dashboard.
+	model2, _ := app.Update(resultMsg)
+	if m, ok := model2.(*App); ok {
+		app = *m
+	} else {
+		app = model2.(App)
+	}
+	if app.dashboard.panelFocus == focusLaunch {
+		t.Error("panelFocus: got focusLaunch after plan approval, want focusList")
+	}
+	if app.focusLaunchAgent != nil {
+		t.Errorf("focusLaunchAgent: got %v, want nil", app.focusLaunchAgent.ID)
+	}
+}

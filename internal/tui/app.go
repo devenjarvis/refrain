@@ -3823,7 +3823,7 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 		// approved plan is when a session "starts" — submitPromptModal
 		// deliberately doesn't increment on plan creation, since the user
 		// could still abandon it before approving.
-		return createResultMsg{sessionID: sessID, agentID: ag.ID, isNewSession: true}
+		return createResultMsg{sessionID: sessID, agentID: ag.ID, isNewSession: true, skipFocusLaunch: true}
 	}
 }
 
