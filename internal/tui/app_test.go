@@ -2462,6 +2462,45 @@ func TestRepoPicker_ManageMode_Remove_DeletesAndReassignsActive(t *testing.T) {
 	}
 }
 
+// TestRepoPicker_ManageMode_RemoveMsg_UnknownPathSetsError verifies that
+// repoPickerRemoveMsg for an unregistered repo sets an error and leaves
+// cfg.Repos unchanged, validating the routing through updateRepoPicker.
+func TestRepoPicker_ManageMode_RemoveMsg_UnknownPathSetsError(t *testing.T) {
+	dir1 := t.TempDir()
+
+	mgr1 := agent.NewManager(dir1, config.Resolve(nil, nil))
+	defer mgr1.Shutdown()
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir1] = mgr1
+	app.activeRepo = dir1
+	app.cfg = &config.Config{
+		Repos: []config.Repo{
+			{Path: dir1, Name: "repo1"},
+		},
+	}
+	app.view = ViewRepoPicker
+	app.repoPicker.SetMode(repoPickerModeManage)
+
+	nonExistent := t.TempDir()
+	model, _ := app.Update(repoPickerRemoveMsg{path: nonExistent})
+	app = model.(App)
+
+	if app.err == "" {
+		t.Error("expected error when removing an unregistered repo path")
+	}
+	if app.view != ViewRepoPicker {
+		t.Errorf("view = %v, want ViewRepoPicker after failed remove", app.view)
+	}
+	if len(app.cfg.Repos) != 1 {
+		t.Errorf("cfg.Repos should still have 1 entry, got %d", len(app.cfg.Repos))
+	}
+}
+
 // TestPipeline_XKey_NoSession verifies that 'x' on an empty pipeline produces
 // a friendly error and does not crash.
 func TestPipeline_XKey_NoSession(t *testing.T) {
