@@ -3051,6 +3051,39 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.view = ViewDashboard
 		return a, nil
 
+	case repoPickerRemoveMsg:
+		mgr := a.managers[msg.path]
+		if mgr != nil && mgr.AgentCount() > 0 {
+			a.setError(fmt.Sprintf("cannot remove %q while %d session(s) are running",
+				filepath.Base(msg.path), mgr.AgentCount()))
+			return a, nil
+		}
+		if err := config.RemoveRepo(a.cfg, msg.path); err != nil {
+			a.setError(err.Error())
+			return a, nil
+		}
+		if err := config.Save(a.cfg); err != nil {
+			a.setError(err.Error())
+		}
+		delete(a.managers, msg.path)
+		delete(a.repoSettings, msg.path)
+		delete(a.resolvedCache, msg.path)
+		if a.activeRepo == msg.path {
+			a.activeRepo = ""
+			if len(a.cfg.Repos) > 0 {
+				a.activeRepo = a.cfg.Repos[0].Path
+			}
+		}
+		a.refreshAgentList()
+		counts := make(map[string]int, len(a.cfg.Repos))
+		for _, repo := range a.cfg.Repos {
+			if m := a.managers[repo.Path]; m != nil {
+				counts[repo.Path] = m.AgentCount()
+			}
+		}
+		a.repoPicker.setRepos(a.cfg.Repos, counts, a.activeRepo)
+		return a, nil
+
 	case repoPickerAddRepoMsg:
 		a.repoPickerPending = true
 		a.repoBrowser = newFileBrowserModel()
