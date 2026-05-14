@@ -191,6 +191,118 @@ func TestRepoPicker_AddRepoRowAlwaysPresent(t *testing.T) {
 	}
 }
 
+// fixtureRepoPickerManage returns a manage-mode picker seeded with the same
+// three repos as fixtureRepoPicker, with the cursor on /Code/beta (index 1).
+func fixtureRepoPickerManage() repoPickerModel {
+	m := fixtureRepoPicker()
+	m.SetMode(repoPickerModeManage)
+	return m
+}
+
+func TestRepoPicker_ManageMode_EnterEmitsSwitchActive(t *testing.T) {
+	m := fixtureRepoPickerManage()
+	// cursor is on /Code/beta (selected=1 from initialPath)
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd from enter in manage mode")
+	}
+	msg, ok := cmd().(repoPickerSwitchActiveMsg)
+	if !ok {
+		t.Fatalf("expected repoPickerSwitchActiveMsg, got %T", cmd())
+	}
+	if msg.path != "/Code/beta" {
+		t.Errorf("path = %q, want /Code/beta", msg.path)
+	}
+}
+
+func TestRepoPicker_ManageMode_SOpensEditSettings(t *testing.T) {
+	m := fixtureRepoPickerManage()
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd from s in manage mode")
+	}
+	msg, ok := cmd().(repoPickerEditSettingsMsg)
+	if !ok {
+		t.Fatalf("expected repoPickerEditSettingsMsg, got %T", cmd())
+	}
+	if msg.path != "/Code/beta" {
+		t.Errorf("path = %q, want /Code/beta", msg.path)
+	}
+}
+
+func TestRepoPicker_ManageMode_DTwiceEmitsRemove(t *testing.T) {
+	m := fixtureRepoPickerManage()
+	// first d: sets pendingRemoveIdx
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if cmd != nil {
+		t.Errorf("first d should not emit a cmd, got %T", cmd())
+	}
+	if m.pendingRemoveIdx != m.selected {
+		t.Errorf("after first d, pendingRemoveIdx=%d, want selected=%d", m.pendingRemoveIdx, m.selected)
+	}
+	// second d on same row: emits remove
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if cmd == nil {
+		t.Fatal("second d should emit a cmd")
+	}
+	msg, ok := cmd().(repoPickerRemoveMsg)
+	if !ok {
+		t.Fatalf("expected repoPickerRemoveMsg, got %T", cmd())
+	}
+	if msg.path != "/Code/beta" {
+		t.Errorf("path = %q, want /Code/beta", msg.path)
+	}
+}
+
+func TestRepoPicker_ManageMode_DOnDifferentRowResetsConfirm(t *testing.T) {
+	m := fixtureRepoPickerManage()
+	// First d on /Code/beta (selected=1)
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if m.pendingRemoveIdx != 1 {
+		t.Fatalf("pendingRemoveIdx = %d, want 1", m.pendingRemoveIdx)
+	}
+	// Move down to /Code/gamma (selected=2): should clear pendingRemoveIdx
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.pendingRemoveIdx != -1 {
+		t.Errorf("navigation should reset pendingRemoveIdx to -1, got %d", m.pendingRemoveIdx)
+	}
+	// d again on new row: sets a new pending (not emit)
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if cmd != nil {
+		t.Errorf("first d on new row should not emit, got cmd")
+	}
+	if m.pendingRemoveIdx != 2 {
+		t.Errorf("pendingRemoveIdx = %d, want 2", m.pendingRemoveIdx)
+	}
+}
+
+func TestRepoPicker_ManageMode_FilterEmptyGatesSAndD(t *testing.T) {
+	m := fixtureRepoPickerManage()
+	// Start typing a filter char so filter is non-empty.
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	if m.filter == "" {
+		t.Fatal("filter should be non-empty after typing b")
+	}
+	// s should append to filter, not emit edit-settings
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if cmd != nil {
+		if _, ok := cmd().(repoPickerEditSettingsMsg); ok {
+			t.Error("s with active filter should NOT emit repoPickerEditSettingsMsg")
+		}
+	}
+	if m.filter != "bs" {
+		t.Errorf("filter = %q, want \"bs\"", m.filter)
+	}
+	// d should also append to filter, not set pendingRemoveIdx
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if m.pendingRemoveIdx != -1 {
+		t.Errorf("d with active filter should not set pendingRemoveIdx, got %d", m.pendingRemoveIdx)
+	}
+	if m.filter != "bsd" {
+		t.Errorf("filter = %q, want \"bsd\"", m.filter)
+	}
+}
+
 func TestRepoPicker_NavigationClampsAtBounds(t *testing.T) {
 	m := fixtureRepoPicker()
 	// Push past the top.
