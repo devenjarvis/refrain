@@ -672,3 +672,32 @@ func TestResolve_BuildSystemPrompt_EmptyStringDisables(t *testing.T) {
 		t.Errorf("BuildSystemPrompt = %q, want empty (disabled)", r.BuildSystemPrompt)
 	}
 }
+
+// TestResolve_MergeMethod_NormalizesAndValidates pins M4: the resolver must
+// lowercase and whitelist MergeMethod against {"merge","squash","rebase"} and
+// fall back to the default for anything else. Without this, a typo like
+// "Squash" or "ff-only" silently reaches the API client where it's coerced
+// to "squash" without telling the user — which makes the merge button's
+// behavior surprising.
+func TestResolve_MergeMethod_NormalizesAndValidates(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"squash", "squash"},
+		{"merge", "merge"},
+		{"rebase", "rebase"},
+		{"Squash", "squash"},     // capital letter → lowercased
+		{"  rebase  ", "rebase"}, // whitespace trimmed
+		{"ff-only", config.DefaultMergeMethod},
+		{"yolo", config.DefaultMergeMethod},
+		{"", config.DefaultMergeMethod},
+	}
+	for _, tc := range cases {
+		g := &config.GlobalSettings{MergeMethod: strPtr(tc.input)}
+		r := config.Resolve(g, nil)
+		if r.MergeMethod != tc.want {
+			t.Errorf("MergeMethod(%q) = %q, want %q", tc.input, r.MergeMethod, tc.want)
+		}
+	}
+}

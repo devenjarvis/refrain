@@ -298,11 +298,13 @@ func TestServerConnectionDropMidLine(t *testing.T) {
 	}
 }
 
-// TestServerSlowConsumerDoesNotBlock verifies that a stuck consumer does
-// not block the hook senders. The events channel is buffered at 64 and
-// excess messages must be dropped, not block the writer (which would in
-// turn wedge `claude`).
-func TestServerSlowConsumerDoesNotBlock(t *testing.T) {
+// TestServerSlowConsumerDeliversAllEvents verifies that a temporarily slow
+// consumer does not lose hook events. Status-critical hooks (Stop,
+// UserPromptSubmit) drive agent status transitions — dropping them silently
+// leaves the dashboard stuck on the wrong badge, which defeats the whole
+// attention-routing thesis. Senders may pause if the buffer fills (that's
+// fine — they're short-lived hook CLIs), but events must not be discarded.
+func TestServerSlowConsumerDeliversAllEvents(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "hook.sock")
 	srv, err := NewServer(socketPath)
 	if err != nil {
@@ -310,19 +312,58 @@ func TestServerSlowConsumerDoesNotBlock(t *testing.T) {
 	}
 	defer func() { _ = srv.Close() }()
 
-	const burst = 200
-	done := make(chan struct{})
+	const burst = 500 // exceeds the buffer to force back-pressure
 	go func() {
 		for i := 0; i < burst; i++ {
 			_ = SendEvent(socketPath, Event{Kind: KindStop, AgentID: "a"})
 		}
-		close(done)
 	}()
 
+	// Drain on this goroutine with a small sleep on every read to simulate a
+	// briefly slow consumer. The blocking-send guard must hold the senders
+	// (or buffer) without dropping anything.
+	received := 0
+	deadline := time.After(15 * time.Second)
+	for received < burst {
+		select {
+		case <-srv.Events():
+			received++
+			time.Sleep(time.Millisecond)
+		case <-deadline:
+			t.Fatalf("only received %d/%d events before deadline — events were dropped", received, burst)
+		}
+	}
+}
+
+// TestServerCloseUnblocksHandlerWaitingOnSlowConsumer verifies that a handler
+// blocked on a full events channel exits cleanly when Close is called,
+// rather than leaving wg.Wait stuck forever.
+func TestServerCloseUnblocksHandlerWaitingOnSlowConsumer(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "hook.sock")
+	srv, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	// Fill the events buffer + a bit more so a handler is blocked on send.
+	go func() {
+		for i := 0; i < 300; i++ {
+			_ = SendEvent(socketPath, Event{Kind: KindStop, AgentID: "a"})
+		}
+	}()
+
+	// Give senders time to fill the buffer.
+	time.Sleep(50 * time.Millisecond)
+
+	closed := make(chan error, 1)
+	go func() { closed <- srv.Close() }()
+
 	select {
-	case <-done:
-		// Senders unblocked even though the events channel was never drained.
+	case err := <-closed:
+		if err != nil {
+			t.Errorf("Close returned error: %v", err)
+		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("senders blocked — slow consumer wedged the hook path")
+		t.Fatal("Close blocked on handler stuck on slow consumer")
 	}
 }

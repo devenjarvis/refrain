@@ -85,15 +85,18 @@ func TestExpandBranchPrefix_UserFallsBackToEnv(t *testing.T) {
 	}
 }
 
-func TestExpandBranchPrefix_UserEmptyDropsToken(t *testing.T) {
+// TestExpandBranchPrefix_UserEmptyFallsBackToLiteral pins M7: when both git
+// user.name and $USER are empty (CI containers, minimal sandboxes), {user}
+// must expand to a non-empty literal so the resulting branch path stays
+// well-formed. Dropping to empty produced "baton//date-suffix", which git
+// rejects as an invalid branch name.
+func TestExpandBranchPrefix_UserEmptyFallsBackToLiteral(t *testing.T) {
 	sandboxGitConfig(t)
 	t.Setenv("USER", "")
 
 	got := config.ExpandBranchPrefix("{user}/")
-	// When both git user.name and $USER are empty, {user} drops to empty.
-	// The literal trailing "/" remains so the caller can still slash-separate.
-	if got != "/" {
-		t.Errorf("ExpandBranchPrefix(%q) = %q, want %q", "{user}/", got, "/")
+	if got != "user/" {
+		t.Errorf("ExpandBranchPrefix(%q) = %q, want %q", "{user}/", got, "user/")
 	}
 }
 

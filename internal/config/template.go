@@ -14,8 +14,9 @@ var prefixSlugRe = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 // returns the result. Supported tokens:
 //
 //   - {user}: git `user.name` (falling back to $USER), slugified. If both are
-//     empty, the token is dropped entirely — the surrounding separators remain
-//     as the user wrote them.
+//     empty (e.g. a minimal CI container with no git identity and no $USER),
+//     the token expands to the literal "user" so the resulting branch path
+//     stays well-formed — git rejects empty path segments like "baton//foo".
 //   - {date}: today's date in YYYY-MM-DD form.
 //
 // Unknown {foo} tokens are left literal. No Go template syntax is used so
@@ -26,6 +27,12 @@ func ExpandBranchPrefix(raw string) string {
 	out = strings.ReplaceAll(out, "{date}", time.Now().Format("2006-01-02"))
 	return out
 }
+
+// userSlugFallback is the literal substituted for {user} when neither git
+// user.name nor $USER produces a non-empty slug. Chosen as a benign,
+// human-readable string that keeps branch paths well-formed and matches
+// what users typing the template likely meant ("baton/user/feature").
+const userSlugFallback = "user"
 
 func resolveUserSlug() string {
 	if name := strings.TrimSpace(gitUserName()); name != "" {
@@ -38,7 +45,7 @@ func resolveUserSlug() string {
 			return slug
 		}
 	}
-	return ""
+	return userSlugFallback
 }
 
 func gitUserName() string {

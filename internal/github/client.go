@@ -517,6 +517,22 @@ func (c *Client) GetReviewThreads(ctx context.Context, owner, repo string, numbe
 	return threads, nil
 }
 
+// RefreshPR fetches the latest PR state by number, including mergeable_state
+// (always populated by the singular PR endpoint, unlike List/Create). Used to
+// re-validate a PR is still mergeable immediately before MergePR — the
+// pr-poller's cached state can be seconds stale, and CI/conflicts can change
+// in that window. Returns (nil, nil) if the PR no longer exists.
+func (c *Client) RefreshPR(ctx context.Context, owner, repo string, number int) (*PRState, error) {
+	pr, err := c.getPRDetail(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	if pr == nil {
+		return nil, nil
+	}
+	return prToState(pr), nil
+}
+
 // MergePR merges the given pull request using the specified method.
 // method must be one of "merge", "squash", or "rebase". Defaults to "squash".
 // Merge is not idempotent so this bypasses doWithRetry to avoid a false-failure
