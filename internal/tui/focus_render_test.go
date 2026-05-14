@@ -543,7 +543,9 @@ func TestRenderFocusSessionCard_BuildingNoTasksShortDescription(t *testing.T) {
 
 // TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan verifies that
 // when the session's primary agent has an in_progress TodoItem, that item's
-// content wins on line 2 over the plan's first uncompleted task.
+// ActiveForm wins on line 3 ("current task: Running todo task") over the
+// plan's first uncompleted task. Line 2 shows the description; line 1 still
+// shows the progress bar.
 func TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
@@ -567,18 +569,29 @@ func TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan(t *testing.
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card, got %d", len(card))
 	}
-	line2 := ansi.Strip(card[1])
-	if !strings.Contains(line2, "Running todo task") {
-		t.Errorf("line 2 should show in_progress todo's ActiveForm, got %q", line2)
+	line1 := ansi.Strip(card[0])
+	if !strings.Contains(line1, "tasks") {
+		t.Errorf("line 1 should still contain progress bar, got %q", line1)
 	}
-	if strings.Contains(line2, "plan task") {
-		t.Errorf("line 2 must not show plan task when todo overrides it, got %q", line2)
+	line3 := ansi.Strip(card[2])
+	if !strings.Contains(line3, "current task:") {
+		t.Errorf("line 3 should contain 'current task:' prefix, got %q", line3)
+	}
+	if !strings.Contains(line3, "Running todo task") {
+		t.Errorf("line 3 should show in_progress todo's ActiveForm, got %q", line3)
+	}
+	if strings.Contains(line3, "next:") {
+		t.Errorf("line 3 must not contain 'next:', got %q", line3)
+	}
+	if strings.Contains(line3, "plan task") {
+		t.Errorf("line 3 must not show plan task text when todo overrides it, got %q", line3)
 	}
 }
 
 // TestRenderFocusSessionCard_PlanWithSingleOpenTaskDropsNextSuffix verifies
-// that when only one open task remains, line 2 shows the last task (bold, no ▸)
-// and line 3 is blank (no "next:" suffix), card is exactly 4 lines.
+// that when only one open task remains, line 3 shows "current task: last task"
+// and contains no "next:" suffix. Line 1 still holds the progress bar.
+// Card is exactly 4 lines.
 func TestRenderFocusSessionCard_PlanWithSingleOpenTaskDropsNextSuffix(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
@@ -598,13 +611,19 @@ func TestRenderFocusSessionCard_PlanWithSingleOpenTaskDropsNextSuffix(t *testing
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card with single open task, got %d lines", len(card))
 	}
-	line2 := ansi.Strip(card[1])
-	if !strings.Contains(line2, "last task") {
-		t.Errorf("line 2 should contain open task name, got %q", line2)
+	line1 := ansi.Strip(card[0])
+	if !strings.Contains(line1, "tasks") {
+		t.Errorf("line 1 should still contain progress bar, got %q", line1)
 	}
 	line3 := ansi.Strip(card[2])
+	if !strings.Contains(line3, "current task:") {
+		t.Errorf("line 3 should contain 'current task:' prefix, got %q", line3)
+	}
+	if !strings.Contains(line3, "last task") {
+		t.Errorf("line 3 should contain the open task name, got %q", line3)
+	}
 	if strings.Contains(line3, "next:") {
-		t.Errorf("line 3 must not have 'next:' with single open task, got %q", line3)
+		t.Errorf("line 3 must not contain 'next:', got %q", line3)
 	}
 }
 
