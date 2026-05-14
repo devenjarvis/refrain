@@ -496,26 +496,33 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 	}
 	if sess.LifecyclePhase() == agent.LifecycleInProgress {
 		const barWidth = 20
-		// Plan checkboxes take priority over TodoWrite snapshots: plan items are
-		// the build agent's authoritative work contract (mapped 1:1 to [task N]
-		// commits) and stay in sync via Claude's Edit tool, whereas TodoWrite-driven
-		// todos can sit stale when Claude omits subsequent TodoWrite calls.
+		// Combine plan-checkbox counts with [task N] commit counts so the bar
+		// advances even when Claude omits a checkbox toggle. Use max(planDone,
+		// commitDone) / max(planTotal, commitMax) and clamp done ≤ total.
+		var planTotal, planDone int
 		if plan, present := sess.CachedPlan(); present {
-			if total, done := planTaskCounts(plan); total > 0 {
-				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
-			}
+			planTotal, planDone = planTaskCounts(plan)
+		}
+		commitDone, commitMax := sess.CommitTaskCount()
+		total := max(planTotal, commitMax)
+		done := max(planDone, commitDone)
+		if done > total {
+			done = total
+		}
+		if total > 0 {
+			return renderCardProgressBar(done, total, barWidth, ColorPrimary)
 		}
 		if ag := sess.PrimaryAgent(); ag != nil {
 			todos := ag.Todos()
 			if len(todos) > 0 {
-				total := len(todos)
-				done := 0
+				todoTotal := len(todos)
+				todoDone := 0
 				for _, t := range todos {
 					if t.Status == "completed" {
-						done++
+						todoDone++
 					}
 				}
-				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
+				return renderCardProgressBar(todoDone, todoTotal, barWidth, ColorPrimary)
 			}
 		}
 	}

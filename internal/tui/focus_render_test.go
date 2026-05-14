@@ -1178,3 +1178,63 @@ func TestRenderFocusSessionCard_StaleTodosLineLine3UsesPlan(t *testing.T) {
 		t.Errorf("line 3 must not show stale pending todo 'step one', got %q", line3)
 	}
 }
+
+// TestSessionFocusStatus_BuildingProgressCombinesPlanAndCommits verifies that
+// the building card badge uses max(planDone, commitDone) / max(planTotal, commitMax).
+func TestSessionFocusStatus_BuildingProgressCombinesPlanAndCommits(t *testing.T) {
+	const plan5 = "# Goal\nDo it\n\n## Tasks\n- [x] one\n- [ ] two\n- [ ] three\n- [ ] four\n- [ ] five\n"
+
+	newBuildingSession := func(t *testing.T, planBody string) *agent.Session {
+		t.Helper()
+		dir := t.TempDir()
+		sess := agent.NewSessionForTestWithPath("s", "test", dir)
+		sess.SetLifecyclePhase(agent.LifecycleInProgress)
+		if planBody != "" {
+			if err := sess.WritePlan(planBody); err != nil {
+				t.Fatalf("WritePlan: %v", err)
+			}
+		}
+		return sess
+	}
+
+	d := newDashboardModel()
+
+	t.Run("plan_only_1_of_5", func(t *testing.T) {
+		sess := newBuildingSession(t, plan5) // 1 checked, 5 total
+		badge := ansi.Strip(d.sessionFocusStatus(sess))
+		if !strings.Contains(badge, "1/5") {
+			t.Errorf("expected 1/5 badge, got %q", badge)
+		}
+	})
+
+	t.Run("commits_ahead_of_checkboxes_3_of_5", func(t *testing.T) {
+		sess := newBuildingSession(t, plan5) // 1 checked, 5 total
+		sess.SetCommitTaskCountForTest(3, 3)  // commits: done=3, max=3
+		badge := ansi.Strip(d.sessionFocusStatus(sess))
+		if !strings.Contains(badge, "3/5") {
+			t.Errorf("expected 3/5 badge (commits ahead of checkboxes), got %q", badge)
+		}
+	})
+
+	t.Run("commits_win_clamped_4_of_5", func(t *testing.T) {
+		sess := newBuildingSession(t, plan5) // 2 checked (bump to 2 done)
+		const plan5two = "# Goal\nDo it\n\n## Tasks\n- [x] one\n- [x] two\n- [ ] three\n- [ ] four\n- [ ] five\n"
+		if err := sess.WritePlan(plan5two); err != nil {
+			t.Fatalf("WritePlan: %v", err)
+		}
+		sess.SetCommitTaskCountForTest(4, 4) // commits: done=4, max=4
+		badge := ansi.Strip(d.sessionFocusStatus(sess))
+		if !strings.Contains(badge, "4/5") {
+			t.Errorf("expected 4/5 badge (max(2,4)/max(5,4)), got %q", badge)
+		}
+	})
+
+	t.Run("no_plan_commits_drive_bar", func(t *testing.T) {
+		sess := newBuildingSession(t, "") // no plan
+		sess.SetCommitTaskCountForTest(2, 3)
+		badge := ansi.Strip(d.sessionFocusStatus(sess))
+		if !strings.Contains(badge, "2/3") {
+			t.Errorf("expected 2/3 badge (commits only, no plan), got %q", badge)
+		}
+	})
+}
