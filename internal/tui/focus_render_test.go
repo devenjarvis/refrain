@@ -401,9 +401,9 @@ func TestRenderQueueRow_RepoPrefix(t *testing.T) {
 }
 
 // TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine verifies
-// that a Building session with a plan and open tasks produces a 4-line card
-// where line 2 shows the first open task (bold, no leading ▸) and line 3
-// shows "next: second open" (no leading ↳).
+// that a Building session with a plan shows the session description on line 2
+// and "current task: <first open task>" on line 3. The line-1 progress bar
+// and the 4-line card height are unchanged.
 func TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
@@ -424,22 +424,120 @@ func TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine(t *testing
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card for plan-backed building session, got %d lines: %v", len(card), card)
 	}
-	line2 := ansi.Strip(card[1])
-	if strings.Contains(line2, "▸") {
-		t.Errorf("line 2 must not contain ▸ prefix, got %q", line2)
+	line1 := ansi.Strip(card[0])
+	if !strings.Contains(line1, "1/3") {
+		t.Errorf("line 1 should still contain progress bar '1/3', got %q", line1)
 	}
-	if !strings.Contains(line2, "write tests") {
-		t.Errorf("line 2 should contain first open task, got %q", line2)
+	line2 := ansi.Strip(card[1])
+	if !strings.Contains(line2, "implement oauth flow") {
+		t.Errorf("line 2 should contain session description (TaskSummary), got %q", line2)
 	}
 	line3 := ansi.Strip(card[2])
-	if strings.Contains(line3, "↳") {
-		t.Errorf("line 3 must not contain ↳ glyph, got %q", line3)
+	if !strings.Contains(line3, "current task:") {
+		t.Errorf("line 3 should contain \"current task:\" prefix, got %q", line3)
 	}
-	if !strings.Contains(line3, "next:") {
-		t.Errorf("line 3 should contain \"next:\" prefix, got %q", line3)
+	if !strings.Contains(line3, "write tests") {
+		t.Errorf("line 3 should contain first open task name, got %q", line3)
 	}
-	if !strings.Contains(line3, "open PR") {
-		t.Errorf("line 3 should contain second open task, got %q", line3)
+	if strings.Contains(line3, "next:") {
+		t.Errorf("line 3 must not contain 'next:', got %q", line3)
+	}
+	if strings.Contains(line3, "open PR") {
+		t.Errorf("line 3 must not contain the second open task, got %q", line3)
+	}
+}
+
+// TestRenderFocusSessionCard_BuildingDescriptionFallsBackToOriginalPrompt
+// verifies that when no TaskSummary is set, line 2 shows the OriginalPrompt
+// in muted-italic style (pending=true branch).
+func TestRenderFocusSessionCard_BuildingDescriptionFallsBackToOriginalPrompt(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	sess := agent.NewSessionForTest("s", "my-session")
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	sess.SetOriginalPrompt("add dark mode")
+	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	card := d.renderFocusSessionCard(sess, "", false, 100)
+	if len(card) != 4 {
+		t.Fatalf("expected 4-line card, got %d", len(card))
+	}
+	if !strings.Contains(ansi.Strip(card[1]), "add dark mode") {
+		t.Errorf("line 2 should contain OriginalPrompt, got %q", ansi.Strip(card[1]))
+	}
+	// Pending style → italic SGR (\x1b[...;3m or \x1b[3m).
+	if !strings.Contains(card[1], "\x1b[") {
+		t.Errorf("line 2 raw should contain ANSI escape (italic), got %q", card[1])
+	}
+}
+
+// TestRenderFocusSessionCard_BuildingNoTasksFallsBackToDescriptionOverflow
+// verifies that when there are no todos and no plan, a long OriginalPrompt
+// wraps onto lines 2 and 3 with no "current task:" present.
+func TestRenderFocusSessionCard_BuildingNoTasksFallsBackToDescriptionOverflow(t *testing.T) {
+	sess := agent.NewSessionForTest("s", "my-session")
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	sess.SetOriginalPrompt("implement the entire authentication subsystem with OAuth2 PKCE flow")
+	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	card := d.renderFocusSessionCard(sess, "", false, 60)
+	if len(card) != 4 {
+		t.Fatalf("expected 4-line card, got %d", len(card))
+	}
+	line2 := ansi.Strip(card[1])
+	line3 := ansi.Strip(card[2])
+	if !strings.Contains(line2, "implement") {
+		t.Errorf("line 2 should contain first wrapped chunk, got %q", line2)
+	}
+	if !strings.Contains(line3, "OAuth2") && !strings.Contains(line3, "authentication") {
+		t.Errorf("line 3 should contain description overflow, got %q", line3)
+	}
+	if strings.Contains(line2, "current task:") || strings.Contains(line3, "current task:") {
+		t.Errorf("no current task should appear when no todos/plan, got line2=%q line3=%q", line2, line3)
+	}
+}
+
+// TestRenderFocusSessionCard_BuildingNoTasksShortDescription verifies that
+// when there are no todos, no plan, and the description fits in one line,
+// line 3 is blank (no "current task:", no overflow).
+func TestRenderFocusSessionCard_BuildingNoTasksShortDescription(t *testing.T) {
+	sess := agent.NewSessionForTest("s", "my-session")
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	sess.SetOriginalPrompt("add dark mode")
+	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
+
+	d := newDashboardModel()
+	d.items = []listItem{
+		{kind: listItemSession, repoPath: "/r", session: sess},
+		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
+	}
+
+	card := d.renderFocusSessionCard(sess, "", false, 100)
+	if len(card) != 4 {
+		t.Fatalf("expected 4-line card, got %d", len(card))
+	}
+	line3 := ansi.Strip(card[2])
+	if strings.Contains(line3, "current task:") {
+		t.Errorf("line 3 must not contain 'current task:' when no todos/plan, got %q", line3)
+	}
+	// "Blank" in card context = stripe glyph + indent spaces, no content.
+	contentAfterStripe := strings.TrimLeft(strings.TrimPrefix(line3, "▎"), " ")
+	if contentAfterStripe != "" {
+		t.Errorf("line 3 should be blank (stripe+indent only) when description fits one line, got %q", line3)
 	}
 }
 

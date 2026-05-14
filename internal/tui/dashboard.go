@@ -705,21 +705,25 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 			line3 = stripe + indent + descStyle.Render(descLine2)
 		}
 	} else if buildingPhase {
-		// Active task: bold text, no leading glyph.
-		activeLine := ""
-		if descLine1 != "" {
-			activeLine = lipgloss.NewStyle().Bold(true).Render(truncateVisible(descLine1, descBudget))
+		// Line 2: session description — StyleSubtle or muted-italic when pending.
+		descStyle := StyleSubtle
+		if descPending {
+			descStyle = lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
 		}
-		line2 = stripe + indent + activeLine
-		// Next task: "next: <muted-italic text>". Subtract 6 cells for "next: ".
+		line2 = stripe + indent + descStyle.Render(descLine1)
+		// Line 3: current task (label muted, name bold) or description overflow.
+		task := buildingCurrentTask(sess)
 		line3 = stripe + indent
-		if descLine2 != "" {
-			nextBudget := descBudget - 6
-			if nextBudget < 0 {
-				nextBudget = 0
+		if task != "" {
+			taskBudget := descBudget - 14 // subtract len("current task: ")
+			if taskBudget < 0 {
+				taskBudget = 0
 			}
-			nextStyle := lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
-			line3 = stripe + indent + nextStyle.Render("next: "+truncateVisible(descLine2, nextBudget))
+			taskLabel := StyleSubtle.Render("current task: ")
+			taskName := lipgloss.NewStyle().Bold(true).Render(truncateVisible(task, taskBudget))
+			line3 = stripe + indent + taskLabel + taskName
+		} else if descLine2 != "" {
+			line3 = stripe + indent + descStyle.Render(descLine2)
 		}
 	} else {
 		line2 = stripe + indent + StyleSubtle.Render(descLine1)
