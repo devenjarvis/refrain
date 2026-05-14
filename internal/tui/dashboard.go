@@ -496,9 +496,16 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 	}
 	if sess.LifecyclePhase() == agent.LifecycleInProgress {
 		const barWidth = 20
-		// Check todos first to stay in sync with focusTaskDescription's priority:
-		// when both todos and a plan exist, the badge and the task text on lines
-		// 2–3 should count the same source.
+		// Plan checkboxes take priority over TodoWrite snapshots: plan items are
+		// the build agent's authoritative work contract (mapped 1:1 to [task N]
+		// commits) and stay in sync via Claude's Edit tool, whereas TodoWrite-driven
+		// todos can sit stale when Claude omits subsequent TodoWrite calls.
+		// focusTaskDescription mirrors this priority.
+		if plan, present := sess.CachedPlan(); present {
+			if total, done := planTaskCounts(plan); total > 0 {
+				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
+			}
+		}
 		if ag := sess.PrimaryAgent(); ag != nil {
 			todos := ag.Todos()
 			if len(todos) > 0 {
@@ -509,11 +516,6 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 						done++
 					}
 				}
-				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
-			}
-		}
-		if plan, present := sess.CachedPlan(); present {
-			if total, done := planTaskCounts(plan); total > 0 {
 				return renderCardProgressBar(done, total, barWidth, ColorPrimary)
 			}
 		}
