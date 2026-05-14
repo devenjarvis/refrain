@@ -56,6 +56,15 @@ type Session struct {
 	planCachePresent bool
 	planCacheContent string
 	planCacheMTime   time.Time
+
+	// cleanupOnce makes Session.Cleanup idempotent. Both watchAgent (via
+	// closeSession on natural exit) and Shutdown's teardown loop can call
+	// Cleanup against the same session; without this guard the second caller
+	// hits git's "not a worktree" error and surfaces a spurious shutdown
+	// failure. The Once also pins the result so all callers see the same
+	// error value.
+	cleanupOnce sync.Once
+	cleanupErr  error
 }
 
 // newSession creates a session with the given worktree. New sessions land in
@@ -429,9 +438,15 @@ func (s *Session) KillAll() {
 }
 
 // Cleanup removes the session's worktree. If the session owns its branch
-// (created it), the branch is also deleted. Attached sessions preserve the branch.
+// (created it), the branch is also deleted. Attached sessions preserve the
+// branch. Idempotent: a second call is a no-op and returns the same error
+// (if any) the first call returned — both Shutdown's teardown loop and
+// closeSession from a natural agent exit can race to clean the same session.
 func (s *Session) Cleanup(repoPath string) error {
-	return git.RemoveWorktree(repoPath, s.Worktree, s.ownsBranch)
+	s.cleanupOnce.Do(func() {
+		s.cleanupErr = git.RemoveWorktree(repoPath, s.Worktree, s.ownsBranch)
+	})
+	return s.cleanupErr
 }
 
 // SetDisplayName sets a human-readable display name for the session.
@@ -870,13 +885,17 @@ type PlanTask struct {
 }
 
 // ParsePlanTasks extracts ordered task items from plan markdown using the same
-// counting rules as planTaskCounts in internal/tui/dashboard.go:
-// every "- [ ]" or "- [x]" line (leading whitespace stripped) is a task,
-// indexed 1-based in the order they appear. Section headers are ignored.
+// counting rules as planTaskCounts in internal/tui/dashboard.go: every "- [ ]"
+// or "- [x]" line (leading whitespace stripped) inside the "## Tasks" section
+// is a task, indexed 1-based in the order they appear. If the plan has no
+// "## Tasks" heading we fall back to scanning the entire document so freeform
+// plans still report a useful count; with a "## Tasks" heading present, only
+// checkboxes within that section count — stray "- [ ]" lines in Spec or
+// Verification do not corrupt the [task N] commit-to-task mapping.
 func ParsePlanTasks(plan string) []PlanTask {
 	tasks := make([]PlanTask, 0, 16)
 	idx := 0
-	for _, raw := range strings.Split(plan, "\n") {
+	for _, raw := range ScanTaskLines(plan) {
 		line := strings.TrimLeft(raw, " \t")
 		if !strings.HasPrefix(line, "- [") {
 			continue
@@ -891,6 +910,44 @@ func ParsePlanTasks(plan string) []PlanTask {
 		tasks = append(tasks, PlanTask{Index: idx, Text: text, Done: done})
 	}
 	return tasks
+}
+
+// ScanTaskLines returns the lines of plan that should be considered for task
+// counting. When the plan contains a "## Tasks" heading we return only the
+// lines inside that section (up to the next "## " heading or EOF); otherwise
+// we return every line in the document so freeform plans without a Tasks
+// section still produce a count. Exported so internal/tui can share the same
+// scoping rule as ParsePlanTasks without duplicating the state machine.
+func ScanTaskLines(plan string) []string {
+	lines := strings.Split(plan, "\n")
+	start, end := -1, len(lines)
+	for i, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		if start == -1 {
+			if isTasksHeading(trimmed) {
+				start = i + 1
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") {
+			end = i
+			break
+		}
+	}
+	if start == -1 {
+		return lines
+	}
+	return lines[start:end]
+}
+
+// isTasksHeading reports whether a trimmed line is the "## Tasks" heading.
+// Matches "## Tasks" only (case-insensitive on the word) so it doesn't
+// misfire on "## Task Status" or "## Tasks (revised)".
+func isTasksHeading(trimmed string) bool {
+	if !strings.HasPrefix(trimmed, "## ") {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(trimmed[3:]), "Tasks")
 }
 
 // PlanSections holds the named sections extracted from a plan markdown document.

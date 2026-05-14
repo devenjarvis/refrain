@@ -69,6 +69,16 @@ type Manager struct {
 	done     chan struct{}
 	watchers sync.WaitGroup
 
+	// sendsMu protects sends into m.events and m.plannerQuestions from racing
+	// the close() calls in Shutdown/Detach. emit() and the pumpPlannerQuestions
+	// send case acquire RLock; Shutdown/Detach acquire Lock around setting
+	// sendsClosed and closing the channels. An atomic flag is not enough —
+	// even with a pre-check, a concurrent send can pass the check and then
+	// hit the close, panicking with "send on closed channel". The lock
+	// ensures any send completes (or is short-circuited) before close runs.
+	sendsMu     sync.RWMutex
+	sendsClosed bool
+
 	hookServer     *hook.Server
 	hookSocketPath string
 	hookDispatcher sync.WaitGroup
@@ -595,18 +605,35 @@ func (m *Manager) startPlannerQuestionServer(sessionID string) (*planner.Server,
 func (m *Manager) pumpPlannerQuestions(srv *planner.Server, sessionID string) {
 	defer m.watchers.Done()
 	for ev := range srv.Events() {
-		select {
-		case m.plannerQuestions <- PlannerQuestion{
-			SessionID: sessionID,
-			Question:  ev.Question,
-			AnswerCh:  ev.AnswerCh,
-		}:
-		case <-m.done:
-			// Manager shutting down — answer empty so the planner subprocess
-			// unblocks rather than holding the connection until ctx fires.
+		// Same gate as emit(): hold sendsMu.RLock while we test sendsClosed
+		// and execute the select. Without this, Shutdown/Detach could close
+		// m.plannerQuestions between the check and the send.
+		if !m.tryPumpPlannerQuestion(sessionID, ev) {
 			ev.AnswerCh <- ""
 			return
 		}
+	}
+}
+
+// tryPumpPlannerQuestion forwards a planner ask_user event onto
+// m.plannerQuestions, returning false when Shutdown/Detach has gated the
+// channel (in which case the caller answers the event with the empty string
+// so the planner subprocess unblocks).
+func (m *Manager) tryPumpPlannerQuestion(sessionID string, ev planner.PlannerQuestionEvent) bool {
+	m.sendsMu.RLock()
+	defer m.sendsMu.RUnlock()
+	if m.sendsClosed {
+		return false
+	}
+	select {
+	case m.plannerQuestions <- PlannerQuestion{
+		SessionID: sessionID,
+		Question:  ev.Question,
+		AnswerCh:  ev.AnswerCh,
+	}:
+		return true
+	case <-m.done:
+		return false
 	}
 }
 
@@ -1472,8 +1499,17 @@ func (m *Manager) Shutdown() {
 	m.sessions = make(map[string]*Session)
 	m.mu.Unlock()
 
+	// Gate all emitters BEFORE closing the channels. Holding sendsMu.Lock
+	// across the close ensures any concurrent emit/pumpPlannerQuestions
+	// either completed before we entered, or is now short-circuited by the
+	// sendsClosed check it sees once it acquires its RLock. Without this
+	// ordering, a late caller (StartDraft, ResumeSession, a watchAgent
+	// finishing) would panic with "send on closed channel".
+	m.sendsMu.Lock()
+	m.sendsClosed = true
 	close(m.events)
 	close(m.plannerQuestions)
+	m.sendsMu.Unlock()
 }
 
 // stopHookServer closes the hook server and waits for the dispatcher goroutine.
@@ -1593,8 +1629,12 @@ func (m *Manager) Detach() *state.BatonState {
 	m.sessions = make(map[string]*Session)
 	m.mu.Unlock()
 
+	// Same gate as Shutdown — see the comment there.
+	m.sendsMu.Lock()
+	m.sendsClosed = true
 	close(m.events)
 	close(m.plannerQuestions)
+	m.sendsMu.Unlock()
 
 	if len(sessionStates) == 0 {
 		return nil
@@ -1749,6 +1789,17 @@ func (m *Manager) closeSession(sessionID string, sess *Session) {
 }
 
 func (m *Manager) emit(e Event) {
+	// Gate: Shutdown/Detach holds sendsMu.Lock around setting sendsClosed and
+	// close(m.events). Holding RLock through the send ensures the close
+	// cannot run while we're inside the select; without this guard a late
+	// caller (StartDraft, CreateAgent, ResumeSession, a watchAgent finishing
+	// during teardown) would panic with "send on closed channel" — the
+	// select's default only protects against a full buffer, not a closed one.
+	m.sendsMu.RLock()
+	defer m.sendsMu.RUnlock()
+	if m.sendsClosed {
+		return
+	}
 	select {
 	case m.events <- e:
 	default:

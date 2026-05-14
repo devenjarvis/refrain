@@ -905,3 +905,43 @@ func TestManager_AgentCount_ExcludesExitedAgents(t *testing.T) {
 		})
 	}
 }
+
+// TestManager_EmitDuringShutdownDoesNotPanic pins C1: emit() must short-circuit
+// once Shutdown begins closing m.events. Without the sendsClosed guard, any
+// concurrent caller (StartDraft, CreateAgent, ResumeSession, a late watchAgent
+// returning) would panic with "send on closed channel" — the select+default
+// in emit only protects against a full buffer, not a closed one.
+func TestManager_EmitDuringShutdownDoesNotPanic(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+
+	// Drive emit() from many goroutines while Shutdown runs. Under -race the
+	// data-race detector also catches any sendsClosed/closed-channel ordering
+	// mistakes. The events channel is intentionally not drained so emits can
+	// race the close.
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				mgr.emit(Event{Type: EventStatusChanged})
+			}
+		}()
+	}
+
+	// Let the emitters get into their loop, then tear down.
+	time.Sleep(10 * time.Millisecond)
+	mgr.Shutdown()
+
+	// After Shutdown returns, signal stop and wait for goroutines. Any
+	// closed-channel send before this point would have panicked the test.
+	close(stop)
+	wg.Wait()
+}

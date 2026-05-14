@@ -1543,3 +1543,37 @@ OAuth2 support`
 		}
 	})
 }
+
+// TestSession_CleanupIsIdempotent pins M2: a second Cleanup call must not
+// re-run git worktree remove (which would return a "not a worktree" error
+// and surface a spurious shutdown failure). Both Shutdown's teardown loop
+// and closeSession from a natural agent exit can call Cleanup on the same
+// session.
+func TestSession_CleanupIsIdempotent(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	sess, _, err := mgr.CreateSessionWithCommand(
+		Config{Task: "test", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "exit 0") },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First call: real cleanup, should succeed.
+	if err := sess.Cleanup(repo); err != nil {
+		t.Fatalf("first Cleanup: %v", err)
+	}
+	worktreePath := sess.Worktree.Path
+	if _, statErr := os.Stat(worktreePath); !os.IsNotExist(statErr) {
+		t.Errorf("worktree %s should be removed after first Cleanup", worktreePath)
+	}
+
+	// Second call: must be a no-op returning the same (nil) error, not a
+	// "not a worktree" error from a re-run git command.
+	if err := sess.Cleanup(repo); err != nil {
+		t.Errorf("second Cleanup must be idempotent, got: %v", err)
+	}
+}

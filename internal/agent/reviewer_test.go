@@ -56,6 +56,47 @@ func TestParsePlanTasks_EmptyPlan(t *testing.T) {
 	}
 }
 
+// TestParsePlanTasks_IgnoresCheckboxesOutsideTasks pins the section-scoping
+// fix: when a "## Tasks" heading is present, checkboxes in other sections
+// (Spec, Verification, sub-bullets) must not be counted because the
+// "[task N]" commit prefix depends on the in-section ordering.
+func TestParsePlanTasks_IgnoresCheckboxesOutsideTasks(t *testing.T) {
+	plan := `# Goal
+Add a feature.
+
+## Spec
+- [ ] this is a stray checkbox the drafter accidentally wrote in Spec
+- [ ] another one
+
+## Tasks
+- [ ] real task one
+- [x] real task two
+
+## Verification
+- [ ] not a task, this is a verification step
+`
+	tasks := ParsePlanTasks(plan)
+	if len(tasks) != 2 {
+		t.Fatalf("want 2 tasks (only those under ## Tasks), got %d", len(tasks))
+	}
+	if tasks[0].Index != 1 || tasks[0].Text != "real task one" || tasks[0].Done {
+		t.Errorf("tasks[0] = %+v, want {1 'real task one' false}", tasks[0])
+	}
+	if tasks[1].Index != 2 || tasks[1].Text != "real task two" || !tasks[1].Done {
+		t.Errorf("tasks[1] = %+v, want {2 'real task two' true}", tasks[1])
+	}
+}
+
+// TestParsePlanTasks_NoTasksHeadingFallback verifies plans without a
+// "## Tasks" heading still report a count (whole-document scope).
+func TestParsePlanTasks_NoTasksHeadingFallback(t *testing.T) {
+	plan := "freeform plan\n- [ ] one\n- [x] two\n"
+	tasks := ParsePlanTasks(plan)
+	if len(tasks) != 2 {
+		t.Fatalf("freeform plan: want 2 tasks, got %d", len(tasks))
+	}
+}
+
 // TestGroupCommitsByTask verifies that commits are bucketed correctly by
 // [task N] prefix, with the "other" bucket receiving untagged commits.
 func TestGroupCommitsByTask(t *testing.T) {

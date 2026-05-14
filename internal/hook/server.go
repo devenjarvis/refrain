@@ -19,10 +19,17 @@ import (
 //     shuts down.
 //   - Close stops accepting new connections, waits for in-flight handlers, then
 //     removes the socket file.
+//
+// Back-pressure: hook events are status-critical (Stop, UserPromptSubmit,
+// Notification) — silently dropping them leaves agents stuck in the wrong
+// status, which directly defeats the dashboard's attention-routing thesis.
+// handleConn therefore performs a *blocking* send into events, guarded by
+// the done channel so a slow consumer can't wedge handlers past Close.
 type Server struct {
 	socketPath string
 	listener   net.Listener
 	events     chan Event
+	done       chan struct{}
 
 	wg       sync.WaitGroup
 	closeMu  sync.Mutex
@@ -49,7 +56,10 @@ func NewServer(socketPath string) (*Server, error) {
 	s := &Server{
 		socketPath: socketPath,
 		listener:   l,
-		events:     make(chan Event, 64),
+		// Buffer is a cushion against bursts; the real guarantee against
+		// dropped events is the blocking send + done guard in handleConn.
+		events: make(chan Event, 256),
+		done:   make(chan struct{}),
 	}
 
 	s.wg.Add(1)
@@ -103,11 +113,12 @@ func (s *Server) handleConn(conn net.Conn) {
 			// we don't want one bad client to kill the server.
 			continue
 		}
-		// Non-blocking send: if the consumer is slow, drop rather than wedge
-		// the hook path.
+		// Blocking send guarded by done: never drop status-critical events,
+		// but abort if Close was called so handlers don't outlive the server.
 		select {
 		case s.events <- e:
-		default:
+		case <-s.done:
+			return
 		}
 	}
 }
@@ -123,6 +134,9 @@ func (s *Server) Close() error {
 	s.closed = true
 	s.closeMu.Unlock()
 
+	// Close done first so any handler blocked on a slow consumer aborts
+	// instead of hanging wg.Wait() indefinitely.
+	close(s.done)
 	err := s.listener.Close()
 	s.wg.Wait()
 	close(s.events)

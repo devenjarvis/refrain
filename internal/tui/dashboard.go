@@ -880,12 +880,15 @@ func planningDescription(sess *agent.Session) (string, bool) {
 }
 
 // planTaskCounts returns (total, done) for "- [ ]" / "- [x]" task list items
-// found anywhere in plan markdown. Tolerant of leading whitespace and either
-// case for the completion marker. Doesn't try to scope to a "## Tasks"
-// section — keeping the check section-agnostic means a renamed heading or a
-// freeform plan still gets a useful count.
+// inside the plan's "## Tasks" section. Scoping is required because the
+// "[task N]" commit prefix the build agent uses is derived from the position
+// of each checkbox top-to-bottom across the document — a stray "- [ ]" in
+// "## Spec" or "## Verification" would shift the numbering and break the
+// review panel's commit-to-task mapping. Plans without a "## Tasks" heading
+// fall back to whole-document scope so freeform plans still get a count.
+// Tolerant of leading whitespace and either case for the completion marker.
 func planTaskCounts(plan string) (total, done int) {
-	for _, raw := range strings.Split(plan, "\n") {
+	for _, raw := range agent.ScanTaskLines(plan) {
 		line := strings.TrimLeft(raw, " \t")
 		if !strings.HasPrefix(line, "- [") {
 			continue

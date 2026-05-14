@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Default values for all settings.
@@ -361,6 +362,19 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		if repo.MergeMethod != nil {
 			r.MergeMethod = *repo.MergeMethod
 		}
+	}
+
+	// Normalize MergeMethod after both layers have written. GitHub accepts
+	// only {"merge","squash","rebase"} and silently coercing in the API client
+	// hides typos from the user — capital "Squash" would be turned into
+	// "squash" without explanation. Lowercase + whitelist with fallback to
+	// default keeps the resolved value safe and surfaces invalid input
+	// later (doctor / merge command can compare against the default).
+	r.MergeMethod = strings.ToLower(strings.TrimSpace(r.MergeMethod))
+	switch r.MergeMethod {
+	case "merge", "squash", "rebase":
+	default:
+		r.MergeMethod = DefaultMergeMethod
 	}
 
 	return r
