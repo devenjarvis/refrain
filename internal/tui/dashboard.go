@@ -948,46 +948,60 @@ func secondUncompletedTask(plan string) string {
 // focusTaskDescription chooses the description lines for a session card in
 // focus mode and reports whether they should render in pending (italic) style.
 // For Building-phase sessions, line1 is the active task text and line2 is
-// the next task text (both raw). Priority: in_progress TodoItem > plan
-// firstUncompletedTask > fallback.
+// the next task text (both raw). Priority: plan firstUncompletedTask >
+// in_progress TodoItem > fallback. Plan checkboxes take precedence because
+// they are the build agent's authoritative contract (1:1 with [task N]
+// commits) and stay in sync via Claude's Edit tool; TodoWrite snapshots can
+// go stale when Claude omits subsequent calls. When a plan exists but all
+// checkboxes are done, we do NOT fall through to todos — the task-summary
+// path below handles that case. This mirrors sessionFocusStatus's priority.
 func focusTaskDescription(sess *agent.Session, budget int) (line1, line2 string, pending bool) {
 	if sess.LifecyclePhase() == agent.LifecycleInProgress && !sess.IsReviewable() {
-		if ag := sess.PrimaryAgent(); ag != nil {
-			todos := ag.Todos()
-			if len(todos) > 0 {
-				var activeText, nextPending string
-				for _, t := range todos {
-					if t.Status == "in_progress" {
-						activeText = t.ActiveForm
-						if activeText == "" {
-							activeText = t.Content
-						}
-						break
-					}
-				}
-				for _, t := range todos {
-					if t.Status == "pending" {
-						nextPending = t.Content
-						break
-					}
-				}
-				if activeText == "" && nextPending != "" {
-					activeText = nextPending
-					nextPending = ""
-				}
-				if activeText != "" {
-					l1 := truncateVisible(activeText, budget)
-					l2 := truncateVisible(nextPending, budget)
-					return l1, l2, false
-				}
-			}
-		}
-		// No todos: fall back to plan checkboxes.
+		skipTodos := false
+		// Plan checkboxes win when the plan has open tasks.
 		if plan, present := sess.CachedPlan(); present {
 			first := firstUncompletedTask(plan)
 			if first != "" {
 				second := secondUncompletedTask(plan)
 				return truncateVisible(first, budget), truncateVisible(second, budget), false
+			}
+			// Plan exists but all checkboxes done: skip todos so stale
+			// TodoWrite state doesn't resurface completed-looking tasks.
+			if total, _ := planTaskCounts(plan); total > 0 {
+				skipTodos = true
+			}
+		}
+		// No plan (or plan with zero checkboxes): consult todos.
+		if !skipTodos {
+			if ag := sess.PrimaryAgent(); ag != nil {
+				todos := ag.Todos()
+				if len(todos) > 0 {
+					var activeText, nextPending string
+					for _, t := range todos {
+						if t.Status == "in_progress" {
+							activeText = t.ActiveForm
+							if activeText == "" {
+								activeText = t.Content
+							}
+							break
+						}
+					}
+					for _, t := range todos {
+						if t.Status == "pending" {
+							nextPending = t.Content
+							break
+						}
+					}
+					if activeText == "" && nextPending != "" {
+						activeText = nextPending
+						nextPending = ""
+					}
+					if activeText != "" {
+						l1 := truncateVisible(activeText, budget)
+						l2 := truncateVisible(nextPending, budget)
+						return l1, l2, false
+					}
+				}
 			}
 		}
 	}

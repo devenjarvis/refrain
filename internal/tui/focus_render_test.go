@@ -447,10 +447,13 @@ func TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine(t *testing
 	}
 }
 
-// TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan verifies that
-// when the session's primary agent has an in_progress TodoItem, that item's
-// content wins on line 2 over the plan's first uncompleted task.
-func TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan(t *testing.T) {
+// TestRenderFocusSessionCard_PlanBackedBuilding_PlanOverridesTodo verifies that
+// when the session has both a plan with open tasks and an in_progress TodoItem,
+// the plan's first uncompleted task wins on line 2. Plan checkboxes are the
+// build agent's authoritative contract (1:1 with [task N] commits) and stay in
+// sync via Claude's Edit tool; TodoWrite snapshots can go stale when Claude
+// omits subsequent calls.
+func TestRenderFocusSessionCard_PlanBackedBuilding_PlanOverridesTodo(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
@@ -474,11 +477,11 @@ func TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan(t *testing.
 		t.Fatalf("expected 4-line card, got %d", len(card))
 	}
 	line2 := ansi.Strip(card[1])
-	if !strings.Contains(line2, "Running todo task") {
-		t.Errorf("line 2 should show in_progress todo's ActiveForm, got %q", line2)
+	if !strings.Contains(line2, "plan task one") {
+		t.Errorf("line 2 should show plan's first open task, got %q", line2)
 	}
-	if strings.Contains(line2, "plan task") {
-		t.Errorf("line 2 must not show plan task when todo overrides it, got %q", line2)
+	if strings.Contains(line2, "Running todo task") {
+		t.Errorf("line 2 must not show stale todo when plan is present, got %q", line2)
 	}
 }
 
