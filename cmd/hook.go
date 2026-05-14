@@ -8,16 +8,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/hook"
+	"github.com/devenjarvis/refrain/internal/hook"
 	"github.com/spf13/cobra"
 )
 
 var hookCmd = &cobra.Command{
 	Use:   "hook <event>",
-	Short: "Forward a Claude Code hook event to the running baton process",
-	Long: `hook is invoked by Claude Code via the settings file baton writes before
+	Short: "Forward a Claude Code hook event to the running refrain process",
+	Long: `hook is invoked by Claude Code via the settings file refrain writes before
 spawning a session. It reads the Claude hook JSON payload on stdin and
-forwards it to the baton TUI over the unix socket named by BATON_HOOK_SOCKET.
+forwards it to the refrain TUI over the unix socket named by REFRAIN_HOOK_SOCKET.
 
 This command is not intended to be run by humans. Output is kept silent —
 Claude interprets stdout from hooks as feedback. Errors go to stderr. Exit
@@ -55,17 +55,17 @@ func runHook(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	socketPath := os.Getenv("BATON_HOOK_SOCKET")
-	agentID := os.Getenv("BATON_AGENT_ID")
-	// Without the env vars there's no route to any running baton — exit
-	// silently so running `claude` outside of baton doesn't spew errors.
+	socketPath := os.Getenv("REFRAIN_HOOK_SOCKET")
+	agentID := os.Getenv("REFRAIN_AGENT_ID")
+	// Without the env vars there's no route to any running refrain — exit
+	// silently so running `claude` outside of refrain doesn't spew errors.
 	if socketPath == "" || agentID == "" {
 		return nil
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "baton hook: reading stdin:", err)
+		fmt.Fprintln(os.Stderr, "refrain hook: reading stdin:", err)
 		return nil
 	}
 
@@ -104,18 +104,18 @@ func runHook(cmd *cobra.Command, args []string) error {
 		e.ToolInput = payload.ToolInput
 	}
 
-	if os.Getenv("BATON_HOOK_DEBUG") != "" {
+	if os.Getenv("REFRAIN_HOOK_DEBUG") != "" {
 		hookDebugLog(socketPath, kind, payload.ToolName, e.ToolInput, raw)
 	}
 
 	if err := hook.SendEvent(socketPath, e); err != nil {
-		fmt.Fprintln(os.Stderr, "baton hook: forwarding event:", err)
+		fmt.Fprintln(os.Stderr, "refrain hook: forwarding event:", err)
 	}
 	return nil
 }
 
-// hookDebugLog appends a debug line to .baton/logs/hooks.log when BATON_HOOK_DEBUG is set.
-// socketPath is used to derive the .baton directory — it lives at <repo>/.baton/hook.sock.
+// hookDebugLog appends a debug line to .refrain/logs/hooks.log when REFRAIN_HOOK_DEBUG is set.
+// socketPath is used to derive the .refrain directory — it lives at <repo>/.refrain/hook.sock.
 func hookDebugLog(socketPath string, kind hook.Kind, toolName string, toolInput json.RawMessage, raw []byte) {
 	dir := filepath.Join(filepath.Dir(socketPath), "logs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

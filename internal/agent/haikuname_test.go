@@ -245,16 +245,16 @@ func writeEnvDumpingClaude(t *testing.T, dir, envFile, stdout string) {
 	}
 }
 
-func TestDefaultBranchNamer_StripsBatonHookEnv(t *testing.T) {
+func TestDefaultBranchNamer_StripsRefrainHookEnv(t *testing.T) {
 	dir := t.TempDir()
 	envFile := filepath.Join(dir, "env.txt")
 	writeEnvDumpingClaude(t, dir, envFile, "result-slug")
 	withPATH(t, dir)
 
-	t.Setenv("BATON_HOOK_SOCKET", "/should/not/leak.sock")
-	t.Setenv("BATON_AGENT_ID", "should-not-leak")
-	// Sentinel non-baton var should still be inherited.
-	t.Setenv("BATON_KEEPME_TESTONLY", "yes")
+	t.Setenv("REFRAIN_HOOK_SOCKET", "/should/not/leak.sock")
+	t.Setenv("REFRAIN_AGENT_ID", "should-not-leak")
+	// Sentinel non-refrain var should still be inherited.
+	t.Setenv("REFRAIN_KEEPME_TESTONLY", "yes")
 
 	namer := DefaultBranchNamer()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -269,33 +269,33 @@ func TestDefaultBranchNamer_StripsBatonHookEnv(t *testing.T) {
 		t.Fatalf("read env file: %v", err)
 	}
 	body := string(envContents)
-	for _, banned := range []string{"BATON_HOOK_SOCKET=", "BATON_AGENT_ID="} {
+	for _, banned := range []string{"REFRAIN_HOOK_SOCKET=", "REFRAIN_AGENT_ID="} {
 		if strings.Contains(body, banned) {
 			t.Errorf("subprocess env contained %q; should have been stripped\n%s", banned, body)
 		}
 	}
-	if !strings.Contains(body, "BATON_KEEPME_TESTONLY=yes") {
-		t.Errorf("subprocess env missing non-baton sentinel var; env stripping was too aggressive\n%s", body)
+	if !strings.Contains(body, "REFRAIN_KEEPME_TESTONLY=yes") {
+		t.Errorf("subprocess env missing non-refrain sentinel var; env stripping was too aggressive\n%s", body)
 	}
 }
 
 func TestSanitizedHaikuEnv(t *testing.T) {
 	in := []string{
 		"PATH=/usr/bin",
-		"BATON_HOOK_SOCKET=/sock",
+		"REFRAIN_HOOK_SOCKET=/sock",
 		"HOME=/home/u",
-		"BATON_AGENT_ID=abc",
-		"BATON_FOO=keepme",     // not in strip list
-		"BATON_HOOK_SOCKET_X=", // prefix-only similar key — must NOT be stripped
+		"REFRAIN_AGENT_ID=abc",
+		"REFRAIN_FOO=keepme",     // not in strip list
+		"REFRAIN_HOOK_SOCKET_X=", // prefix-only similar key — must NOT be stripped
 	}
 	out := sanitizedHaikuEnv(in)
 	got := strings.Join(out, "\n")
-	for _, banned := range []string{"BATON_HOOK_SOCKET=/sock", "BATON_AGENT_ID=abc"} {
+	for _, banned := range []string{"REFRAIN_HOOK_SOCKET=/sock", "REFRAIN_AGENT_ID=abc"} {
 		if strings.Contains(got, banned) {
 			t.Errorf("sanitized env contained %q\n%s", banned, got)
 		}
 	}
-	for _, kept := range []string{"PATH=/usr/bin", "HOME=/home/u", "BATON_FOO=keepme", "BATON_HOOK_SOCKET_X="} {
+	for _, kept := range []string{"PATH=/usr/bin", "HOME=/home/u", "REFRAIN_FOO=keepme", "REFRAIN_HOOK_SOCKET_X="} {
 		if !strings.Contains(got, kept) {
 			t.Errorf("sanitized env missing %q\n%s", kept, got)
 		}

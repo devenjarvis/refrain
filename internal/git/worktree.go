@@ -12,7 +12,7 @@ import (
 type WorktreeInfo struct {
 	Name       string // agent name
 	Path       string // absolute path to worktree dir
-	Branch     string // branch name (baton/<name>)
+	Branch     string // branch name (refrain/<name>)
 	BaseBranch string // branch worktree was created from
 }
 
@@ -92,15 +92,15 @@ func UpdateBaseBranch(repoPath, branch string) error {
 
 // CreateWorktree creates a new git worktree for the named agent.
 // branchPrefix and worktreeDir control naming and placement; pass empty
-// strings to use defaults ("baton/" and ".baton/worktrees").
+// strings to use defaults ("refrain/" and ".refrain/worktrees").
 // An optional startPoint specifies the commit to branch from; if omitted,
 // the worktree branches from the current HEAD.
 func CreateWorktree(repoPath, agentName, branchPrefix, worktreeDir, baseBranch string, startPoint ...string) (*WorktreeInfo, error) {
 	if branchPrefix == "" {
-		branchPrefix = "baton/"
+		branchPrefix = "refrain/"
 	}
 	if worktreeDir == "" {
-		worktreeDir = ".baton/worktrees"
+		worktreeDir = ".refrain/worktrees"
 	}
 
 	if baseBranch == "" {
@@ -140,10 +140,10 @@ func CreateWorktree(repoPath, agentName, branchPrefix, worktreeDir, baseBranch s
 // Unlike CreateWorktree, it does NOT create a new branch (no -b flag).
 // For remote-only branches, it fetches from origin first so git can
 // auto-create the local tracking branch.
-// worktreeDir defaults to ".baton/worktrees" if empty.
+// worktreeDir defaults to ".refrain/worktrees" if empty.
 func AttachWorktree(repoPath, name, worktreeDir, branch string) (*WorktreeInfo, error) {
 	if worktreeDir == "" {
-		worktreeDir = ".baton/worktrees"
+		worktreeDir = ".refrain/worktrees"
 	}
 
 	// Check if the branch exists locally.
@@ -242,12 +242,12 @@ func RemoveWorktree(repoPath string, wt *WorktreeInfo, deleteBranch bool) error 
 	return nil
 }
 
-// ListWorktrees returns all baton-managed worktrees in the repo.
-// branchPrefix controls which branches are considered baton-managed;
-// pass empty string to use the default ("baton/").
+// ListWorktrees returns all refrain-managed worktrees in the repo.
+// branchPrefix controls which branches are considered refrain-managed;
+// pass empty string to use the default ("refrain/").
 func ListWorktrees(repoPath, branchPrefix string) ([]*WorktreeInfo, error) {
 	if branchPrefix == "" {
-		branchPrefix = "baton/"
+		branchPrefix = "refrain/"
 	}
 
 	out, err := runGit(repoPath, "worktree", "list", "--porcelain")

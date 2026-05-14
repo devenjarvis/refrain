@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/diffmodel"
-	"github.com/devenjarvis/baton/internal/tui/diff"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/tui/diff"
 )
 
 func buildTree(t *testing.T, paths ...string) *diff.Tree {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devenjarvis/baton/internal/git"
+	"github.com/devenjarvis/refrain/internal/git"
 )
 
 func TestSlugify(t *testing.T) {
@@ -104,15 +104,15 @@ func TestSessionRenameBranch(t *testing.T) {
 		t.Error("HasClaudeName() should be false before rename")
 	}
 
-	actual, err := s.RenameBranch(repo, "baton/add-dark-mode")
+	actual, err := s.RenameBranch(repo, "refrain/add-dark-mode")
 	if err != nil {
 		t.Fatalf("RenameBranch: %v", err)
 	}
-	if actual != "baton/add-dark-mode" {
-		t.Errorf("expected branch %q, got %q", "baton/add-dark-mode", actual)
+	if actual != "refrain/add-dark-mode" {
+		t.Errorf("expected branch %q, got %q", "refrain/add-dark-mode", actual)
 	}
-	if s.Worktree.Branch != "baton/add-dark-mode" {
-		t.Errorf("Worktree.Branch = %q, want %q", s.Worktree.Branch, "baton/add-dark-mode")
+	if s.Worktree.Branch != "refrain/add-dark-mode" {
+		t.Errorf("Worktree.Branch = %q, want %q", s.Worktree.Branch, "refrain/add-dark-mode")
 	}
 	if s.Name != "add-dark-mode" {
 		t.Errorf("Session.Name = %q, want %q", s.Name, "add-dark-mode")
@@ -128,11 +128,11 @@ func TestSessionRenameBranch(t *testing.T) {
 	}
 
 	// Second rename is a no-op.
-	second, err := s.RenameBranch(repo, "baton/second-attempt")
+	second, err := s.RenameBranch(repo, "refrain/second-attempt")
 	if err != nil {
 		t.Fatalf("second RenameBranch: %v", err)
 	}
-	if second != "baton/add-dark-mode" {
+	if second != "refrain/add-dark-mode" {
 		t.Errorf("second rename should be no-op, got %q", second)
 	}
 	if s.Name != "add-dark-mode" {
@@ -225,10 +225,10 @@ func TestUpdateBranch(t *testing.T) {
 		t.Error("HasClaudeName() should be false before UpdateBranch")
 	}
 
-	s.UpdateBranch("baton/fix-login-bug")
+	s.UpdateBranch("refrain/fix-login-bug")
 
-	if s.Branch() != "baton/fix-login-bug" {
-		t.Errorf("Branch() = %q, want %q", s.Branch(), "baton/fix-login-bug")
+	if s.Branch() != "refrain/fix-login-bug" {
+		t.Errorf("Branch() = %q, want %q", s.Branch(), "refrain/fix-login-bug")
 	}
 	if s.CurrentName() != "fix-login-bug" {
 		t.Errorf("CurrentName() = %q, want %q", s.CurrentName(), "fix-login-bug")
@@ -247,17 +247,17 @@ func TestUpdateBranch_PreventsHaikuOverwrite(t *testing.T) {
 	}
 	s := newSession("session-1", "warm-ibis", wt)
 
-	s.UpdateBranch("baton/external-name")
+	s.UpdateBranch("refrain/external-name")
 
 	// RenameBranch must be a no-op because hasClaudeName is now true.
-	actual, err := s.RenameBranch(repo, "baton/haiku-would-set-this")
+	actual, err := s.RenameBranch(repo, "refrain/haiku-would-set-this")
 	if err != nil {
 		t.Fatalf("RenameBranch: %v", err)
 	}
-	if actual != "baton/external-name" {
-		t.Errorf("RenameBranch should no-op, got %q, want %q", actual, "baton/external-name")
+	if actual != "refrain/external-name" {
+		t.Errorf("RenameBranch should no-op, got %q, want %q", actual, "refrain/external-name")
 	}
-	if s.Branch() != "baton/external-name" {
-		t.Errorf("Branch() should stay %q after no-op, got %q", "baton/external-name", s.Branch())
+	if s.Branch() != "refrain/external-name" {
+		t.Errorf("Branch() should stay %q after no-op, got %q", "refrain/external-name", s.Branch())
 	}
 }

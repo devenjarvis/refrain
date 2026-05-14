@@ -9,7 +9,7 @@ import (
 	"runtime"
 )
 
-// Editor is a detected editor with a display name and the command baton stores
+// Editor is a detected editor with a display name and the command refrain stores
 // to launch it.
 type Editor struct {
 	Name    string

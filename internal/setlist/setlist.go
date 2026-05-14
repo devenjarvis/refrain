@@ -1,6 +1,6 @@
 // Package setlist persists a JSONL log of songs that have "played" for
-// Baton sessions. Each newly created session appends one entry to
-// ~/.baton/setlist.jsonl so the user can later browse a setlist of past
+// Refrain sessions. Each newly created session appends one entry to
+// ~/.refrain/setlist.jsonl so the user can later browse a setlist of past
 // sessions.
 package setlist
 
@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 // Entry is a single record in the setlist log.
@@ -28,11 +28,11 @@ type Entry struct {
 	SessionID string    `json:"sessionId,omitempty"`
 }
 
-// Path returns the absolute path to the setlist JSONL file inside ~/.baton.
+// Path returns the absolute path to the setlist JSONL file inside ~/.refrain.
 func Path() (string, error) {
-	dir, err := config.BatonDir()
+	dir, err := config.RefrainDir()
 	if err != nil {
-		return "", fmt.Errorf("setlist: resolving baton dir: %w", err)
+		return "", fmt.Errorf("setlist: resolving refrain dir: %w", err)
 	}
 	return filepath.Join(dir, "setlist.jsonl"), nil
 }

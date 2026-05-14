@@ -5,4 +5,4 @@
 - Review panel: press `r` on a queued session to open a full-screen review view showing your original prompt, top-changed files, and a logic/test/config ratio before going to GitHub
 - `m` key marks a finished session as ready for review; `d` defers from review back to the queue
 - `MaxReviewBacklog` config setting (default 5): warns before creating new agents when review backlog is large
-- Lifecycle phase and original prompt persist across baton restarts
+- Lifecycle phase and original prompt persist across refrain restarts

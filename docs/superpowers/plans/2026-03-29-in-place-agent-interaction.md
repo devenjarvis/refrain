@@ -258,7 +258,7 @@ Add to `internal/tui/app_test.go`:
 
 ```go
 func TestPanelFocusSwitching(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-focus-*")
+	dir, err := os.MkdirTemp("", "refrain-focus-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestPanelFocusSwitching(t *testing.T) {
 }
 
 func TestActionKeysBlockedInFocusTerminal(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-block-*")
+	dir, err := os.MkdirTemp("", "refrain-block-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/devenjarvis/baton/internal/agent"
+	"github.com/devenjarvis/refrain/internal/agent"
 	xvt "github.com/charmbracelet/x/vt"
 )
 ```

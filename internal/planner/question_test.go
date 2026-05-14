@@ -15,7 +15,7 @@ import (
 func shortSocketPath(t *testing.T) string {
 	t.Helper()
 	h := sha256.Sum256([]byte(t.Name() + fmt.Sprintf("-%d", time.Now().UnixNano())))
-	p := filepath.Join(os.TempDir(), fmt.Sprintf("baton-q-%x.sock", h[:6]))
+	p := filepath.Join(os.TempDir(), fmt.Sprintf("refrain-q-%x.sock", h[:6]))
 	t.Cleanup(func() { _ = os.Remove(p) })
 	return p
 }

@@ -47,8 +47,8 @@ func TestApplyHookEnv_NoOpWhenSocketEmpty(t *testing.T) {
 		t.Fatalf("expected no error with empty socket, got: %v", err)
 	}
 	for _, e := range cmd.Env {
-		if strings.HasPrefix(e, "BATON_HOOK_SOCKET=") || strings.HasPrefix(e, "BATON_AGENT_ID=") {
-			t.Errorf("expected no BATON_* env when socket empty, got %q", e)
+		if strings.HasPrefix(e, "REFRAIN_HOOK_SOCKET=") || strings.HasPrefix(e, "REFRAIN_AGENT_ID=") {
+			t.Errorf("expected no REFRAIN_* env when socket empty, got %q", e)
 		}
 	}
 }
@@ -60,8 +60,8 @@ func TestApplyHookEnv_NoOpWhenProgramNotClaude(t *testing.T) {
 		t.Fatalf("expected no error for non-claude program, got: %v", err)
 	}
 	for _, e := range cmd.Env {
-		if strings.HasPrefix(e, "BATON_HOOK_SOCKET=") {
-			t.Errorf("expected no BATON_HOOK_SOCKET for non-claude program, got %q", e)
+		if strings.HasPrefix(e, "REFRAIN_HOOK_SOCKET=") {
+			t.Errorf("expected no REFRAIN_HOOK_SOCKET for non-claude program, got %q", e)
 		}
 	}
 }
@@ -69,15 +69,15 @@ func TestApplyHookEnv_NoOpWhenProgramNotClaude(t *testing.T) {
 func TestApplyHookEnv_SetsEnvWhenWired(t *testing.T) {
 	cmd := exec.Command("echo")
 	cfg := Config{AgentProgram: "claude"}
-	if err := applyHookEnv(cmd, cfg, "agent-42", "/tmp/baton-hook.sock"); err != nil {
+	if err := applyHookEnv(cmd, cfg, "agent-42", "/tmp/refrain-hook.sock"); err != nil {
 		t.Fatalf("applyHookEnv: %v", err)
 	}
 
-	if !slices.Contains(cmd.Env, "BATON_HOOK_SOCKET=/tmp/baton-hook.sock") {
-		t.Errorf("expected BATON_HOOK_SOCKET in env, got %v", cmd.Env)
+	if !slices.Contains(cmd.Env, "REFRAIN_HOOK_SOCKET=/tmp/refrain-hook.sock") {
+		t.Errorf("expected REFRAIN_HOOK_SOCKET in env, got %v", cmd.Env)
 	}
-	if !slices.Contains(cmd.Env, "BATON_AGENT_ID=agent-42") {
-		t.Errorf("expected BATON_AGENT_ID=agent-42 in env, got %v", cmd.Env)
+	if !slices.Contains(cmd.Env, "REFRAIN_AGENT_ID=agent-42") {
+		t.Errorf("expected REFRAIN_AGENT_ID=agent-42 in env, got %v", cmd.Env)
 	}
 }
 
@@ -92,8 +92,8 @@ func TestApplyHookEnv_ErrorsWhenAgentIDMissing(t *testing.T) {
 		t.Errorf("expected error to mention agentID, got: %v", err)
 	}
 	for _, e := range cmd.Env {
-		if strings.HasPrefix(e, "BATON_HOOK_SOCKET=") {
-			t.Errorf("env should not contain BATON_HOOK_SOCKET on error, got %q", e)
+		if strings.HasPrefix(e, "REFRAIN_HOOK_SOCKET=") {
+			t.Errorf("env should not contain REFRAIN_HOOK_SOCKET on error, got %q", e)
 		}
 	}
 }
@@ -129,7 +129,7 @@ func TestBuildHookArgs_WritesSettingsAndReturnsFlags(t *testing.T) {
 	if len(args) != 2 || args[0] != "--settings" {
 		t.Fatalf("expected [--settings <path>], got %v", args)
 	}
-	wantPath := filepath.Join(dir, ".baton", "hooks.json")
+	wantPath := filepath.Join(dir, ".refrain", "hooks.json")
 	if args[1] != wantPath {
 		t.Errorf("settings path = %q, want %q", args[1], wantPath)
 	}

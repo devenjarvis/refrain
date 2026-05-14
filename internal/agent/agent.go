@@ -12,9 +12,9 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	xvt "github.com/charmbracelet/x/vt"
-	"github.com/devenjarvis/baton/internal/hook"
-	bpty "github.com/devenjarvis/baton/internal/pty"
-	"github.com/devenjarvis/baton/internal/vt"
+	"github.com/devenjarvis/refrain/internal/hook"
+	bpty "github.com/devenjarvis/refrain/internal/pty"
+	"github.com/devenjarvis/refrain/internal/vt"
 )
 
 // TodoItem represents a single entry from a TodoWrite tool call.
@@ -122,9 +122,9 @@ func supportsHooks(cfg Config) bool {
 
 // newAgent creates and starts an agent with the configured agent program.
 // The worktreePath is provided by the session — agents do not create worktrees.
-// socketPath is the unix socket the baton-hook CLI should dial; when non-empty,
+// socketPath is the unix socket the refrain hook CLI should dial; when non-empty,
 // a Claude settings file is written that routes SessionStart/Stop/SessionEnd
-// events back to this baton process.
+// events back to this refrain process.
 func newAgent(id string, cfg Config, worktreePath, socketPath string) (*Agent, error) {
 	term := vt.New(cfg.Cols, cfg.Rows)
 
@@ -282,22 +282,22 @@ func buildSpawnArgs(cfg Config, worktreePath, socketPath string) ([]string, erro
 // `--settings <path>` pair. Returns an empty slice when hooks are disabled
 // (socketPath empty, or agent program is not claude).
 //
-// The file lives at `<worktreePath>/.baton/hooks.json` so it sits inside the
-// already-gitignored `.baton/` tree and doesn't show up as an untracked file
+// The file lives at `<worktreePath>/.refrain/hooks.json` so it sits inside the
+// already-gitignored `.refrain/` tree and doesn't show up as an untracked file
 // in the user's worktree `git status`.
 func buildHookArgs(cfg Config, worktreePath, socketPath string) ([]string, error) {
 	if socketPath == "" || !supportsHooks(cfg) {
 		return nil, nil
 	}
-	hookPath := filepath.Join(worktreePath, ".baton", "hooks.json")
+	hookPath := filepath.Join(worktreePath, ".refrain", "hooks.json")
 	if err := hook.WriteHooksFile(hookPath); err != nil {
 		return nil, fmt.Errorf("writing hooks settings: %w", err)
 	}
 	return []string{"--settings", hookPath}, nil
 }
 
-// applyHookEnv sets BATON_HOOK_SOCKET and BATON_AGENT_ID on cmd so the
-// baton-hook CLI (invoked by claude) knows where to forward events.
+// applyHookEnv sets REFRAIN_HOOK_SOCKET and REFRAIN_AGENT_ID on cmd so the
+// refrain hook CLI (invoked by claude) knows where to forward events.
 // No-op when hooks are disabled for this program (socketPath empty or
 // program is not claude).
 //
@@ -313,8 +313,8 @@ func applyHookEnv(cmd *exec.Cmd, cfg Config, agentID, socketPath string) error {
 	}
 	cmd.Env = append(
 		cmd.Env,
-		"BATON_HOOK_SOCKET="+socketPath,
-		"BATON_AGENT_ID="+agentID,
+		"REFRAIN_HOOK_SOCKET="+socketPath,
+		"REFRAIN_AGENT_ID="+agentID,
 	)
 	return nil
 }
@@ -565,16 +565,16 @@ func (a *Agent) OnHookEvent(e hook.Event) (changed bool) {
 				Todos []TodoItem `json:"todos"`
 			}
 			if err := json.Unmarshal(e.ToolInput, &inp); err != nil {
-				if os.Getenv("BATON_HOOK_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "baton: TodoWrite unmarshal err=%v input=%s\n", err, e.ToolInput)
+				if os.Getenv("REFRAIN_HOOK_DEBUG") != "" {
+					fmt.Fprintf(os.Stderr, "refrain: TodoWrite unmarshal err=%v input=%s\n", err, e.ToolInput)
 				}
 			} else {
 				a.todos = make([]TodoItem, len(inp.Todos))
 				copy(a.todos, inp.Todos)
 				a.todosUpdatedAt = time.Now()
 				todosChanged = true
-				if os.Getenv("BATON_HOOK_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "baton: TodoWrite populated todos=%d\n", len(a.todos))
+				if os.Getenv("REFRAIN_HOOK_DEBUG") != "" {
+					fmt.Fprintf(os.Stderr, "refrain: TodoWrite populated todos=%d\n", len(a.todos))
 				}
 			}
 		}

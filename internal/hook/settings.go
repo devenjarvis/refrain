@@ -31,16 +31,16 @@ type hookCommand struct {
 }
 
 // WriteHooksFile writes a minimal Claude settings file to path that wires up
-// SessionStart, Stop, and SessionEnd to `baton hook <event>`.
+// SessionStart, Stop, and SessionEnd to `refrain hook <event>`.
 //
-// The baton binary is resolved via os.Executable so the generated file works
+// The refrain binary is resolved via os.Executable so the generated file works
 // regardless of where Claude is invoked from. Socket path and agent ID are
-// not baked into the command — they travel through BATON_HOOK_SOCKET and
-// BATON_AGENT_ID, which the baton-hook CLI reads at runtime.
+// not baked into the command — they travel through REFRAIN_HOOK_SOCKET and
+// REFRAIN_AGENT_ID, which the refrain hook CLI reads at runtime.
 func WriteHooksFile(path string) error {
 	batonPath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolving baton binary: %w", err)
+		return fmt.Errorf("resolving refrain binary: %w", err)
 	}
 	// Symlink resolution gives us a stable path; fall back to the raw result if
 	// EvalSymlinks fails for any reason.

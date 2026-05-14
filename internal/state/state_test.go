@@ -13,7 +13,7 @@ import (
 func TestRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
-	saved := &BatonState{
+	saved := &RefrainState{
 		Version: 1,
 		SavedAt: time.Now().Truncate(time.Second),
 		Sessions: []SessionState{
@@ -22,7 +22,7 @@ func TestRoundTrip(t *testing.T) {
 				Name:         "warm-xerus",
 				DisplayName:  "Warm Xerus",
 				WorktreePath: "/tmp/worktrees/warm-xerus",
-				Branch:       "baton/warm-xerus",
+				Branch:       "refrain/warm-xerus",
 				BaseBranch:   "main",
 				Agents: []AgentState{
 					{
@@ -42,7 +42,7 @@ func TestRoundTrip(t *testing.T) {
 				ID:           "sess-2",
 				Name:         "dark-drake",
 				WorktreePath: "/tmp/worktrees/dark-drake",
-				Branch:       "baton/dark-drake",
+				Branch:       "refrain/dark-drake",
 				BaseBranch:   "main",
 				Agents:       []AgentState{},
 			},
@@ -84,7 +84,7 @@ func TestRoundTrip(t *testing.T) {
 	if s.WorktreePath != "/tmp/worktrees/warm-xerus" {
 		t.Errorf("WorktreePath: got %q", s.WorktreePath)
 	}
-	if s.Branch != "baton/warm-xerus" {
+	if s.Branch != "refrain/warm-xerus" {
 		t.Errorf("Branch: got %q", s.Branch)
 	}
 	if s.BaseBranch != "main" {
@@ -142,7 +142,7 @@ func TestLoadMissingFile(t *testing.T) {
 func TestRemoveIdempotent(t *testing.T) {
 	dir := t.TempDir()
 
-	saved := &BatonState{
+	saved := &RefrainState{
 		Version:  1,
 		SavedAt:  time.Now().Truncate(time.Second),
 		Sessions: []SessionState{},
@@ -172,7 +172,7 @@ func TestSaveCreatesBatonDir(t *testing.T) {
 	// Use a subdirectory that doesn't exist yet
 	repoPath := filepath.Join(dir, "newrepo")
 
-	saved := &BatonState{
+	saved := &RefrainState{
 		Version:  1,
 		SavedAt:  time.Now().Truncate(time.Second),
 		Sessions: []SessionState{},
@@ -182,13 +182,13 @@ func TestSaveCreatesBatonDir(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Verify the .baton directory was created
-	info, err := os.Stat(filepath.Join(repoPath, ".baton"))
+	// Verify the .refrain directory was created
+	info, err := os.Stat(filepath.Join(repoPath, ".refrain"))
 	if err != nil {
-		t.Fatalf("Expected .baton dir to exist: %v", err)
+		t.Fatalf("Expected .refrain dir to exist: %v", err)
 	}
 	if !info.IsDir() {
-		t.Fatal(".baton should be a directory")
+		t.Fatal(".refrain should be a directory")
 	}
 
 	// Verify the file exists and is loadable
@@ -208,7 +208,7 @@ func TestSessionState_LifecyclePersistence(t *testing.T) {
 	dir := t.TempDir()
 
 	doneAt := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
-	original := &BatonState{
+	original := &RefrainState{
 		Version: 1,
 		Sessions: []SessionState{
 			{
@@ -256,7 +256,7 @@ func TestSaveConcurrent(t *testing.T) {
 	for i := range writers {
 		go func() {
 			defer wg.Done()
-			s := &BatonState{
+			s := &RefrainState{
 				Version: 1,
 				SavedAt: time.Now(),
 				Sessions: []SessionState{
@@ -279,10 +279,10 @@ func TestSaveConcurrent(t *testing.T) {
 	}
 
 	// No leftover .json.tmp files should remain.
-	batonDir := filepath.Join(dir, ".baton")
-	entries, err := os.ReadDir(batonDir)
+	refrainDir := filepath.Join(dir, ".refrain")
+	entries, err := os.ReadDir(refrainDir)
 	if err != nil {
-		t.Fatalf("read .baton: %v", err)
+		t.Fatalf("read .refrain: %v", err)
 	}
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".tmp") {
@@ -293,11 +293,11 @@ func TestSaveConcurrent(t *testing.T) {
 
 func TestLoadCorruptFile(t *testing.T) {
 	dir := t.TempDir()
-	batonDir := filepath.Join(dir, ".baton")
-	if err := os.MkdirAll(batonDir, 0o755); err != nil {
+	refrainDir := filepath.Join(dir, ".refrain")
+	if err := os.MkdirAll(refrainDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(batonDir, "state.json"), []byte("{not json"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(refrainDir, "state.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -315,16 +315,16 @@ func TestLoadCorruptFile(t *testing.T) {
 
 func TestSaveDirCreateFailure(t *testing.T) {
 	dir := t.TempDir()
-	// Make repoPath/.baton a regular file so MkdirAll fails.
-	blocker := filepath.Join(dir, ".baton")
+	// Make repoPath/.refrain a regular file so MkdirAll fails.
+	blocker := filepath.Join(dir, ".refrain")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	s := &BatonState{Version: 1, SavedAt: time.Now()}
+	s := &RefrainState{Version: 1, SavedAt: time.Now()}
 	err := Save(dir, s)
 	if err == nil {
-		t.Fatal("expected error when .baton is a regular file, got nil")
+		t.Fatal("expected error when .refrain is a regular file, got nil")
 	}
 	if !strings.Contains(err.Error(), "creating dir") {
 		t.Errorf("expected dir-creation error, got: %v", err)
@@ -335,11 +335,11 @@ func TestSessionState_BackwardsCompatibility(t *testing.T) {
 	// A state file without lifecycle fields should load with empty defaults.
 	dir := t.TempDir()
 	raw := `{"version":1,"savedAt":"2026-05-03T00:00:00Z","sessions":[{"id":"s1","name":"test","worktreePath":"/tmp","branch":"main","ownsBranch":true,"agents":[]}]}`
-	batonDir := filepath.Join(dir, ".baton")
-	if err := os.MkdirAll(batonDir, 0o755); err != nil {
+	refrainDir := filepath.Join(dir, ".refrain")
+	if err := os.MkdirAll(refrainDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(batonDir, "state.json"), []byte(raw), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(refrainDir, "state.json"), []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := Load(dir)

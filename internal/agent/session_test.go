@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/git"
+	"github.com/devenjarvis/refrain/internal/git"
 )
 
 func TestSessionCreation(t *testing.T) {
@@ -1137,7 +1137,7 @@ func TestSession_WritePlan_AppendsToGitignoreWhenMissing(t *testing.T) {
 	s := newSession("id", "name", &git.WorktreeInfo{Path: dir})
 
 	gitignorePath := filepath.Join(dir, ".gitignore")
-	if err := os.WriteFile(gitignorePath, []byte("node_modules\n.baton/\n"), 0o644); err != nil {
+	if err := os.WriteFile(gitignorePath, []byte("node_modules\n.refrain/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1226,7 +1226,7 @@ func TestClaudeIgnoreCovered(t *testing.T) {
 		want bool
 	}{
 		{"empty", "", false},
-		{"unrelated", "node_modules\n.baton/\n", false},
+		{"unrelated", "node_modules\n.refrain/\n", false},
 		{"with slash", ".claude/\n", true},
 		{"without slash", ".claude\n", true},
 		{"surrounded", "node_modules\n.claude/\nfoo\n", true},

@@ -11,9 +11,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/tui/mdrender"
-	"github.com/devenjarvis/baton/internal/tui/mdtextarea"
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/tui/mdrender"
+	"github.com/devenjarvis/refrain/internal/tui/mdtextarea"
 )
 
 // planEditorChromaStyle is the chroma style used by the markdown renderer.

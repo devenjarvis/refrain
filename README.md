@@ -1,32 +1,32 @@
-# Baton
+# Refrain
 
 A terminal-native dashboard for running [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents in parallel — designed around how many agents a human can actually oversee, not how many you can launch.
 
 <!-- TODO: record demo GIF and replace placeholder -->
-![Baton demo](docs/demo.gif)
+![Refrain demo](docs/demo.gif)
 
-> **Alpha software — v0.1.0 shipped.** The core loop is working and stabilizing, but rough edges remain. APIs, config schema, and keybindings may change between versions. Git operations are conservative — Baton only writes to `baton/*` branches inside `.baton/worktrees/` and uses `git merge --no-ff` with explicit confirmation — but keep your work committed and file issues when things break.
+> **Alpha software — v0.1.0 shipped.** The core loop is working and stabilizing, but rough edges remain. APIs, config schema, and keybindings may change between versions. Git operations are conservative — Refrain only writes to `refrain/*` branches inside `.refrain/worktrees/` and uses `git merge --no-ff` with explicit confirmation — but keep your work committed and file issues when things break.
 
 ## Install
 
 **Homebrew (recommended):**
 
 ```bash
-brew install devenjarvis/tap/baton
+brew install devenjarvis/tap/refrain
 ```
 
 **Go install:**
 
 ```bash
-go install github.com/devenjarvis/baton@latest
+go install github.com/devenjarvis/refrain@latest
 ```
 
 **Build from source:**
 
 ```bash
-git clone https://github.com/devenjarvis/baton.git
-cd baton
-go build -o baton .
+git clone https://github.com/devenjarvis/refrain.git
+cd refrain
+go build -o refrain .
 ```
 
 ## Requirements
@@ -38,33 +38,33 @@ go build -o baton .
 Verify your environment:
 
 ```bash
-baton doctor
+refrain doctor
 ```
 
-`doctor` checks git, Claude Code, the baton binary, hook-pipeline round-trip, and GitHub auth.
+`doctor` checks git, Claude Code, the refrain binary, hook-pipeline round-trip, and GitHub auth.
 
-## Why Baton?
+## Why Refrain?
 
-Most parallel-agent tools optimize for throughput — how many agents you can run at once. Baton optimizes for the human running them. The whole product is built around a single, opinionated workflow: **one primary goal, up to three agents, a defined review point, and a 90-minute block.**
+Most parallel-agent tools optimize for throughput — how many agents you can run at once. Refrain optimizes for the human running them. The whole product is built around a single, opinionated workflow: **one primary goal, up to three agents, a defined review point, and a 90-minute block.**
 
 That opinion is grounded in evidence. BCG's 2026 study (n=1,488) found developers managing more than ~3 concurrent agents made 39% more errors and reported 33% more decision fatigue. METR's 2025 RCT measured a 19% productivity *slowdown* among experienced developers using AI tools, driven almost entirely by verification overhead. And every unnecessary context switch costs ~9.5 minutes of recovery time. The instinct to spawn another agent is almost always right; the instinct to monitor all of them simultaneously is what drains the day.
 
-Baton turns that into a workflow:
+Refrain turns that into a workflow:
 
 - **One pipeline, one cursor.** A four-section dashboard — PLANNING → BUILDING → REVIEWING → SHIPPING — replaces tmux pane-juggling and tab-switching. `j`/`k` walk every section; everything else acts on whatever the cursor is on.
-- **Isolated git worktrees per session.** Each agent works on `baton/<name>` under `.baton/worktrees/`. Branches are conservative, merges are explicit (`git merge --no-ff` with confirmation), and your main checkout is never touched.
-- **Batch review, not continuous monitoring.** Hook-driven status (idle / active / waiting / done / error) means Baton tells you when an agent needs you. You don't watch streams — you check in when there's something to check.
-- **Wellness baked in, not bolted on.** A soft 3-agent cap, an automatic break overlay at 90 minutes, suppressed chimes for routine state changes, and a `.baton/logs/wellness.log` of every block. These aren't toggles — they're the product.
+- **Isolated git worktrees per session.** Each agent works on `refrain/<name>` under `.refrain/worktrees/`. Branches are conservative, merges are explicit (`git merge --no-ff` with confirmation), and your main checkout is never touched.
+- **Batch review, not continuous monitoring.** Hook-driven status (idle / active / waiting / done / error) means Refrain tells you when an agent needs you. You don't watch streams — you check in when there's something to check.
+- **Wellness baked in, not bolted on.** A soft 3-agent cap, an automatic break overlay at 90 minutes, suppressed chimes for routine state changes, and a `.refrain/logs/wellness.log` of every block. These aren't toggles — they're the product.
 
-If you want to run 8 agents for 4 hours straight, Baton is the wrong tool. If you want to actually finish three things in a focused block and ship them, keep reading.
+If you want to run 8 agents for 4 hours straight, Refrain is the wrong tool. If you want to actually finish three things in a focused block and ship them, keep reading.
 
 ## Quick Start
 
 ```bash
-baton                         # inside any git repo
+refrain                         # inside any git repo
 ```
 
-The first run registers the repo and adds `.baton/` to `.gitignore`. From there:
+The first run registers the repo and adds `.refrain/` to `.gitignore`. From there:
 
 1. `n` — create a session. It lands in PLANNING; the cursor jumps to it and opens its terminal so you can scope the work with Claude.
 2. `b` — promote the planning session to BUILDING when you've nailed down what to do.
@@ -148,7 +148,7 @@ Mouse: single-click on a session card moves the cursor; double-click activates (
 
 ## Branch naming
 
-New sessions start on a random adjective-noun branch (e.g. `baton/warm-ibis`) so Claude can launch immediately. On the first real `user-prompt-submit`, the branch is renamed in place — `git branch -m` atomically updates the worktree's HEAD symref — to a slug of the prompt, e.g. `baton/add-dark-mode-to-dashboard`. Slash commands (`/clear`, `/help`) are skipped, so the next real prompt still triggers the rename. Sessions started on an existing branch (`o`) keep that branch as-is.
+New sessions start on a random adjective-noun branch (e.g. `refrain/warm-ibis`) so Claude can launch immediately. On the first real `user-prompt-submit`, the branch is renamed in place — `git branch -m` atomically updates the worktree's HEAD symref — to a slug of the prompt, e.g. `refrain/add-dark-mode-to-dashboard`. Slash commands (`/clear`, `/help`) are skipped, so the next real prompt still triggers the rename. Sessions started on an existing branch (`o`) keep that branch as-is.
 
 The prefix is configurable via `BranchPrefix` in global or per-repo settings, and supports two template variables:
 
@@ -161,23 +161,23 @@ Unknown `{tokens}` are left literal. Example: `BranchPrefix: "{user}/"` produces
 
 The dashboard surfaces three wellness affordances tuned to keep parallel-agent work sustainable:
 
-- **Session timer** (`focus_session_minutes`, default `90`) — when the configured block elapses, Baton automatically opens a centered break overlay with a coherent-breathing animation.
+- **Session timer** (`focus_session_minutes`, default `90`) — when the configured block elapses, Refrain automatically opens a centered break overlay with a coherent-breathing animation.
 - **Soft agent limit** (`max_concurrent_agents`, default `3`) — pressing `n` past the cap shows a one-key warning; pressing `n` a second time overrides and spawns anyway.
 - **Soft review backlog** (`max_review_backlog`, default `5`) — same two-press override pattern when the REVIEWING section has too many sessions waiting.
 
-Every block (work + break) is appended to `.baton/logs/wellness.log` so you can audit your own pacing later.
+Every block (work + break) is appended to `.refrain/logs/wellness.log` so you can audit your own pacing later.
 
 ## How It Works
 
-When you create a session, Baton:
+When you create a session, Refrain:
 
-1. Creates an isolated git worktree at `.baton/worktrees/<name>` on branch `baton/<name>`.
-2. Writes a settings file wiring Claude Code's hooks (`session-start`, `stop`, `notification`, `user-prompt-submit`, `session-end`) to `baton hook <event>` and points Claude at it with `claude --settings`.
+1. Creates an isolated git worktree at `.refrain/worktrees/<name>` on branch `refrain/<name>`.
+2. Writes a settings file wiring Claude Code's hooks (`session-start`, `stop`, `notification`, `user-prompt-submit`, `session-end`) to `refrain hook <event>` and points Claude at it with `claude --settings`.
 3. Spawns `claude "<task>"` in a PTY inside the worktree.
 4. Feeds PTY output through a virtual terminal emulator ([charmbracelet/x/vt](https://github.com/charmbracelet/x/vt)) and renders it in the dashboard via [Bubble Tea v2](https://github.com/charmbracelet/bubbletea).
 5. Listens on a per-process unix socket for hook events so the TUI can distinguish idle / active / waiting / done states without screen-scraping.
 
-When you merge, Baton runs `git merge --no-ff` from the worktree branch into the session's base branch and cleans up the worktree.
+When you merge, Refrain runs `git merge --no-ff` from the worktree branch into the session's base branch and cleans up the worktree.
 
 ## What's Coming
 
@@ -187,15 +187,15 @@ When you merge, Baton runs `git merge --no-ff` from the worktree branch into the
 
 ## Development
 
-Baton is Go 1.25, single-binary. Common loop:
+Refrain is Go 1.25, single-binary. Common loop:
 
 ```bash
-go build -o baton .         # build
+go build -o refrain .         # build
 go test -race ./...         # run unit tests with the race detector (required before committing)
 go vet ./...                # static analysis
 golangci-lint run           # lint (config in .golangci.yml)
 gofumpt -w .                # format
-./baton doctor              # validate environment + hook pipeline round-trip
+./refrain doctor              # validate environment + hook pipeline round-trip
 ```
 
 End-to-end TUI tests live under `internal/e2e/` behind the `e2e` build tag (needs [`tu`](https://github.com/charmbracelet/x/tree/main/tu) v0.6.0+):
@@ -210,7 +210,7 @@ For architecture, internal package layout, and the design philosophy behind the 
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). Bug reports and focused PRs are welcome; because Baton is a single-maintainer alpha, larger feature proposals should start as an issue. Proposals that increase raw parallel-agent throughput at the cost of monitoring burden are unlikely to land — see the design philosophy in [CLAUDE.md](./CLAUDE.md).
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Bug reports and focused PRs are welcome; because Refrain is a single-maintainer alpha, larger feature proposals should start as an issue. Proposals that increase raw parallel-agent throughput at the cost of monitoring burden are unlikely to land — see the design philosophy in [CLAUDE.md](./CLAUDE.md).
 
 ## Security
 

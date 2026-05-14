@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/pty"
+	"github.com/devenjarvis/refrain/internal/pty"
 )
 
 func TestStartEchoAndReadOutput(t *testing.T) {

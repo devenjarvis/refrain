@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/github"
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/github"
 )
 
 // renderShippingPanel renders the fullscreen shipping panel for a session.

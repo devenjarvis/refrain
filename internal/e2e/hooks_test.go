@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-// claudeStubScript is a bash stub installed as `<dir>/claude`. Baton's
+// claudeStubScript is a bash stub installed as `<dir>/claude`. Refrain's
 // supportsHooks check keys off filepath.Base(agent_program), so the file must
-// be named `claude`. The stub ignores any args (baton passes
-// `--settings <path>`), inherits BATON_HOOK_SOCKET / BATON_AGENT_ID from
-// baton's env wiring, and drives the pipeline by invoking
-// `$BATON_E2E_BATON hook <event>` at scripted intervals.
+// be named `claude`. The stub ignores any args (refrain passes
+// `--settings <path>`), inherits REFRAIN_HOOK_SOCKET / REFRAIN_AGENT_ID from
+// refrain's env wiring, and drives the pipeline by invoking
+// `$REFRAIN_E2E_BINARY hook <event>` at scripted intervals.
 //
 // Sequence (seconds since start):
 //
@@ -24,30 +24,30 @@ import (
 //	3.5  stop            → Idle
 //	5.5  user-prompt-submit → Active (re-armed)
 //	7.5  stop            → Idle
-//	then sleep 3600 so baton keeps it alive until test teardown kills it.
+//	then sleep 3600 so refrain keeps it alive until test teardown kills it.
 const claudeStubScript = `#!/bin/bash
 echo "claude-e2e-stub ready"
 sleep 0.3
-"$BATON_E2E_BATON" hook session-start <<< '{"session_id":"e2e-sess-1","cwd":"/tmp"}'
+"$REFRAIN_E2E_BINARY" hook session-start <<< '{"session_id":"e2e-sess-1","cwd":"/tmp"}'
 sleep 1.2
-"$BATON_E2E_BATON" hook notification <<< '{"session_id":"e2e-sess-1","message":"Claude needs permission"}'
+"$REFRAIN_E2E_BINARY" hook notification <<< '{"session_id":"e2e-sess-1","message":"Claude needs permission"}'
 sleep 2
-"$BATON_E2E_BATON" hook stop <<< '{"session_id":"e2e-sess-1"}'
+"$REFRAIN_E2E_BINARY" hook stop <<< '{"session_id":"e2e-sess-1"}'
 sleep 2
-"$BATON_E2E_BATON" hook user-prompt-submit <<< '{"session_id":"e2e-sess-1"}'
+"$REFRAIN_E2E_BINARY" hook user-prompt-submit <<< '{"session_id":"e2e-sess-1"}'
 sleep 2
-"$BATON_E2E_BATON" hook stop <<< '{"session_id":"e2e-sess-1"}'
+"$REFRAIN_E2E_BINARY" hook stop <<< '{"session_id":"e2e-sess-1"}'
 sleep 3600
 `
 
-// TestHookPipeline drives baton through a scripted bash "claude" stub that
+// TestHookPipeline drives refrain through a scripted bash "claude" stub that
 // emits each hook kind in turn, and asserts the dashboard bubble transitions
 // Active → Waiting → Idle → Active → Idle. This is the end-to-end check that
 // the plan calls for: hooks file wiring, socket forwarding, agent status
 // transitions, and dashboard rendering all working in concert.
 func TestHookPipeline(t *testing.T) {
 	// Install the stub as a file named `claude` in a short-path temp dir.
-	// The basename must be exactly "claude" so baton's supportsHooks check
+	// The basename must be exactly "claude" so refrain's supportsHooks check
 	// fires and the agent gets --settings + socket env wired up.
 	stubDir, err := os.MkdirTemp("", "bs")
 	if err != nil {
@@ -60,30 +60,30 @@ func TestHookPipeline(t *testing.T) {
 	}
 
 	s := newSession(t)
-	// Point both global and repo config at the stub so whichever baton reads
-	// wins, and pass BATON_E2E_BATON through tu so the stub can invoke the
+	// Point both global and repo config at the stub so whichever refrain reads
+	// wins, and pass REFRAIN_E2E_BINARY through tu so the stub can invoke the
 	// hook CLI without needing to know the binary path itself.
 	// plan_first_enabled is pinned off here for the same reason as in
 	// helpers_test.go: this test exercises the hook pipeline via `n` →
 	// immediate spawn, not the plan-first prompt-modal flow. Re-stating
 	// the override is necessary because this writeJSON overwrites the
 	// helper's config rather than merging with it.
-	writeJSON(t, filepath.Join(s.home, ".baton", "config.json"), map[string]any{
+	writeJSON(t, filepath.Join(s.home, ".refrain", "config.json"), map[string]any{
 		"agent_program":      stubPath,
 		"bypass_permissions": false,
 		"plan_first_enabled": false,
 	})
-	writeJSON(t, filepath.Join(s.repoDir, ".baton", "config.json"), map[string]any{
+	writeJSON(t, filepath.Join(s.repoDir, ".refrain", "config.json"), map[string]any{
 		"agent_program":      stubPath,
 		"bypass_permissions": false,
 		"plan_first_enabled": false,
 	})
-	s.extraEnv = append(s.extraEnv, "BATON_E2E_BATON="+batonBin)
+	s.extraEnv = append(s.extraEnv, "REFRAIN_E2E_BINARY="+refrainBin)
 	s.Start()
 
 	s.WaitForText("FOCUS", 10000)
 	s.Press("n")
-	// After "n", baton spawns the stub and auto-focuses its PTY. The stub
+	// After "n", refrain spawns the stub and auto-focuses its PTY. The stub
 	// prints a greeting; wait for it so we know the process is live before
 	// bouncing back to the dashboard to read status symbols.
 	s.WaitForText("claude-e2e-stub ready", 10000)

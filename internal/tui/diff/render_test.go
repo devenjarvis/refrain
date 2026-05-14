@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/diffmodel"
-	"github.com/devenjarvis/baton/internal/tui/diff"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/tui/diff"
 )
 
 // stripped returns s with all ANSI escape sequences removed so substring

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/config"
-	"github.com/devenjarvis/baton/internal/state"
+	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/state"
 )
 
 func TestDetachSnapshotsState(t *testing.T) {
@@ -34,7 +34,7 @@ func TestDetachSnapshotsState(t *testing.T) {
 
 	bs := mgr.Detach()
 	if bs == nil {
-		t.Fatal("expected non-nil BatonState from Detach")
+		t.Fatal("expected non-nil RefrainState from Detach")
 	}
 
 	// State should have the session.
@@ -79,7 +79,7 @@ func TestDetachEmptyReturnsNil(t *testing.T) {
 
 	bs := mgr.Detach()
 	if bs != nil {
-		t.Errorf("expected nil BatonState for empty manager, got %+v", bs)
+		t.Errorf("expected nil RefrainState for empty manager, got %+v", bs)
 	}
 }
 
@@ -109,7 +109,7 @@ func TestDetachSkipsCompleteSessionsAndCleansWorktree(t *testing.T) {
 
 	bs := mgr.Detach()
 	if bs == nil {
-		t.Fatal("expected non-nil BatonState when one non-complete session remains")
+		t.Fatal("expected non-nil RefrainState when one non-complete session remains")
 	}
 	if len(bs.Sessions) != 1 {
 		t.Fatalf("expected 1 session in snapshot, got %d", len(bs.Sessions))
@@ -144,7 +144,7 @@ func TestDetachAllCompleteReturnsNil(t *testing.T) {
 
 	bs := mgr.Detach()
 	if bs != nil {
-		t.Errorf("expected nil BatonState when all sessions are complete, got %+v", bs)
+		t.Errorf("expected nil RefrainState when all sessions are complete, got %+v", bs)
 	}
 }
 
@@ -166,7 +166,7 @@ func TestDetachSaveLoadRoundTrip(t *testing.T) {
 
 	bs := mgr.Detach()
 	if bs == nil {
-		t.Fatal("expected non-nil BatonState")
+		t.Fatal("expected non-nil RefrainState")
 	}
 
 	// Save to disk.
@@ -218,7 +218,7 @@ func TestResumeSessionCreatesAgentWithResume(t *testing.T) {
 
 	bs := mgr1.Detach()
 	if bs == nil {
-		t.Fatal("expected non-nil BatonState")
+		t.Fatal("expected non-nil RefrainState")
 	}
 
 	// Second manager: resume from saved state.
@@ -270,7 +270,7 @@ func TestResumeSessionMissingWorktreeReturnsError(t *testing.T) {
 		ID:           "session-99",
 		Name:         "nonexistent",
 		WorktreePath: "/tmp/does-not-exist-" + time.Now().Format("20060102150405"),
-		Branch:       "baton/nonexistent",
+		Branch:       "refrain/nonexistent",
 		BaseBranch:   "main",
 		Agents: []state.AgentState{
 			{ID: "session-99-agent-1", Name: "test"},
@@ -468,7 +468,7 @@ func TestDetachResumePreservesOwnsBranch(t *testing.T) {
 
 	bs := mgr1.Detach()
 	if bs == nil {
-		t.Fatal("expected non-nil BatonState")
+		t.Fatal("expected non-nil RefrainState")
 	}
 
 	// OwnsBranch should be false in saved state.
@@ -524,7 +524,7 @@ func TestDetachResumePreservesHasClaudeName(t *testing.T) {
 	}
 
 	// Rename the branch before detaching.
-	if _, err := sess.RenameBranch(repo, "baton/add-feature"); err != nil {
+	if _, err := sess.RenameBranch(repo, "refrain/add-feature"); err != nil {
 		t.Fatal(err)
 	}
 	if !sess.HasClaudeName() {
@@ -534,14 +534,14 @@ func TestDetachResumePreservesHasClaudeName(t *testing.T) {
 	sessID := sess.ID
 	bs := mgr1.Detach()
 	if bs == nil {
-		t.Fatal("expected non-nil BatonState")
+		t.Fatal("expected non-nil RefrainState")
 	}
 
 	if !bs.Sessions[0].HasClaudeName {
 		t.Error("detached state should record HasClaudeName=true")
 	}
-	if bs.Sessions[0].Branch != "baton/add-feature" {
-		t.Errorf("detached state branch = %q, want baton/add-feature", bs.Sessions[0].Branch)
+	if bs.Sessions[0].Branch != "refrain/add-feature" {
+		t.Errorf("detached state branch = %q, want refrain/add-feature", bs.Sessions[0].Branch)
 	}
 
 	// Resume.
@@ -559,8 +559,8 @@ func TestDetachResumePreservesHasClaudeName(t *testing.T) {
 	if !resumed.HasClaudeName() {
 		t.Error("resumed session should have HasClaudeName=true")
 	}
-	if resumed.Worktree.Branch != "baton/add-feature" {
-		t.Errorf("resumed branch = %q, want baton/add-feature", resumed.Worktree.Branch)
+	if resumed.Worktree.Branch != "refrain/add-feature" {
+		t.Errorf("resumed branch = %q, want refrain/add-feature", resumed.Worktree.Branch)
 	}
 
 	// A subsequent UserPromptSubmit must NOT trigger another rename.
@@ -609,13 +609,13 @@ func TestResumeSessionPreservesWorktreeOnAgentFailure(t *testing.T) {
 	wtPath := sess.Worktree.Path
 	bs := mgr1.Detach()
 	if bs == nil {
-		t.Fatal("expected non-nil BatonState")
+		t.Fatal("expected non-nil RefrainState")
 	}
 
 	// Second manager: settings point AgentProgram at a missing binary so
 	// PTY.Start in newResumedAgent fails deterministically.
 	settings := config.Resolve(nil, nil)
-	settings.AgentProgram = "/definitely/not/a/real/binary/baton-test-missing"
+	settings.AgentProgram = "/definitely/not/a/real/binary/refrain-test-missing"
 	mgr2 := NewManager(repo, settings)
 	defer mgr2.Shutdown()
 

@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/github"
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/github"
 )
 
 func TestRenderShippingPanel_NilEntry(t *testing.T) {

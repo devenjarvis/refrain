@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/devenjarvis/baton/internal/git"
+	"github.com/devenjarvis/refrain/internal/git"
 )
 
 // TestParsePlanTasks verifies that ParsePlanTasks extracts tasks with correct

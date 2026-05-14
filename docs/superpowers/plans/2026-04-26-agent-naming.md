@@ -66,7 +66,7 @@ func TestAgentAutoNamedAsTrack(t *testing.T) {
 - [ ] **Step 2: Run test to confirm it fails**
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && go test ./internal/agent/ -run TestAgentAutoNamedAsTrack -v
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && go test ./internal/agent/ -run TestAgentAutoNamedAsTrack -v
 ```
 
 Expected: FAIL — `agent 1 Name = "brave-falcon"` or similar random name.
@@ -170,19 +170,19 @@ func (s *Session) AddAgentResumed(cfg Config, claudeSessionID string) (*Agent, e
 - [ ] **Step 4: Run the new test and all agent tests**
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && go test -race ./internal/agent/ -v -run TestAgentAutoNamedAsTrack
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && go test -race ./internal/agent/ -v -run TestAgentAutoNamedAsTrack
 ```
 Expected: PASS
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && go test -race ./internal/agent/
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && go test -race ./internal/agent/
 ```
 Expected: all PASS (existing tests pass explicit cfg.Names so are unaffected by this change)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && git add internal/agent/session.go internal/agent/session_name_test.go && git commit -m "feat: auto-name agents track-1, track-2 instead of random adj-noun"
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && git add internal/agent/session.go internal/agent/session_name_test.go && git commit -m "feat: auto-name agents track-1, track-2 instead of random adj-noun"
 ```
 
 ---
@@ -226,8 +226,8 @@ Then update `TestManagerRenamesOnFirstUserPromptSubmit` (starting at line 590). 
 	if got := waitForAgentDisplayName(t, ag, want, 2*time.Second); got != want {
 		t.Fatalf("agent display name: got %q, want %q", got, want)
 	}
-	if got := sess.Branch(); got != "baton/"+want {
-		t.Errorf("branch: got %q, want baton/%s", got, want)
+	if got := sess.Branch(); got != "refrain/"+want {
+		t.Errorf("branch: got %q, want refrain/%s", got, want)
 	}
 	// Session display name stays pinned to the worktree slug — only agents
 	// pick up the task-derived name.
@@ -251,8 +251,8 @@ Then update `TestManagerRenamesOnFirstUserPromptSubmit` (starting at line 590). 
 	if got := waitForSessionDisplayName(t, sess, want, 2*time.Second); got != want {
 		t.Fatalf("session display name: got %q, want %q", got, want)
 	}
-	if got := sess.Branch(); got != "baton/"+want {
-		t.Errorf("branch: got %q, want baton/%s", got, want)
+	if got := sess.Branch(); got != "refrain/"+want {
+		t.Errorf("branch: got %q, want refrain/%s", got, want)
 	}
 	// Agent display name stays at its original value — agents keep their
 	// track identities; only the session separator picks up the task name.
@@ -272,8 +272,8 @@ Then update `TestManagerSecondUserPromptSubmitDoesNotRename` (starting at line 6
 	if got := waitForAgentDisplayName(t, ag, want, 2*time.Second); got != want {
 		t.Fatalf("after first prompt: agent = %q, want %q", got, want)
 	}
-	if got := sess.Branch(); got != "baton/"+want {
-		t.Fatalf("after first prompt: branch = %q, want baton/%s", got, want)
+	if got := sess.Branch(); got != "refrain/"+want {
+		t.Fatalf("after first prompt: branch = %q, want refrain/%s", got, want)
 	}
 ```
 
@@ -283,8 +283,8 @@ Then update `TestManagerSecondUserPromptSubmitDoesNotRename` (starting at line 6
 	if got := waitForSessionDisplayName(t, sess, want, 2*time.Second); got != want {
 		t.Fatalf("after first prompt: session display name = %q, want %q", got, want)
 	}
-	if got := sess.Branch(); got != "baton/"+want {
-		t.Fatalf("after first prompt: branch = %q, want baton/%s", got, want)
+	if got := sess.Branch(); got != "refrain/"+want {
+		t.Fatalf("after first prompt: branch = %q, want refrain/%s", got, want)
 	}
 	// Agent display name must not have changed.
 	if got := ag.GetDisplayName(); got != "rename-second" {
@@ -319,7 +319,7 @@ Then update `TestManagerSecondUserPromptSubmitDoesNotRename` (starting at line 6
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && go test -race ./internal/agent/ -run "TestManagerRenamesOnFirstUserPromptSubmit|TestManagerSecondUserPromptSubmitDoesNotRename" -v
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && go test -race ./internal/agent/ -run "TestManagerRenamesOnFirstUserPromptSubmit|TestManagerSecondUserPromptSubmitDoesNotRename" -v
 ```
 
 Expected: FAIL on display-name assertions (session display name not set, agent still getting the rename).
@@ -353,7 +353,7 @@ In `internal/agent/manager.go`, replace lines ~259-269 (the block after `m.renam
 - [ ] **Step 4: Run the targeted tests**
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && go test -race ./internal/agent/ -run "TestManagerRenamesOnFirstUserPromptSubmit|TestManagerSecondUserPromptSubmitDoesNotRename" -v
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && go test -race ./internal/agent/ -run "TestManagerRenamesOnFirstUserPromptSubmit|TestManagerSecondUserPromptSubmitDoesNotRename" -v
 ```
 
 Expected: PASS
@@ -361,7 +361,7 @@ Expected: PASS
 - [ ] **Step 5: Run the full agent test suite**
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && go test -race ./internal/agent/
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && go test -race ./internal/agent/
 ```
 
 Expected: all PASS
@@ -369,7 +369,7 @@ Expected: all PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && git add internal/agent/manager.go internal/agent/hook_integration_test.go && git commit -m "feat: rename session display name (not agent) after Haiku rename"
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && git add internal/agent/manager.go internal/agent/hook_integration_test.go && git commit -m "feat: rename session display name (not agent) after Haiku rename"
 ```
 
 ---
@@ -404,7 +404,7 @@ This is fine as-is. No change needed.
 - [ ] **Step 2: Run all tests one final time**
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && go test -race ./...
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && go test -race ./...
 ```
 
 Expected: all PASS
@@ -412,5 +412,5 @@ Expected: all PASS
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/devenjarvis/Code/baton/.baton/worktrees/pure-gold && git add CLAUDE.md && git commit -m "docs: update branch naming behavior in CLAUDE.md"
+cd /Users/devenjarvis/Code/refrain/.refrain/worktrees/pure-gold && git add CLAUDE.md && git commit -m "docs: update branch naming behavior in CLAUDE.md"
 ```

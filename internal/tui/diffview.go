@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/devenjarvis/baton/internal/diffmodel"
-	"github.com/devenjarvis/baton/internal/tui/diff"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/tui/diff"
 )
 
 // Left-pane sizing.

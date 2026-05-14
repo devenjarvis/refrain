@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devenjarvis/baton/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
 )
 
 func TestParse_EmptyInput(t *testing.T) {

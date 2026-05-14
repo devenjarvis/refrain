@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 func TestExpandBranchPrefix_NoBraces(t *testing.T) {
-	if got := config.ExpandBranchPrefix("baton/"); got != "baton/" {
-		t.Errorf("ExpandBranchPrefix(%q) = %q, want %q", "baton/", got, "baton/")
+	if got := config.ExpandBranchPrefix("refrain/"); got != "refrain/" {
+		t.Errorf("ExpandBranchPrefix(%q) = %q, want %q", "refrain/", got, "refrain/")
 	}
 	if got := config.ExpandBranchPrefix(""); got != "" {
 		t.Errorf("ExpandBranchPrefix(%q) = %q, want empty", "", got)
@@ -88,7 +88,7 @@ func TestExpandBranchPrefix_UserFallsBackToEnv(t *testing.T) {
 // TestExpandBranchPrefix_UserEmptyFallsBackToLiteral pins M7: when both git
 // user.name and $USER are empty (CI containers, minimal sandboxes), {user}
 // must expand to a non-empty literal so the resulting branch path stays
-// well-formed. Dropping to empty produced "baton//date-suffix", which git
+// well-formed. Dropping to empty produced "refrain//date-suffix", which git
 // rejects as an invalid branch name.
 func TestExpandBranchPrefix_UserEmptyFallsBackToLiteral(t *testing.T) {
 	sandboxGitConfig(t)

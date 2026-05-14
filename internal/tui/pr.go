@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/devenjarvis/baton/internal/github"
+	"github.com/devenjarvis/refrain/internal/github"
 )
 
 // rowStatePhrase returns a human-readable badge for a session's shipping row.

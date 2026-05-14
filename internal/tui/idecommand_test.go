@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/devenjarvis/baton/internal/editor"
+	"github.com/devenjarvis/refrain/internal/editor"
 )
 
 func TestAddEditorFields_EmptyStoredShape(t *testing.T) {

@@ -1,8 +1,8 @@
-// Package config manages the global registry of repos that Baton tracks,
+// Package config manages the global registry of repos that Refrain tracks,
 // as well as global and per-repo settings.
 //
-// Global files live at ~/.baton/ (repos.json, config.json).
-// Per-repo settings live at <repo>/.baton/config.json.
+// Global files live at ~/.refrain/ (repos.json, config.json).
+// Per-repo settings live at <repo>/.refrain/config.json.
 package config
 
 import (
@@ -13,10 +13,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/git"
+	"github.com/devenjarvis/refrain/internal/git"
 )
 
-// Repo is a single entry in the Baton repo registry.
+// Repo is a single entry in the Refrain repo registry.
 type Repo struct {
 	Path    string    `json:"path"`
 	Name    string    `json:"name"`
@@ -39,22 +39,33 @@ type Config struct {
 	BypassPermissions *bool  `json:"bypass_permissions,omitempty"`
 }
 
-// BatonDir returns the absolute path to the ~/.baton directory.
-func BatonDir() (string, error) {
+// RefrainDir returns the absolute path to the ~/.refrain directory.
+func RefrainDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("config: finding home dir: %w", err)
 	}
-	return filepath.Join(home, ".baton"), nil
+	return filepath.Join(home, ".refrain"), nil
 }
 
 // configFile returns the absolute path to the repos.json file.
 func configFile() (string, error) {
-	dir, err := BatonDir()
+	dir, err := RefrainDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "repos.json"), nil
+}
+
+// legacyBatonConfigFile returns the path to the pre-rename ~/.baton/repos.json
+// used as a read-only fallback before the dir-level migration in
+// internal/migrate runs.
+func legacyBatonConfigFile() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("config: finding home dir: %w", err)
+	}
+	return filepath.Join(home, ".baton", "repos.json"), nil
 }
 
 // legacyConfigFile returns the old XDG-based path for migration.
@@ -67,8 +78,9 @@ func legacyConfigFile() (string, error) {
 }
 
 // Load reads the config from disk and returns it.
-// If the file does not exist at ~/.baton/repos.json, it checks the legacy
-// XDG location and migrates if found. On first run it returns an empty Config.
+// If the file does not exist at ~/.refrain/repos.json, it checks the pre-rename
+// ~/.baton/repos.json and the older XDG location, migrating from either if
+// found. On first run it returns an empty Config.
 func Load() (*Config, error) {
 	path, err := configFile()
 	if err != nil {
@@ -77,13 +89,24 @@ func Load() (*Config, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		// Try legacy XDG location and migrate if found.
-		if legacyPath, legacyErr := legacyConfigFile(); legacyErr == nil {
-			if legacyData, readErr := os.ReadFile(legacyPath); readErr == nil {
-				data = legacyData
-				// Migrate: write to new location, best-effort.
+		// Try pre-rename ~/.baton/repos.json (file-level safety net in case the
+		// directory-level migration in internal/migrate didn't run).
+		if batonPath, batonErr := legacyBatonConfigFile(); batonErr == nil {
+			if batonData, readErr := os.ReadFile(batonPath); readErr == nil {
+				data = batonData
 				if writeErr := atomicWriteJSON(path, json.RawMessage(data)); writeErr == nil {
-					_ = os.Remove(legacyPath)
+					_ = os.Remove(batonPath)
+				}
+			}
+		}
+		// Then try legacy XDG location and migrate if found.
+		if data == nil {
+			if legacyPath, legacyErr := legacyConfigFile(); legacyErr == nil {
+				if legacyData, readErr := os.ReadFile(legacyPath); readErr == nil {
+					data = legacyData
+					if writeErr := atomicWriteJSON(path, json.RawMessage(data)); writeErr == nil {
+						_ = os.Remove(legacyPath)
+					}
 				}
 			}
 		}

@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sergi/go-diff/diffmatchpatch"
 
-	"github.com/devenjarvis/baton/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
 )
 
 // SideBySideMinWidth is the terminal-width threshold (inclusive) above which
@@ -26,7 +26,7 @@ import (
 const SideBySideMinWidth = 100
 
 // defaultChromaStyle is the chroma style used if no other is configured. It
-// blends well with the baton dark theme.
+// blends well with the refrain dark theme.
 const defaultChromaStyle = "monokai"
 
 // Renderer paints a single file's diff. Caller is expected to construct one

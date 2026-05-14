@@ -7,7 +7,7 @@
 
 Agent display names are currently noisy and off-brand. Claude agents get random `adj-noun` placeholders (e.g. `brave-falcon`, `eager-panda`) until Haiku renames the branch after the first user prompt — at which point the agent display name is overwritten with the branch suffix (e.g. `add-dark-mode`). This approach has two problems:
 
-1. The adj-noun names carry no meaning and don't fit Baton's music theme.
+1. The adj-noun names carry no meaning and don't fit Refrain's music theme.
 2. When multiple agents share a session (same worktree/branch), they all get renamed to the same branch suffix, making them indistinguishable.
 
 ## Design

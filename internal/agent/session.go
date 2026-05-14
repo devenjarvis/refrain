@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/git"
+	"github.com/devenjarvis/refrain/internal/git"
 )
 
 // Session owns a git worktree and holds one or more agents that share it.
@@ -561,7 +561,7 @@ func (s *Session) RenameBranch(repoPath, newBranch string) (string, error) {
 // UpdateBranch updates the in-memory branch name and session display name to
 // match an externally applied git branch rename. This is the no-git-ops
 // counterpart to RenameBranch: it reconciles state after the user has already
-// run `git branch -m` outside baton. Setting hasClaudeName prevents the Haiku
+// run `git branch -m` outside refrain. Setting hasClaudeName prevents the Haiku
 // namer from overwriting the externally-set name on the next user prompt.
 func (s *Session) UpdateBranch(newBranch string) {
 	s.mu.Lock()

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 func TestDefaultPlanDrafter_DraftSuccess(t *testing.T) {
@@ -131,14 +131,14 @@ func TestDefaultPlanDrafter_DraftContextCancel(t *testing.T) {
 	}
 }
 
-func TestDefaultPlanDrafter_DraftStripsBatonHookEnv(t *testing.T) {
+func TestDefaultPlanDrafter_DraftStripsRefrainHookEnv(t *testing.T) {
 	dir := t.TempDir()
 	envFile := filepath.Join(dir, "env.txt")
 	writeEnvDumpingClaude(t, dir, envFile, "# Goal\nstub")
 	withPATH(t, dir)
 
-	t.Setenv("BATON_HOOK_SOCKET", "/should/not/leak.sock")
-	t.Setenv("BATON_AGENT_ID", "should-not-leak")
+	t.Setenv("REFRAIN_HOOK_SOCKET", "/should/not/leak.sock")
+	t.Setenv("REFRAIN_AGENT_ID", "should-not-leak")
 
 	d := DefaultPlanDrafter("")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -153,7 +153,7 @@ func TestDefaultPlanDrafter_DraftStripsBatonHookEnv(t *testing.T) {
 		t.Fatalf("read env file: %v", err)
 	}
 	body := string(envContents)
-	for _, banned := range []string{"BATON_HOOK_SOCKET=", "BATON_AGENT_ID="} {
+	for _, banned := range []string{"REFRAIN_HOOK_SOCKET=", "REFRAIN_AGENT_ID="} {
 		if strings.Contains(body, banned) {
 			t.Errorf("planner env contained %q; should have been stripped\n%s", banned, body)
 		}
@@ -334,7 +334,7 @@ func TestBuildClaudePlannerArgs_UsesSonnet(t *testing.T) {
 
 func TestBuildClaudePlannerArgs_WithQuestionSocketRegistersMCPServer(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	const socketPath = "/tmp/baton-q.sock"
+	const socketPath = "/tmp/refrain-q.sock"
 	args := buildClaudePlannerArgs("", socketPath)
 
 	mcpIdx := -1

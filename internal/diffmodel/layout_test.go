@@ -3,7 +3,7 @@ package diffmodel_test
 import (
 	"testing"
 
-	"github.com/devenjarvis/baton/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
 )
 
 // mkHunk builds a hunk from a compact spec: each string is " ", "-" or "+"

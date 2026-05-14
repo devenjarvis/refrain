@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
 )
 
 func TestWrapCell_NoWrap(t *testing.T) {

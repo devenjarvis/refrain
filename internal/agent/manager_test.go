@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/planner"
+	"github.com/devenjarvis/refrain/internal/planner"
 )
 
 // stubPlanDrafter is a configurable PlanDrafter for tests. Each call records

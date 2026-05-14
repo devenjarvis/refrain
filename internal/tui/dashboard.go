@@ -13,9 +13,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/config"
-	"github.com/devenjarvis/baton/internal/vt"
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/vt"
 )
 
 // truncateVisible returns s truncated to n display cells with an ellipsis.
@@ -266,7 +266,7 @@ func (d dashboardModel) View() string {
 	default:
 		out = d.renderFullscreenFocus(d.width, d.height)
 	}
-	if path := os.Getenv("BATON_E2E_DEBUG_DUMP"); path != "" {
+	if path := os.Getenv("REFRAIN_E2E_DEBUG_DUMP"); path != "" {
 		_ = os.WriteFile(path, []byte(out), 0o644)
 	}
 	return out
@@ -336,7 +336,7 @@ func (d dashboardModel) renderRepoConfigOverlay(width, height int) string {
 }
 
 func (d dashboardModel) emptyView() string {
-	title := StyleTitle.Render("Baton")
+	title := StyleTitle.Render("Refrain")
 	subtitle := StyleSubtle.Render("No agents running")
 	hint := StyleSubtle.Render("Press n to create a new session")
 

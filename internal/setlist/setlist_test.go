@@ -6,16 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/setlist"
+	"github.com/devenjarvis/refrain/internal/setlist"
 )
 
 // setlistDirInTmp redirects $HOME into a temp directory so tests never touch
-// the real ~/.baton/. Returns the ~/.baton directory.
+// the real ~/.refrain/. Returns the ~/.refrain directory.
 func setlistDirInTmp(t *testing.T) string {
 	t.Helper()
 	base := t.TempDir()
 	t.Setenv("HOME", base)
-	return filepath.Join(base, ".baton")
+	return filepath.Join(base, ".refrain")
 }
 
 func TestAppend_RoundTrip(t *testing.T) {
@@ -134,7 +134,7 @@ this is not json at all {{{
 func TestAppend_CreatesParentDir(t *testing.T) {
 	dir := setlistDirInTmp(t)
 
-	// Confirm ~/.baton does not exist yet.
+	// Confirm ~/.refrain does not exist yet.
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("expected %s to not exist, got err=%v", dir, err)
 	}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/devenjarvis/baton/internal/editor"
+	"github.com/devenjarvis/refrain/internal/editor"
 )
 
 const (

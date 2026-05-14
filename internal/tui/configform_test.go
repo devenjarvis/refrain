@@ -9,7 +9,7 @@ import (
 func sampleForm() configForm {
 	fields := []formField{}
 	fields = addToggle(fields, "Enable focus mode", true)
-	fields = addTextInput(fields, "Branch prefix", "baton/", "baton/", 30)
+	fields = addTextInput(fields, "Branch prefix", "refrain/", "refrain/", 30)
 	fields = addSelect(fields, "Theme", []string{"light", "dark", "auto"}, 1)
 	return newConfigForm(fields, 60)
 }
@@ -157,8 +157,8 @@ func TestConfigForm_AccessorsByLabel(t *testing.T) {
 	if !f.toggleValue("Enable focus mode") {
 		t.Error("toggleValue should read fixture value")
 	}
-	if got := f.textValue("Branch prefix"); got != "baton/" {
-		t.Errorf("textValue = %q, want %q", got, "baton/")
+	if got := f.textValue("Branch prefix"); got != "refrain/" {
+		t.Errorf("textValue = %q, want %q", got, "refrain/")
 	}
 	if got := f.selectValue("Theme"); got != "dark" {
 		t.Errorf("selectValue = %q, want %q", got, "dark")

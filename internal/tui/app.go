@@ -20,14 +20,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	xvt "github.com/charmbracelet/x/vt"
-	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/audio"
-	"github.com/devenjarvis/baton/internal/config"
-	"github.com/devenjarvis/baton/internal/diffmodel"
-	"github.com/devenjarvis/baton/internal/git"
-	"github.com/devenjarvis/baton/internal/github"
-	"github.com/devenjarvis/baton/internal/state"
-	"github.com/devenjarvis/baton/internal/vt"
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/audio"
+	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/git"
+	"github.com/devenjarvis/refrain/internal/github"
+	"github.com/devenjarvis/refrain/internal/state"
+	"github.com/devenjarvis/refrain/internal/vt"
 )
 
 // tickMsg triggers periodic re-renders.
@@ -451,7 +451,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if pruned > 0 {
 				bs.Sessions = valid
 				if saveErr := state.Save(repo.Path, bs); saveErr != nil {
-					fmt.Fprintf(os.Stderr, "baton: pruning stale state for %s: %v\n", repo.Path, saveErr)
+					fmt.Fprintf(os.Stderr, "refrain: pruning stale state for %s: %v\n", repo.Path, saveErr)
 				}
 				totalPruned += pruned
 			}
@@ -4417,7 +4417,7 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 		}
 
 		// Prefer SHA-based lookup: invariant to branch renames, so a PR opened
-		// under a random baton/<adj>-<noun> name (before Haiku rename finishes)
+		// under a random refrain/<adj>-<noun> name (before Haiku rename finishes)
 		// is still discovered after the rename. Fall back to branch lookup when
 		// the commit hasn't been pushed or SHA lookup returns no PR.
 		var pr *github.PRState
@@ -5027,7 +5027,7 @@ type wellnessLogEntry struct {
 	BlocksCompleted int    `json:"blocks_completed"`
 }
 
-// writeWellnessLog appends a single JSON line to <repoPath>/.baton/logs/wellness.log.
+// writeWellnessLog appends a single JSON line to <repoPath>/.refrain/logs/wellness.log.
 // Best-effort: any error is silently dropped so it never blocks shutdown.
 func (a *App) writeWellnessLog() {
 	repoPath := a.activeRepo
@@ -5038,7 +5038,7 @@ func (a *App) writeWellnessLog() {
 		return
 	}
 
-	logPath := filepath.Join(repoPath, ".baton", "logs", "wellness.log")
+	logPath := filepath.Join(repoPath, ".refrain", "logs", "wellness.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return
 	}
@@ -5094,7 +5094,7 @@ func panelFocusName(f panelFocus) string {
 	}
 }
 
-// writePlannerLog appends a single JSON line to <repoPath>/.baton/logs/planner.log.
+// writePlannerLog appends a single JSON line to <repoPath>/.refrain/logs/planner.log.
 // Best-effort: any error is silently dropped so it never blocks the UI loop.
 // repoPath is passed explicitly (rather than read from a.activeRepo) because
 // the caller has the exact repo path from the message in multi-repo configs.
@@ -5102,7 +5102,7 @@ func (a *App) writePlannerLog(repoPath string, entry plannerLogEntry) {
 	if repoPath == "" {
 		return
 	}
-	logPath := filepath.Join(repoPath, ".baton", "logs", "planner.log")
+	logPath := filepath.Join(repoPath, ".refrain", "logs", "planner.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return
 	}
@@ -5343,12 +5343,12 @@ func (a App) reviewTaskCmd(sess *agent.Session, group taskReviewGroup, reviewer 
 	}
 }
 
-// ensureGitignore adds .baton/ to .gitignore in the given path if not already present.
+// ensureGitignore adds .refrain/ to .gitignore in the given path if not already present.
 func ensureGitignore(path string) {
-	const entry = ".baton/"
+	const entry = ".refrain/"
 	gitignorePath := filepath.Join(path, ".gitignore")
 
-	// Check if .gitignore exists and already contains .baton/.
+	// Check if .gitignore exists and already contains .refrain/.
 	data, _ := os.ReadFile(gitignorePath)
 	if len(data) > 0 {
 		scanner := bufio.NewScanner(strings.NewReader(string(data)))
@@ -5359,7 +5359,7 @@ func ensureGitignore(path string) {
 		}
 	}
 
-	// Append .baton/ to .gitignore.
+	// Append .refrain/ to .gitignore.
 	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return // best-effort

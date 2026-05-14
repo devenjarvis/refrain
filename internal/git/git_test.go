@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devenjarvis/baton/internal/git"
+	"github.com/devenjarvis/refrain/internal/git"
 )
 
 // initTestRepo creates a temporary git repo with an initial commit and returns its path.
@@ -88,9 +88,9 @@ func TestCreateWorktree(t *testing.T) {
 		t.Errorf("worktree path %s does not exist", wt.Path)
 	}
 
-	// Branch should be baton/agent1.
-	if wt.Branch != "baton/agent1" {
-		t.Errorf("expected branch 'baton/agent1', got %q", wt.Branch)
+	// Branch should be refrain/agent1.
+	if wt.Branch != "refrain/agent1" {
+		t.Errorf("expected branch 'refrain/agent1', got %q", wt.Branch)
 	}
 
 	// BaseBranch should be main.
@@ -99,14 +99,14 @@ func TestCreateWorktree(t *testing.T) {
 	}
 
 	// The branch should exist in git.
-	cmd := exec.Command("git", "branch", "--list", "baton/agent1")
+	cmd := exec.Command("git", "branch", "--list", "refrain/agent1")
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git branch --list: %v", err)
 	}
-	if !strings.Contains(string(out), "baton/agent1") {
-		t.Errorf("branch baton/agent1 not found in git branch output: %s", out)
+	if !strings.Contains(string(out), "refrain/agent1") {
+		t.Errorf("branch refrain/agent1 not found in git branch output: %s", out)
 	}
 }
 
@@ -206,14 +206,14 @@ func TestRemoveWorktree(t *testing.T) {
 	}
 
 	// Branch should be deleted.
-	cmd := exec.Command("git", "branch", "--list", "baton/agent1")
+	cmd := exec.Command("git", "branch", "--list", "refrain/agent1")
 	cmd.Dir = repo
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git branch --list: %v", err)
 	}
-	if strings.Contains(string(out), "baton/agent1") {
-		t.Errorf("branch baton/agent1 should be deleted but still exists")
+	if strings.Contains(string(out), "refrain/agent1") {
+		t.Errorf("branch refrain/agent1 should be deleted but still exists")
 	}
 }
 
@@ -618,12 +618,12 @@ func TestRenameBranch(t *testing.T) {
 		t.Fatalf("CreateWorktree: %v", err)
 	}
 
-	got, err := git.RenameBranch(repo, wt.Branch, "baton/renamed")
+	got, err := git.RenameBranch(repo, wt.Branch, "refrain/renamed")
 	if err != nil {
 		t.Fatalf("RenameBranch: %v", err)
 	}
-	if got != "baton/renamed" {
-		t.Errorf("expected returned name %q, got %q", "baton/renamed", got)
+	if got != "refrain/renamed" {
+		t.Errorf("expected returned name %q, got %q", "refrain/renamed", got)
 	}
 
 	// Old branch should no longer exist.
@@ -638,14 +638,14 @@ func TestRenameBranch(t *testing.T) {
 	}
 
 	// New branch should exist.
-	cmd = exec.Command("git", "branch", "--list", "baton/renamed")
+	cmd = exec.Command("git", "branch", "--list", "refrain/renamed")
 	cmd.Dir = repo
 	out, err = cmd.Output()
 	if err != nil {
 		t.Fatalf("git branch --list renamed: %v", err)
 	}
-	if !strings.Contains(string(out), "baton/renamed") {
-		t.Errorf("new branch baton/renamed not found: %s", out)
+	if !strings.Contains(string(out), "refrain/renamed") {
+		t.Errorf("new branch refrain/renamed not found: %s", out)
 	}
 
 	// Worktree metadata should reflect the new branch.
@@ -655,8 +655,8 @@ func TestRenameBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git worktree list: %v", err)
 	}
-	if !strings.Contains(string(out), "refs/heads/baton/renamed") {
-		t.Errorf("worktree list should reference refs/heads/baton/renamed, got:\n%s", out)
+	if !strings.Contains(string(out), "refs/heads/refrain/renamed") {
+		t.Errorf("worktree list should reference refs/heads/refrain/renamed, got:\n%s", out)
 	}
 }
 
@@ -664,7 +664,7 @@ func TestRenameBranch_CollisionFallback(t *testing.T) {
 	repo := initTestRepo(t)
 
 	// Pre-create the target branch so the primary rename collides.
-	cmd := exec.Command("git", "branch", "baton/taken")
+	cmd := exec.Command("git", "branch", "refrain/taken")
 	cmd.Dir = repo
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git branch: %v\n%s", err, out)
@@ -675,12 +675,12 @@ func TestRenameBranch_CollisionFallback(t *testing.T) {
 		t.Fatalf("CreateWorktree: %v", err)
 	}
 
-	got, err := git.RenameBranch(repo, wt.Branch, "baton/taken")
+	got, err := git.RenameBranch(repo, wt.Branch, "refrain/taken")
 	if err != nil {
 		t.Fatalf("RenameBranch should fall back on collision: %v", err)
 	}
-	if got != "baton/taken-2" {
-		t.Errorf("expected fallback to %q, got %q", "baton/taken-2", got)
+	if got != "refrain/taken-2" {
+		t.Errorf("expected fallback to %q, got %q", "refrain/taken-2", got)
 	}
 }
 
@@ -690,15 +690,15 @@ func TestRenameBranch_NonCollisionErrorDoesNotRetry(t *testing.T) {
 	// Source branch does not exist — git will fail with "no branch named",
 	// which is NOT a collision. The function should return the original error
 	// immediately without cycling through -2..-9 suffixes.
-	_, err := git.RenameBranch(repo, "baton/does-not-exist", "baton/target")
+	_, err := git.RenameBranch(repo, "refrain/does-not-exist", "refrain/target")
 	if err == nil {
 		t.Fatalf("RenameBranch with missing source should error, got nil")
 	}
 	// Error message should mention the original target, not a -N suffix.
-	if !strings.Contains(err.Error(), `"baton/target"`) {
-		t.Errorf("expected error to reference baton/target, got: %v", err)
+	if !strings.Contains(err.Error(), `"refrain/target"`) {
+		t.Errorf("expected error to reference refrain/target, got: %v", err)
 	}
-	if strings.Contains(err.Error(), "baton/target-") {
+	if strings.Contains(err.Error(), "refrain/target-") {
 		t.Errorf("non-collision error should not have cycled through suffixes, got: %v", err)
 	}
 }

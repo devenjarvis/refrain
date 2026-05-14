@@ -8,8 +8,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/devenjarvis/baton/internal/git"
-	"github.com/devenjarvis/baton/internal/github"
+	"github.com/devenjarvis/refrain/internal/git"
+	"github.com/devenjarvis/refrain/internal/github"
 )
 
 // branchPickerItem represents a single entry in the branch picker.

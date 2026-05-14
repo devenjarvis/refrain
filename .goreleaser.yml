@@ -5,8 +5,8 @@ before:
     - go mod tidy
 
 builds:
-  - id: baton
-    binary: baton
+  - id: refrain
+    binary: refrain
     main: .
     env:
       - CGO_ENABLED=0
@@ -18,12 +18,12 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/devenjarvis/baton/cmd.version={{.Version}}
+      - -X github.com/devenjarvis/refrain/cmd.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
 archives:
-  - id: baton
+  - id: refrain
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     formats: [tar.gz]
@@ -35,19 +35,19 @@ snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
 brews:
-  - name: baton
+  - name: refrain
     repository:
       owner: devenjarvis
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/devenjarvis/baton"
+    homepage: "https://github.com/devenjarvis/refrain"
     description: "Terminal-native TUI for orchestrating multiple Claude Code agents in parallel"
     license: "MIT"
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
     install: |
-      bin.install "baton"
+      bin.install "refrain"
     test: |
-      system "#{bin}/baton", "--help"
+      system "#{bin}/refrain", "--help"

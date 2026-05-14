@@ -7,7 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
-	// Two lipgloss versions intentionally: the v1 import drives Baton's
+	// Two lipgloss versions intentionally: the v1 import drives Refrain's
 	// layout helpers (StyleTitle, JoinVertical, etc.), while xlipgloss is
 	// the v2 type the bubbles/v2 textarea exposes in its Styles struct —
 	// we only need it to construct the empty CursorLine override below.
@@ -47,7 +47,7 @@ const (
 )
 
 // promptModalTitles rotate through the modal header. Short and imperative,
-// each one nudges toward Baton's one-primary-goal-per-block frame.
+// each one nudges toward Refrain's one-primary-goal-per-block frame.
 var promptModalTitles = []string{
 	"What do you want to build?",
 	"What's today's primary goal?",
@@ -82,7 +82,7 @@ func newPromptModal() promptModalModel {
 	ta.CharLimit = promptModalCharLimit
 	ta.SetHeight(promptModalRows)
 	// Strip bubbles' default focused CursorLine background — on dark
-	// terminals it paints a near-black rectangle over Baton's #111827 bg.
+	// terminals it paints a near-black rectangle over Refrain's #111827 bg.
 	// The cursor itself signals position; the active line should read
 	// identically to every other line.
 	styles := ta.Styles()

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 // initTestRepo creates a temporary git repository with an initial commit.
@@ -47,14 +47,14 @@ func initTestRepo(t *testing.T) string {
 }
 
 // configDirInTmp redirects $HOME into a temp directory so tests never touch
-// the real ~/.baton/.  It also sets $XDG_CONFIG_HOME so legacy migration
-// tests can exercise the old path.  Returns the ~/.baton directory.
+// the real ~/.refrain/.  It also sets $XDG_CONFIG_HOME so legacy migration
+// tests can exercise the old path.  Returns the ~/.refrain directory.
 func configDirInTmp(t *testing.T) string {
 	t.Helper()
 	base := t.TempDir()
 	t.Setenv("HOME", base)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, ".config"))
-	return filepath.Join(base, ".baton")
+	return filepath.Join(base, ".refrain")
 }
 
 // ---- Load ----

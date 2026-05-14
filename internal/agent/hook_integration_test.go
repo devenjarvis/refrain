@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/hook"
+	"github.com/devenjarvis/refrain/internal/hook"
 )
 
 // TestManagerDispatchesHookEventsToAgent verifies the full path: an external
 // process (simulated via hook.SendEvent from this test) writes to the socket
-// at <repoPath>/.baton/hook.sock, the Manager's dispatcher routes by agent ID,
+// at <repoPath>/.refrain/hook.sock, the Manager's dispatcher routes by agent ID,
 // and the agent's state transitions accordingly.
 func TestManagerDispatchesHookEventsToAgent(t *testing.T) {
 	repo := setupTestRepo(t)
@@ -759,9 +759,9 @@ func TestUserPromptSubmitRenamesBranch(t *testing.T) {
 		t.Fatalf("SendEvent prompt: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/add-dark-mode-to-dashboard")
-	if got != "baton/add-dark-mode-to-dashboard" {
-		t.Errorf("expected branch baton/add-dark-mode-to-dashboard, got %q", got)
+	got := waitForBranch(t, sess, "refrain/add-dark-mode-to-dashboard")
+	if got != "refrain/add-dark-mode-to-dashboard" {
+		t.Errorf("expected branch refrain/add-dark-mode-to-dashboard, got %q", got)
 	}
 	if !sess.HasClaudeName() {
 		t.Fatal("expected HasClaudeName true after prompt")
@@ -821,9 +821,9 @@ func TestUserPromptSubmitSlashWithArgRenamesBranch(t *testing.T) {
 		t.Fatalf("SendEvent slash+arg: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/add-dark-mode")
-	if got != "baton/add-dark-mode" {
-		t.Errorf("expected branch baton/add-dark-mode, got %q", got)
+	got := waitForBranch(t, sess, "refrain/add-dark-mode")
+	if got != "refrain/add-dark-mode" {
+		t.Errorf("expected branch refrain/add-dark-mode, got %q", got)
 	}
 	if !sess.HasClaudeName() {
 		t.Fatal("expected HasClaudeName true after slash+arg prompt")
@@ -980,8 +980,8 @@ func TestManagerRenamesOnFirstUserPromptSubmit(t *testing.T) {
 	if got := waitForSessionDisplayName(t, sess, want, 2*time.Second); got != want {
 		t.Fatalf("session display name: got %q, want %q", got, want)
 	}
-	if got := sess.Branch(); got != "baton/"+want {
-		t.Errorf("branch: got %q, want baton/%s", got, want)
+	if got := sess.Branch(); got != "refrain/"+want {
+		t.Errorf("branch: got %q, want refrain/%s", got, want)
 	}
 	// Agent display name stays at its original value — agents keep their
 	// track identities; only the session separator picks up the task name.
@@ -1020,8 +1020,8 @@ func TestManagerSecondUserPromptSubmitDoesNotRename(t *testing.T) {
 	if got := waitForSessionDisplayName(t, sess, want, 2*time.Second); got != want {
 		t.Fatalf("after first prompt: session display name = %q, want %q", got, want)
 	}
-	if got := sess.Branch(); got != "baton/"+want {
-		t.Fatalf("after first prompt: branch = %q, want baton/%s", got, want)
+	if got := sess.Branch(); got != "refrain/"+want {
+		t.Fatalf("after first prompt: branch = %q, want refrain/%s", got, want)
 	}
 	// Agent display name must not have changed.
 	if got := ag.GetDisplayName(); got != "rename-second" {
@@ -1114,8 +1114,8 @@ func TestManagerEmptyPromptDoesNotConsumeGate(t *testing.T) {
 
 	// Follow-up actionable prompt: gate is still open, rename succeeds.
 	sendUserPromptSubmit(t, mgr, ag, "the real prompt")
-	if got := waitForBranch(t, sess, "baton/real-prompt-result"); got != "baton/real-prompt-result" {
-		t.Errorf("retry rename: branch = %q, want baton/real-prompt-result", got)
+	if got := waitForBranch(t, sess, "refrain/real-prompt-result"); got != "refrain/real-prompt-result" {
+		t.Errorf("retry rename: branch = %q, want refrain/real-prompt-result", got)
 	}
 }
 
@@ -1337,8 +1337,8 @@ func TestSmartBranchRename_HappyPath(t *testing.T) {
 	}
 
 	got := waitForBranchChanged(t, sess, original, 2*time.Second)
-	if got != "baton/fix-login-flow" {
-		t.Errorf("branch = %q, want baton/fix-login-flow", got)
+	if got != "refrain/fix-login-flow" {
+		t.Errorf("branch = %q, want refrain/fix-login-flow", got)
 	}
 	if !sess.HasClaudeName() {
 		t.Error("HasClaudeName should be true after rename")
@@ -1408,9 +1408,9 @@ func TestSmartBranchRename_NamerErrorRetriesNextPrompt(t *testing.T) {
 		t.Fatalf("SendEvent retry: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/second-attempt")
-	if got != "baton/second-attempt" {
-		t.Errorf("retry branch = %q, want baton/second-attempt", got)
+	got := waitForBranch(t, sess, "refrain/second-attempt")
+	if got != "refrain/second-attempt" {
+		t.Errorf("retry branch = %q, want refrain/second-attempt", got)
 	}
 	if good.calls.Load() != 1 {
 		t.Errorf("retry namer call count = %d, want 1", good.calls.Load())
@@ -1471,9 +1471,9 @@ func TestSmartBranchRename_SlashOnlyDoesNotInvokeNamer(t *testing.T) {
 		t.Fatalf("SendEvent retry: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/real-result")
-	if got != "baton/real-result" {
-		t.Errorf("retry branch = %q, want baton/real-result", got)
+	got := waitForBranch(t, sess, "refrain/real-result")
+	if got != "refrain/real-result" {
+		t.Errorf("retry branch = %q, want refrain/real-result", got)
 	}
 	if stub.calls.Load() != 1 {
 		t.Errorf("namer call count = %d, want 1", stub.calls.Load())
@@ -1540,9 +1540,9 @@ func TestSmartBranchRename_DoubleDispatchGated(t *testing.T) {
 	// Release the first call and ensure the rename completes.
 	close(release)
 
-	got := waitForBranch(t, sess, "baton/slow-result")
-	if got != "baton/slow-result" {
-		t.Errorf("branch = %q, want baton/slow-result", got)
+	got := waitForBranch(t, sess, "refrain/slow-result")
+	if got != "refrain/slow-result" {
+		t.Errorf("branch = %q, want refrain/slow-result", got)
 	}
 
 	// Even after completion, total call count must still be 1 — the second
@@ -1642,8 +1642,8 @@ func TestSmartBranchRename_EmitsBranchRenamedEvent(t *testing.T) {
 	}
 
 	got := waitForBranchChanged(t, sess, original, 2*time.Second)
-	if got != "baton/add-dark-mode" {
-		t.Fatalf("branch = %q, want baton/add-dark-mode", got)
+	if got != "refrain/add-dark-mode" {
+		t.Fatalf("branch = %q, want refrain/add-dark-mode", got)
 	}
 
 	// Drain events until we see EventBranchRenamed. Other events
@@ -1702,9 +1702,9 @@ func TestSmartBranchRename_CustomTemplateRendered(t *testing.T) {
 		t.Fatalf("SendEvent: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/fix-login")
-	if got != "baton/fix-login" {
-		t.Fatalf("branch = %q, want baton/fix-login", got)
+	got := waitForBranch(t, sess, "refrain/fix-login")
+	if got != "refrain/fix-login" {
+		t.Fatalf("branch = %q, want refrain/fix-login", got)
 	}
 
 	const wantInstruction = "You are naming a git branch. Use 2 words. fix the login redirect bug -- end"
@@ -1820,8 +1820,8 @@ func TestSmartBranchRename_TemplateWithoutPlaceholderAppendsPrompt(t *testing.T)
 		t.Fatalf("SendEvent: %v", err)
 	}
 
-	if got := waitForBranch(t, sess, "baton/ok"); got != "baton/ok" {
-		t.Fatalf("branch = %q, want baton/ok", got)
+	if got := waitForBranch(t, sess, "refrain/ok"); got != "refrain/ok" {
+		t.Fatalf("branch = %q, want refrain/ok", got)
 	}
 
 	const wantInstruction = "Header without placeholder\n\ndo the thing"
@@ -2181,9 +2181,9 @@ func TestSmartBranchRename_RetryUsesOriginalPrompt(t *testing.T) {
 		t.Fatalf("SendEvent retry: %v", err)
 	}
 
-	got := waitForBranch(t, sess, "baton/focus-mode-pomodoro")
-	if got != "baton/focus-mode-pomodoro" {
-		t.Errorf("retry branch = %q, want baton/focus-mode-pomodoro", got)
+	got := waitForBranch(t, sess, "refrain/focus-mode-pomodoro")
+	if got != "refrain/focus-mode-pomodoro" {
+		t.Errorf("retry branch = %q, want refrain/focus-mode-pomodoro", got)
 	}
 	instr := good.instruction()
 	if !strings.Contains(instr, originalPrompt) {

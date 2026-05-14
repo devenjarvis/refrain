@@ -16,27 +16,27 @@ import (
 	"time"
 )
 
-var batonBin string
+var refrainBin string
 
 func TestMain(m *testing.M) {
-	tmp, err := os.MkdirTemp("", "baton-e2e-bin-*")
+	tmp, err := os.MkdirTemp("", "refrain-e2e-bin-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: failed to create temp dir: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 
-	bin := filepath.Join(tmp, "baton")
+	bin := filepath.Join(tmp, "refrain")
 	cmd := exec.Command("go", "build", "-o", bin, ".")
 	// Build from the repo root (two levels up from internal/e2e).
 	cmd.Dir = filepath.Join(repoRoot())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "e2e: failed to build baton: %v\n", err)
+		fmt.Fprintf(os.Stderr, "e2e: failed to build refrain: %v\n", err)
 		os.Exit(1)
 	}
-	batonBin = bin
+	refrainBin = bin
 	os.Exit(m.Run())
 }
 
@@ -66,12 +66,12 @@ type Session struct {
 	name     string
 	tempDir  string   // parent temp dir
 	home     string   // fake HOME
-	repoDir  string   // temp git repo (also CWD for baton)
-	extraEnv []string // additional "K=V" env entries to pass through tu to baton
+	repoDir  string   // temp git repo (also CWD for refrain)
+	extraEnv []string // additional "K=V" env entries to pass through tu to refrain
 }
 
-// newSession creates an isolated test environment and launches baton via tu.
-// It sets up a fake HOME with baton config, a temp git repo, and starts baton.
+// newSession creates an isolated test environment and launches refrain via tu.
+// It sets up a fake HOME with refrain config, a temp git repo, and starts refrain.
 // Cleanup is automatic via t.Cleanup.
 func newSession(t *testing.T) *Session {
 	t.Helper()
@@ -88,9 +88,9 @@ func newSession(t *testing.T) *Session {
 	// Create directory structure.
 	for _, d := range []string{
 		home,
-		filepath.Join(home, ".baton"),
+		filepath.Join(home, ".refrain"),
 		repoDir,
-		filepath.Join(repoDir, ".baton"),
+		filepath.Join(repoDir, ".refrain"),
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatalf("e2e: mkdir %s: %v", d, err)
@@ -115,7 +115,7 @@ func newSession(t *testing.T) *Session {
 		"bypass_permissions": false,
 		"plan_first_enabled": false,
 	}
-	writeJSON(t, filepath.Join(home, ".baton", "config.json"), globalCfg)
+	writeJSON(t, filepath.Join(home, ".refrain", "config.json"), globalCfg)
 
 	// Write repo config: override agent_program and bypass_permissions.
 	repoCfg := map[string]any{
@@ -123,9 +123,9 @@ func newSession(t *testing.T) *Session {
 		"bypass_permissions": false,
 		"plan_first_enabled": false,
 	}
-	writeJSON(t, filepath.Join(repoDir, ".baton", "config.json"), repoCfg)
+	writeJSON(t, filepath.Join(repoDir, ".refrain", "config.json"), repoCfg)
 
-	// Initialize a git repo so baton can auto-register it. Use the same
+	// Initialize a git repo so refrain can auto-register it. Use the same
 	// sandboxed git env as Start() so the developer's real ~/.gitconfig
 	// (signing keys, hooks, templates) doesn't break test setup.
 	runGit(t, repoDir, home, "init")
@@ -148,7 +148,7 @@ func newSession(t *testing.T) *Session {
 	return s
 }
 
-// Start launches baton inside a tu virtual terminal session.
+// Start launches refrain inside a tu virtual terminal session.
 func (s *Session) Start() {
 	s.t.Helper()
 	// Hardening against env leakage from the host: pin XDG paths inside the
@@ -166,16 +166,16 @@ func (s *Session) Start() {
 		"--env", "XDG_CACHE_HOME=" + filepath.Join(s.home, ".cache"),
 		"--env", "GIT_CONFIG_GLOBAL=" + filepath.Join(s.home, ".gitconfig"),
 		"--env", "GIT_CONFIG_SYSTEM=/dev/null",
-		// Scrub parent baton hook wiring so running these tests from inside
-		// another baton session doesn't leak a live socket into the child's
+		// Scrub parent refrain hook wiring so running these tests from inside
+		// another refrain session doesn't leak a live socket into the child's
 		// env (the stub would forward hook events to the wrong socket).
-		"--env", "BATON_HOOK_SOCKET=",
-		"--env", "BATON_AGENT_ID=",
+		"--env", "REFRAIN_HOOK_SOCKET=",
+		"--env", "REFRAIN_AGENT_ID=",
 	}
 	for _, kv := range s.extraEnv {
 		args = append(args, "--env", kv)
 	}
-	args = append(args, "--cwd", s.repoDir, "--", batonBin)
+	args = append(args, "--cwd", s.repoDir, "--", refrainBin)
 	cmd := exec.Command("tu", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -218,7 +218,7 @@ func (s *Session) WaitStable(ms int) {
 
 // WaitForExit polls Status until the process is no longer alive or timeoutMs
 // elapses. Returns the final (alive, exitCode). Use this instead of
-// WaitStable+Status when confirming that baton has exited.
+// WaitStable+Status when confirming that refrain has exited.
 func (s *Session) WaitForExit(timeoutMs int) (alive bool, exitCode int) {
 	s.t.Helper()
 	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/hook"
+	"github.com/devenjarvis/refrain/internal/hook"
 )
 
 // envWithout returns env with the named vars filtered out.
@@ -27,25 +27,25 @@ outer:
 	return filtered
 }
 
-// buildBaton builds the baton binary into a temp dir and returns the path.
-func buildBaton(t *testing.T) string {
+// buildRefrain builds the refrain binary into a temp dir and returns the path.
+func buildRefrain(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Dir(filepath.Dir(thisFile))
-	bin := filepath.Join(t.TempDir(), "baton")
+	bin := filepath.Join(t.TempDir(), "refrain")
 	build := exec.Command("go", "build", "-o", bin, ".")
 	build.Dir = repoRoot
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building baton: %v\n%s", err, out)
+		t.Fatalf("building refrain: %v\n%s", err, out)
 	}
 	return bin
 }
 
-// TestHookSubcommandForwards runs the built baton binary with each supported
+// TestHookSubcommandForwards runs the built refrain binary with each supported
 // subcommand and asserts the server receives the event with the right kind,
 // AgentID, and parsed payload fields.
 func TestHookSubcommandForwards(t *testing.T) {
-	bin := buildBaton(t)
+	bin := buildRefrain(t)
 
 	cases := []struct {
 		name        string
@@ -138,13 +138,13 @@ func TestHookSubcommandForwards(t *testing.T) {
 			defer func() { _ = srv.Close() }()
 
 			cmd := exec.Command(bin, "hook", tc.subcmd)
-			// Strip parent BATON_* env to avoid leaking outer baton session
+			// Strip parent REFRAIN_* env to avoid leaking outer refrain session
 			// state into the test subprocess.
-			cleanEnv := envWithout(os.Environ(), "BATON_HOOK_SOCKET", "BATON_AGENT_ID")
+			cleanEnv := envWithout(os.Environ(), "REFRAIN_HOOK_SOCKET", "REFRAIN_AGENT_ID")
 			cmd.Env = append(
 				cleanEnv,
-				"BATON_HOOK_SOCKET="+socket,
-				"BATON_AGENT_ID=test-agent-42",
+				"REFRAIN_HOOK_SOCKET="+socket,
+				"REFRAIN_AGENT_ID=test-agent-42",
 			)
 			cmd.Stdin = strings.NewReader(tc.stdin)
 			if out, err := cmd.CombinedOutput(); err != nil {
@@ -179,15 +179,15 @@ func TestHookSubcommandForwards(t *testing.T) {
 }
 
 // TestHookSubcommandNoEnv ensures the hook subcommand silently no-ops when
-// BATON_HOOK_SOCKET and BATON_AGENT_ID aren't set — this is the case for a
-// user running `claude` outside of baton.
+// REFRAIN_HOOK_SOCKET and REFRAIN_AGENT_ID aren't set — this is the case for a
+// user running `claude` outside of refrain.
 func TestHookSubcommandNoEnv(t *testing.T) {
-	bin := buildBaton(t)
+	bin := buildRefrain(t)
 
 	cmd := exec.Command(bin, "hook", "stop")
-	// Deliberately no BATON_* env vars — if baton itself was launched inside
-	// another baton session the parent env may have leaked them in, so filter.
-	cmd.Env = envWithout(os.Environ(), "BATON_HOOK_SOCKET", "BATON_AGENT_ID")
+	// Deliberately no REFRAIN_* env vars — if refrain itself was launched inside
+	// another refrain session the parent env may have leaked them in, so filter.
+	cmd.Env = envWithout(os.Environ(), "REFRAIN_HOOK_SOCKET", "REFRAIN_AGENT_ID")
 	cmd.Stdin = strings.NewReader(`{}`)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -200,7 +200,7 @@ func TestHookSubcommandNoEnv(t *testing.T) {
 
 // TestHookSubcommandUnknownEvent ensures unknown event names exit 0 silently.
 func TestHookSubcommandUnknownEvent(t *testing.T) {
-	bin := buildBaton(t)
+	bin := buildRefrain(t)
 
 	cmd := exec.Command(bin, "hook", "made-up-event")
 	cmd.Stdin = strings.NewReader(`{}`)

@@ -8,10 +8,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/config"
-	"github.com/devenjarvis/baton/internal/tui/mdrender"
-	"github.com/devenjarvis/baton/internal/tui/mdrender/testutil"
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/tui/mdrender"
+	"github.com/devenjarvis/refrain/internal/tui/mdrender/testutil"
 	"github.com/muesli/termenv"
 )
 
@@ -21,7 +21,7 @@ import (
 func newEditorTestSession(t *testing.T) (*agent.Session, *agent.Manager) {
 	t.Helper()
 
-	dir, err := os.MkdirTemp("", "baton-planeditor-*")
+	dir, err := os.MkdirTemp("", "refrain-planeditor-*")
 	if err != nil {
 		t.Fatal(err)
 	}

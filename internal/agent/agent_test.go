@@ -9,8 +9,8 @@ import (
 	"time"
 
 	xvt "github.com/charmbracelet/x/vt"
-	"github.com/devenjarvis/baton/internal/config"
-	"github.com/devenjarvis/baton/internal/hook"
+	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/hook"
 )
 
 // hookEvent is a test helper that builds a hook.Event for a given CLI-name event.

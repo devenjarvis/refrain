@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in Baton is broken or behaving unexpectedly.
+description: Something in Refrain is broken or behaving unexpectedly.
 labels: ["bug"]
 body:
   - type: markdown
@@ -19,7 +19,7 @@ body:
       label: Steps to reproduce
       description: The exact steps someone else can run to see the bug.
       placeholder: |
-        1. Run `baton` in a repo with 2+ agents
+        1. Run `refrain` in a repo with 2+ agents
         2. Press `d` on agent 1
         3. ...
     validations:
@@ -40,17 +40,17 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: "`baton doctor` output"
-      description: Paste the full output of `baton doctor`. This is the fastest way to triage most issues.
+      label: "`refrain doctor` output"
+      description: Paste the full output of `refrain doctor`. This is the fastest way to triage most issues.
       render: shell
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: Baton version
-      description: Output of `baton --version`.
-      placeholder: "baton 0.1.0 (abc123, 2026-01-01)"
+      label: Refrain version
+      description: Output of `refrain --version`.
+      placeholder: "refrain 0.1.0 (abc123, 2026-01-01)"
     validations:
       required: true
   - type: input

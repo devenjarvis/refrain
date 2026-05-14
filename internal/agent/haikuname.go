@@ -134,12 +134,12 @@ var ErrClaudeNotFound = errors.New("claude not found on PATH")
 // instruction is unlikely to produce a different result.
 var ErrEmptySlug = errors.New("empty slug after slugify")
 
-// batonHookEnvVars lists env vars that wire a claude subprocess into baton's
+// refrainHookEnvVars lists env vars that wire a claude subprocess into refrain's
 // running hook server. These must be stripped from the Haiku subprocess so
 // it doesn't fire phantom hook events back into the TUI as the parent agent.
-var batonHookEnvVars = []string{
-	"BATON_HOOK_SOCKET",
-	"BATON_AGENT_ID",
+var refrainHookEnvVars = []string{
+	"REFRAIN_HOOK_SOCKET",
+	"REFRAIN_AGENT_ID",
 }
 
 // DefaultBranchNamer returns a BranchNamer that shells out to
@@ -231,7 +231,7 @@ func buildClaudeHaikuArgs() []string {
 func runClaudeHaikuText(ctx context.Context, claudePath, instruction string) (string, error) {
 	cmd := exec.CommandContext(ctx, claudePath, buildClaudeHaikuArgs()...)
 	cmd.Stdin = strings.NewReader(instruction)
-	// Strip baton's hook-wiring env vars so the Haiku subprocess does not
+	// Strip refrain's hook-wiring env vars so the Haiku subprocess does not
 	// register hook callbacks against the running TUI's socket as the parent
 	// agent. Inheriting these caused phantom SessionStart/SessionEnd events
 	// to land on the parent agent and added per-call socket roundtrips that
@@ -266,7 +266,7 @@ func runClaudeHaiku(ctx context.Context, claudePath, instruction string) (string
 	return slug, nil
 }
 
-// sanitizedHaikuEnv returns env minus baton's hook-wiring vars. Everything
+// sanitizedHaikuEnv returns env minus refrain's hook-wiring vars. Everything
 // else (PATH, HOME, XDG_*, ANTHROPIC_*, etc.) is preserved — claude needs
 // auth and config to run.
 func sanitizedHaikuEnv(env []string) []string {
@@ -281,7 +281,7 @@ func sanitizedHaikuEnv(env []string) []string {
 }
 
 func shouldStripHaikuEnv(entry string) bool {
-	for _, name := range batonHookEnvVars {
+	for _, name := range refrainHookEnvVars {
 		if strings.HasPrefix(entry, name+"=") {
 			return true
 		}

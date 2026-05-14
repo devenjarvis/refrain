@@ -9,11 +9,11 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/diffmodel"
-	"github.com/devenjarvis/baton/internal/git"
-	"github.com/devenjarvis/baton/internal/tui/diff"
-	"github.com/devenjarvis/baton/internal/tui/mdrender"
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/git"
+	"github.com/devenjarvis/refrain/internal/tui/diff"
+	"github.com/devenjarvis/refrain/internal/tui/mdrender"
 )
 
 // spinnerFrames is the braille spinner sequence used while a verdict is running.

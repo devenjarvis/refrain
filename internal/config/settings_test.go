@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 func boolPtr(v bool) *bool    { return &v }
@@ -220,8 +220,8 @@ func TestLoadRepoSettings_MissingFile(t *testing.T) {
 
 func TestSaveLoadRoundTrip_Repo(t *testing.T) {
 	repoPath := t.TempDir()
-	// Create .baton dir
-	_ = os.MkdirAll(filepath.Join(repoPath, ".baton"), 0o755)
+	// Create .refrain dir
+	_ = os.MkdirAll(filepath.Join(repoPath, ".refrain"), 0o755)
 
 	original := &config.RepoSettings{
 		BypassPermissions: boolPtr(false),
@@ -272,11 +272,11 @@ func TestLoadResolved_MergesGlobalAndRepo(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "config.json"), globalData, 0o644)
 
 	// Write repo settings
-	_ = os.MkdirAll(filepath.Join(repoPath, ".baton"), 0o755)
+	_ = os.MkdirAll(filepath.Join(repoPath, ".refrain"), 0o755)
 	repoData, _ := json.Marshal(config.RepoSettings{
 		BranchPrefix: strPtr("repo/"),
 	})
-	_ = os.WriteFile(filepath.Join(repoPath, ".baton", "config.json"), repoData, 0o644)
+	_ = os.WriteFile(filepath.Join(repoPath, ".refrain", "config.json"), repoData, 0o644)
 
 	r, err := config.LoadResolved(repoPath)
 	if err != nil {
@@ -421,7 +421,7 @@ func TestLoad_MigratesFromLegacyXDGPath(t *testing.T) {
 	}
 
 	// New location should now exist
-	newPath := filepath.Join(base, ".baton", "repos.json")
+	newPath := filepath.Join(base, ".refrain", "repos.json")
 	if _, err := os.Stat(newPath); err != nil {
 		t.Errorf("new path %s should exist after migration: %v", newPath, err)
 	}

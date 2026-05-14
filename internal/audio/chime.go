@@ -73,7 +73,7 @@ func GenerateChime() (string, error) {
 		binary.LittleEndian.PutUint16(buf[offset:offset+2], uint16(val))
 	}
 
-	f, err := os.CreateTemp("", "baton-chime-*.wav")
+	f, err := os.CreateTemp("", "refrain-chime-*.wav")
 	if err != nil {
 		return "", err
 	}

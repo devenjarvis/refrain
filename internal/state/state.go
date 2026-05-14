@@ -14,14 +14,14 @@ import (
 // could still let an older snapshot win over a newer one.
 var saveMu sync.Mutex
 
-// BatonState is the top-level persisted state for session recovery.
-type BatonState struct {
+// RefrainState is the top-level persisted state for session recovery.
+type RefrainState struct {
 	Version  int            `json:"version"`
 	SavedAt  time.Time      `json:"savedAt"`
 	Sessions []SessionState `json:"sessions"`
 }
 
-// SessionState captures the state of a single baton session (worktree).
+// SessionState captures the state of a single refrain session (worktree).
 type SessionState struct {
 	ID             string       `json:"id"`
 	Name           string       `json:"name"`
@@ -48,13 +48,13 @@ type AgentState struct {
 
 // statePath returns the path to the state file for a given repo.
 func statePath(repoPath string) string {
-	return filepath.Join(repoPath, ".baton", "state.json")
+	return filepath.Join(repoPath, ".refrain", "state.json")
 }
 
-// Save persists the BatonState to disk using atomic temp+rename. Calls are
+// Save persists the RefrainState to disk using atomic temp+rename. Calls are
 // serialized by a package-level mutex so concurrent writes can't race on the
 // final rename.
-func Save(repoPath string, s *BatonState) error {
+func Save(repoPath string, s *RefrainState) error {
 	saveMu.Lock()
 	defer saveMu.Unlock()
 
@@ -101,8 +101,8 @@ func Save(repoPath string, s *BatonState) error {
 	return nil
 }
 
-// Load reads the BatonState from disk. Returns (nil, nil) if the file does not exist.
-func Load(repoPath string) (*BatonState, error) {
+// Load reads the RefrainState from disk. Returns (nil, nil) if the file does not exist.
+func Load(repoPath string) (*RefrainState, error) {
 	saveMu.Lock()
 	defer saveMu.Unlock()
 
@@ -116,7 +116,7 @@ func Load(repoPath string) (*BatonState, error) {
 		return nil, fmt.Errorf("state: reading %s: %w", path, err)
 	}
 
-	var s BatonState
+	var s RefrainState
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("state: unmarshalling state: %w", err)
 	}

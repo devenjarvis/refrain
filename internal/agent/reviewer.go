@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 // VerdictKind is the outcome of a per-task review.
@@ -49,7 +49,7 @@ type ReviewerAgent interface {
 // DefaultReviewerAgent returns a ReviewerAgent that shells out to
 // `claude -p --model <model>`. An empty model falls back to
 // config.DefaultReviewerModel. The subprocess inherits a sanitized env so
-// baton hook wiring doesn't bleed into the reviewer subprocess.
+// refrain hook wiring doesn't bleed into the reviewer subprocess.
 func DefaultReviewerAgent(model string) ReviewerAgent {
 	if model == "" {
 		model = config.DefaultReviewerModel

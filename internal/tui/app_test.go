@@ -11,11 +11,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	xvt "github.com/charmbracelet/x/vt"
-	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/audio"
-	"github.com/devenjarvis/baton/internal/config"
-	"github.com/devenjarvis/baton/internal/git"
-	"github.com/devenjarvis/baton/internal/github"
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/audio"
+	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/git"
+	"github.com/devenjarvis/refrain/internal/github"
 )
 
 // blockingDrafter is a test PlanDrafter that blocks until its channel is
@@ -95,7 +95,7 @@ func addAgentToSession(t *testing.T, app App) App {
 
 func TestCreateAgentViaN(t *testing.T) {
 	requireClaude(t)
-	dir, err := os.MkdirTemp("", "baton-tui-*")
+	dir, err := os.MkdirTemp("", "refrain-tui-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestCreateAgentViaN(t *testing.T) {
 
 func TestCreateMultipleAgentsViaTUI(t *testing.T) {
 	requireClaude(t)
-	dir, err := os.MkdirTemp("", "baton-tui-multi-*")
+	dir, err := os.MkdirTemp("", "refrain-tui-multi-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestCreateMultipleAgentsViaTUI(t *testing.T) {
 
 func TestAddAgentToSessionViaC(t *testing.T) {
 	requireClaude(t)
-	dir, err := os.MkdirTemp("", "baton-tui-addagent-*")
+	dir, err := os.MkdirTemp("", "refrain-tui-addagent-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestAddAgentToSessionViaC(t *testing.T) {
 // replaces the old split-panel focusTerminal toggling.
 func TestPanelFocusSwitching(t *testing.T) {
 	requireClaude(t)
-	dir, err := os.MkdirTemp("", "baton-focus-*")
+	dir, err := os.MkdirTemp("", "refrain-focus-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestPanelFocusSwitching(t *testing.T) {
 // guard test.
 func TestActionKeysBlockedInFocusLaunch(t *testing.T) {
 	requireClaude(t)
-	dir, err := os.MkdirTemp("", "baton-block-*")
+	dir, err := os.MkdirTemp("", "refrain-block-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestActionKeysBlockedInFocusLaunch(t *testing.T) {
 
 func TestShiftEscForwardsEscapeToAgent(t *testing.T) {
 	requireClaude(t)
-	dir, err := os.MkdirTemp("", "baton-shiftesc-*")
+	dir, err := os.MkdirTemp("", "refrain-shiftesc-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,11 +634,11 @@ func altScreenBashCmd(_ string) *exec.Cmd {
 
 // TestMouseWheelForwardsInAltScreen verifies that wheel events on the
 // focusLaunch agent terminal do NOT mutate scrollOffset when the agent is in
-// alt-screen mode. Alt-screen apps drive their own scrollback, so baton's
+// alt-screen mode. Alt-screen apps drive their own scrollback, so refrain's
 // scrollOffset must stay frozen and the wheel event should be forwarded to
 // the agent instead.
 func TestMouseWheelForwardsInAltScreen(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-alt-*")
+	dir, err := os.MkdirTemp("", "refrain-alt-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -696,7 +696,7 @@ func TestMouseWheelForwardsInAltScreen(t *testing.T) {
 }
 
 func TestScrollOffsetResetsOnAltScreenEntry(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-alt-reset-*")
+	dir, err := os.MkdirTemp("", "refrain-alt-reset-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +790,7 @@ func TestErrorPersistsAcrossTicks(t *testing.T) {
 // synchronously — so the UI stays responsive while the teardown runs in a
 // goroutine.
 func TestKillAgentAsyncMarksClosing(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-killasync-*")
+	dir, err := os.MkdirTemp("", "refrain-killasync-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -968,12 +968,12 @@ func TestKillResultMsgClearsClosingSetOnError(t *testing.T) {
 func TestRefreshAgentListRepoAffinity(t *testing.T) {
 	requireClaude(t)
 	// Set up two temp repos with git init.
-	dir1, err := os.MkdirTemp("", "baton-repo1-*")
+	dir1, err := os.MkdirTemp("", "refrain-repo1-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = os.RemoveAll(dir1) }()
-	dir2, err := os.MkdirTemp("", "baton-repo2-*")
+	dir2, err := os.MkdirTemp("", "refrain-repo2-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1069,7 +1069,7 @@ func TestRefreshAgentListRepoAffinity(t *testing.T) {
 // When an audio player is available, the test asserts ChimedForTurn state
 // directly; otherwise it still validates the gate logic runs without error.
 func TestChimeSuppressionByStatus(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-chime-*")
+	dir, err := os.MkdirTemp("", "refrain-chime-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1223,7 +1223,7 @@ func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 // first press shows the modal and sets agentLimitModalActive; second press proceeds.
 func TestSoftAgentLimitGuard(t *testing.T) {
 	requireClaude(t)
-	dir, err := os.MkdirTemp("", "baton-softlimit-*")
+	dir, err := os.MkdirTemp("", "refrain-softlimit-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1341,7 +1341,7 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 // mode applies to the multi-repo path (picker) just like the single-repo path.
 func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 	requireClaude(t)
-	dir, err := os.MkdirTemp("", "baton-softlimit-multi-*")
+	dir, err := os.MkdirTemp("", "refrain-softlimit-multi-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1559,7 +1559,7 @@ func TestFocusModeNavigationCrossesSections(t *testing.T) {
 // in that session and switches to focusLaunch.
 func TestFocusModeEnterOnActiveOpensFocusLaunch(t *testing.T) {
 	requireClaude(t)
-	dir, err := os.MkdirTemp("", "baton-focus-active-*")
+	dir, err := os.MkdirTemp("", "refrain-focus-active-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1696,7 +1696,7 @@ func TestClampFocusCursorHopsToNonEmptySection(t *testing.T) {
 // actions. Keybindings must not bleed across screens — focusLaunch is a
 // fullscreen Claude session and the user should be able to type any character.
 func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-focuslaunch-keys-*")
+	dir, err := os.MkdirTemp("", "refrain-focuslaunch-keys-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2136,7 +2136,7 @@ func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 // worktree is empty/unwritten, diffmodel.Parse returns an empty model, but the
 // viewer should still open.)
 func TestPipeline_DKey_OpensDiffViewer(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-pipeline-d-*")
+	dir, err := os.MkdirTemp("", "refrain-pipeline-d-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2339,7 +2339,7 @@ func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
 // depend on. Without this, pressing `'e'` on a session in a non-active repo
 // would resolve the IDE command from the wrong repo's resolvedCache.
 func TestRepoPathForSession_FindsSessionsAcrossMultiRepo(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-repopath-*")
+	dir, err := os.MkdirTemp("", "refrain-repopath-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2785,7 +2785,7 @@ func TestPRPollMsg_ExternalCloseCleansSession(t *testing.T) {
 
 // TestPRPollMsg_ExternalOpenPRPromotesBuildingToShipping verifies that a
 // session in LifecycleInProgress transitions to LifecycleShipping when the PR
-// poller discovers an open PR opened outside baton.
+// poller discovers an open PR opened outside refrain.
 func TestPRPollMsg_ExternalOpenPRPromotesBuildingToShipping(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTest("sess-build", "branch")
@@ -3446,7 +3446,7 @@ func TestBuildReviewReworkPrompt_FlaggedNoCommits(t *testing.T) {
 // default), `n` continues the legacy spawn path covered by
 // TestCreateAgentViaN.
 func TestNKeyOpensPromptModal_WhenPlanFirstEnabled(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-tui-planfirst-*")
+	dir, err := os.MkdirTemp("", "refrain-tui-planfirst-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3567,7 +3567,7 @@ func TestCreateResult_SessionsCreatedCount_OnlyIncrementsForNewSession(t *testin
 // Instead focus stays on the dashboard (panelFocus != focusPlanEditor) and the
 // pipeline cursor lands on the new drafting session in the Planning section.
 func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-planfirst-stay-*")
+	dir, err := os.MkdirTemp("", "refrain-planfirst-stay-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3646,7 +3646,7 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 // for a session with no open plan editor causes the editor to open automatically
 // and routes the question — rather than silently skipping it.
 func TestPlannerQuestionMsg_AutoOpensPlanEditor(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-planner-question-*")
+	dir, err := os.MkdirTemp("", "refrain-planner-question-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3770,7 +3770,7 @@ func TestPlannerQuestionMsg_DoesNotReplaceOpenEditor(t *testing.T) {
 func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 	initRepo := func(t *testing.T) string {
 		t.Helper()
-		dir, err := os.MkdirTemp("", "baton-promptroute-*")
+		dir, err := os.MkdirTemp("", "refrain-promptroute-*")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3882,7 +3882,7 @@ func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 // answer channel receives "" (so the planner subprocess unblocks) and
 // app.err is set (so the skip is never silent in the UI).
 func TestPlannerQuestionMsg_SkippedSessionMissing(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-planner-q-missing-*")
+	dir, err := os.MkdirTemp("", "refrain-planner-q-missing-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3938,7 +3938,7 @@ func TestPlannerQuestionMsg_SkippedSessionMissing(t *testing.T) {
 // that does not own the given session. This guards against programming errors
 // (e.g. passing the wrong repo path) before a real poll fires.
 func TestRefreshPRStatus_WrongRepoReturnsError(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-pr-owner-*")
+	dir, err := os.MkdirTemp("", "refrain-pr-owner-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4368,7 +4368,7 @@ func TestCreateResult_SkipFocusLaunch_StaysOnDashboard(t *testing.T) {
 // the user on the dashboard (panelFocus == focusList, focusLaunchAgent == nil)
 // instead of dropping into the fullscreen agent terminal.
 func TestApprovePlanAndSpawn_StaysOnDashboard(t *testing.T) {
-	dir, err := os.MkdirTemp("", "baton-approve-spawn-*")
+	dir, err := os.MkdirTemp("", "refrain-approve-spawn-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4450,7 +4450,7 @@ func TestApprovePlanAndSpawn_StaysOnDashboard(t *testing.T) {
 func setupAutoPromoteRepo(t *testing.T) (dir string, mgr *agent.Manager) {
 	t.Helper()
 	var err error
-	dir, err = os.MkdirTemp("", "baton-auto-promote-*")
+	dir, err = os.MkdirTemp("", "refrain-auto-promote-*")
 	if err != nil {
 		t.Fatal(err)
 	}

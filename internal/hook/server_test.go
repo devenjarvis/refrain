@@ -206,7 +206,7 @@ func TestSendEventNoServer(t *testing.T) {
 }
 
 // TestServerRemovesPriorRegularFile verifies that NewServer cleans up a
-// stale leftover at the socket path even if the previous baton crashed.
+// stale leftover at the socket path even if the previous refrain crashed.
 func TestServerRemovesPriorRegularFile(t *testing.T) {
 	dir := t.TempDir()
 	socketPath := filepath.Join(dir, "hook.sock")

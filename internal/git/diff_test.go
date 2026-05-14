@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/devenjarvis/baton/internal/git"
+	"github.com/devenjarvis/refrain/internal/git"
 )
 
 func TestParseDiffFiles_Empty(t *testing.T) {

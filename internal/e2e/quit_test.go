@@ -5,7 +5,7 @@ package e2e
 import "testing"
 
 // TestQuitNoAgents verifies that pressing "q" with no running agents exits
-// baton immediately with exit code 0.
+// refrain immediately with exit code 0.
 func TestQuitNoAgents(t *testing.T) {
 	s := newSession(t)
 	s.Start()

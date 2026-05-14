@@ -9,9 +9,9 @@ import (
 )
 
 // haikuLogPath returns the diagnostic log path for the given repo. The log
-// lives under <repoPath>/.baton/logs/ alongside the hook socket.
+// lives under <repoPath>/.refrain/logs/ alongside the hook socket.
 func haikuLogPath(repoPath string) string {
-	return filepath.Join(repoPath, ".baton", "logs", "haiku.log")
+	return filepath.Join(repoPath, ".refrain", "logs", "haiku.log")
 }
 
 // haikuLogMaxBytes is the size threshold past which haikuLog truncates the
@@ -22,7 +22,7 @@ const haikuLogMaxBytes int64 = 1 << 20 // 1 MiB
 var haikuLogMu sync.Mutex
 
 // haikuLog appends a single diagnostic line about the branch-namer flow to
-// <repoPath>/.baton/logs/haiku.log. Best-effort: any I/O error is silently
+// <repoPath>/.refrain/logs/haiku.log. Best-effort: any I/O error is silently
 // dropped so logging never disrupts the TUI. The line is suffixed with "\n"
 // if it doesn't already end in one.
 //

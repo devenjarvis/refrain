@@ -1,11 +1,11 @@
 // Package planner carries planner-question events between a spawned
-// `baton planner-question-server` MCP subprocess and the long-running baton
+// `refrain planner-question-server` MCP subprocess and the long-running refrain
 // TUI process over a unix socket.
 //
 // Unlike the hook protocol — which is one-way fire-and-forget — the planner
 // question protocol is request/response on a single connection: the MCP
 // server writes one `{"question":"..."}` line, then blocks on the same
-// connection until baton writes back one `{"answer":"..."}` line.
+// connection until refrain writes back one `{"answer":"..."}` line.
 package planner
 
 import (
@@ -35,7 +35,7 @@ type questionRequest struct {
 	Question string `json:"question"`
 }
 
-// questionResponse is the wire payload baton writes back on the same
+// questionResponse is the wire payload refrain writes back on the same
 // connection. Empty Answer is a legitimate value meaning "no answer; carry
 // on" — the planner CLI is responsible for translating that into prose for
 // the model.

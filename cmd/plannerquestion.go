@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/devenjarvis/baton/internal/planner"
+	"github.com/devenjarvis/refrain/internal/planner"
 	"github.com/spf13/cobra"
 )
 
@@ -16,15 +16,15 @@ import (
 // subprocess pause mid-draft and ask the user for clarification. Claude Code
 // spawns this binary as an MCP server (configured via --mcp-config in the
 // planner argv) and routes any `ask_user` tool call to it. We translate that
-// JSON-RPC call into a unix-socket round-trip with the running baton TUI.
+// JSON-RPC call into a unix-socket round-trip with the running refrain TUI.
 //
-// Like `baton hook`, this command is not meant to be run by humans. It exits
-// silently when BATON_PLANNER_QUESTION_SOCKET is unset so a developer who
-// happens to run `baton planner-question-server` from a shell doesn't see
+// Like `refrain hook`, this command is not meant to be run by humans. It exits
+// silently when REFRAIN_PLANNER_QUESTION_SOCKET is unset so a developer who
+// happens to run `refrain planner-question-server` from a shell doesn't see
 // anything alarming.
 var plannerQuestionCmd = &cobra.Command{
 	Use:           "planner-question-server",
-	Short:         "MCP stdio server that bridges planner ask_user calls to baton",
+	Short:         "MCP stdio server that bridges planner ask_user calls to refrain",
 	Hidden:        true,
 	Args:          cobra.NoArgs,
 	RunE:          runPlannerQuestionServer,
@@ -64,9 +64,9 @@ const (
 )
 
 func runPlannerQuestionServer(_ *cobra.Command, _ []string) error {
-	socketPath := os.Getenv("BATON_PLANNER_QUESTION_SOCKET")
+	socketPath := os.Getenv("REFRAIN_PLANNER_QUESTION_SOCKET")
 	if socketPath == "" {
-		// Running outside baton: exit silently so a curious developer poking
+		// Running outside refrain: exit silently so a curious developer poking
 		// the binary doesn't get spam on stderr.
 		return nil
 	}
@@ -88,7 +88,7 @@ func servePlannerQuestionStdio(r io.Reader, w io.Writer, socketPath string) erro
 		if err := json.Unmarshal(line, &req); err != nil {
 			// Malformed input is unrecoverable on a single-stream protocol —
 			// log and skip rather than killing the server.
-			fmt.Fprintln(os.Stderr, "baton planner-question-server: malformed JSON-RPC line:", err)
+			fmt.Fprintln(os.Stderr, "refrain planner-question-server: malformed JSON-RPC line:", err)
 			continue
 		}
 
@@ -100,7 +100,7 @@ func servePlannerQuestionStdio(r io.Reader, w io.Writer, socketPath string) erro
 		resp := dispatchPlannerRPC(req, socketPath)
 		out, err := json.Marshal(resp)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "baton planner-question-server: encoding response:", err)
+			fmt.Fprintln(os.Stderr, "refrain planner-question-server: encoding response:", err)
 			continue
 		}
 		out = append(out, '\n')
@@ -155,7 +155,7 @@ func handleInitialize(req jsonrpcRequest) jsonrpcResponse {
 				"tools": map[string]any{},
 			},
 			"serverInfo": map[string]any{
-				"name":    "baton-planner-question",
+				"name":    "refrain-planner-question",
 				"version": "0.1.0",
 			},
 		},

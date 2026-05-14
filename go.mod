@@ -1,4 +1,4 @@
-module github.com/devenjarvis/baton
+module github.com/devenjarvis/refrain
 
 go 1.25.0
 

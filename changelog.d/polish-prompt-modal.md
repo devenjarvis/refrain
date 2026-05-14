@@ -5,4 +5,4 @@
 
 ### Changed
 
-- The new-session prompt modal (`n` when plan-first is enabled) has a polished layout: a "NEW SESSION / Planning →" header band, a rotating header prompt, an example-shape placeholder inside the textarea, a Baton-purple cursor, and a two-line aligned key-chip footer that surfaces `shift+enter` for newlines alongside `enter`, `ctrl+enter`, and `esc`.
+- The new-session prompt modal (`n` when plan-first is enabled) has a polished layout: a "NEW SESSION / Planning →" header band, a rotating header prompt, an example-shape placeholder inside the textarea, a Refrain-purple cursor, and a two-line aligned key-chip footer that surfaces `shift+enter` for newlines alongside `enter`, `ctrl+enter`, and `esc`.

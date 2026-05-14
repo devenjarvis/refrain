@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/hook"
+	"github.com/devenjarvis/refrain/internal/hook"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +48,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("  [OK]   claude: %s\n", claudePath)
 
-		// Verify claude supports --settings, which baton uses to inject the
+		// Verify claude supports --settings, which refrain uses to inject the
 		// hooks that drive status detection and chimes.
 		if supportsSettingsFlag(claudePath) {
 			fmt.Println("  [OK]   claude --settings: supported")
@@ -58,19 +58,19 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Baton's own binary path — hooks commands reference it.
-	batonExe, err := resolveBatonBinary()
+	// Refrain's own binary path — hooks commands reference it.
+	refrainExe, err := resolveRefrainBinary()
 	if err != nil {
-		fmt.Printf("  [FAIL] baton binary: unresolved (%v)\n", err)
+		fmt.Printf("  [FAIL] refrain binary: unresolved (%v)\n", err)
 		allOk = false
 	} else {
-		fmt.Printf("  [OK]   baton binary: %s\n", batonExe)
+		fmt.Printf("  [OK]   refrain binary: %s\n", refrainExe)
 	}
 
 	// Hook pipeline round-trip: spin up a temporary socket, invoke
-	// `baton hook session-start` against it, and confirm the event arrives.
-	if batonExe != "" {
-		if err := checkHookPipeline(batonExe); err != nil {
+	// `refrain hook session-start` against it, and confirm the event arrives.
+	if refrainExe != "" {
+		if err := checkHookPipeline(refrainExe); err != nil {
 			fmt.Printf("  [FAIL] hook pipeline: %v\n", err)
 			allOk = false
 		} else {
@@ -143,10 +143,10 @@ func supportsSettingsFlag(claudePath string) bool {
 	return strings.Contains(string(out), "--settings")
 }
 
-// resolveBatonBinary returns the baton binary path, preferring the resolved
+// resolveRefrainBinary returns the refrain binary path, preferring the resolved
 // symlink target. Mirrors the logic in internal/agent so doctor invokes the
 // same binary the hooks file would invoke.
-func resolveBatonBinary() (string, error) {
+func resolveRefrainBinary() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -158,10 +158,10 @@ func resolveBatonBinary() (string, error) {
 }
 
 // checkHookPipeline exercises the socket round-trip: it spins up a hook
-// server on a short temp path, runs `baton hook session-start` with the
+// server on a short temp path, runs `refrain hook session-start` with the
 // socket env wired up, and confirms the event arrives within 2 seconds.
 // Returns a descriptive error on failure so users can act on it.
-func checkHookPipeline(batonExe string) error {
+func checkHookPipeline(refrainExe string) error {
 	// macOS caps unix socket paths at 104 bytes. Use os.TempDir with a short
 	// name and surface a friendly error if it still won't fit.
 	sockDir, err := os.MkdirTemp("", "bd")
@@ -181,22 +181,22 @@ func checkHookPipeline(batonExe string) error {
 	}
 	defer func() { _ = srv.Close() }()
 
-	cmd := exec.Command(batonExe, "hook", "session-start")
-	// Scrub any BATON_* env inherited from a parent baton session — the
+	cmd := exec.Command(refrainExe, "hook", "session-start")
+	// Scrub any REFRAIN_* env inherited from a parent refrain session — the
 	// check must exercise *this* temp socket, not a lingering one. Filter
-	// by the full `BATON_` prefix so future vars (not just the two used
+	// by the full `REFRAIN_` prefix so future vars (not just the two used
 	// today) stay isolated from the doctor subprocess.
 	baseEnv := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "BATON_") {
+		if strings.HasPrefix(kv, "REFRAIN_") {
 			continue
 		}
 		baseEnv = append(baseEnv, kv)
 	}
 	cmd.Env = append(
 		baseEnv,
-		"BATON_HOOK_SOCKET="+socket,
-		"BATON_AGENT_ID=doctor",
+		"REFRAIN_HOOK_SOCKET="+socket,
+		"REFRAIN_AGENT_ID=doctor",
 	)
 	cmd.Stdin = strings.NewReader(`{"session_id":"doctor","cwd":"/"}`)
 	if out, err := cmd.CombinedOutput(); err != nil {

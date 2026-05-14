@@ -11,7 +11,7 @@ var version = "dev"
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print the version of baton",
+	Short: "Print the version of refrain",
 	RunE:  runVersion,
 }
 
@@ -20,7 +20,7 @@ func init() {
 }
 
 func runVersion(cmd *cobra.Command, args []string) error {
-	fmt.Printf("baton version %s\n", resolvedVersion())
+	fmt.Printf("refrain version %s\n", resolvedVersion())
 	return nil
 }
 

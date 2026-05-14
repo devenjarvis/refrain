@@ -16,7 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/tui/mdrender"
+	"github.com/devenjarvis/refrain/internal/tui/mdrender"
 )
 
 // Model embeds textarea.Model and adds an mdrender.Renderer hook for live

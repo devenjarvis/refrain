@@ -73,8 +73,8 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/flipbit03/terminal-use/main/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Build baton
-        run: go build -o baton .
+      - name: Build refrain
+        run: go build -o refrain .
 
       - name: Run e2e tests
         run: go test -tags e2e -timeout 300s -v ./internal/e2e/

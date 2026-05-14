@@ -42,7 +42,7 @@ type Server struct {
 // If a stale socket file exists at the path, it is removed before binding.
 // The directory containing the socket must already exist.
 func NewServer(socketPath string) (*Server, error) {
-	// Remove stale socket file from a previous baton run — unix domain sockets
+	// Remove stale socket file from a previous refrain run — unix domain sockets
 	// don't auto-clean on process crash.
 	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("removing stale socket: %w", err)

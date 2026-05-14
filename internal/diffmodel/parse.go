@@ -1,4 +1,4 @@
-// Package diffmodel wraps bluekeyes/go-gitdiff with a baton-shaped data model
+// Package diffmodel wraps bluekeyes/go-gitdiff with a refrain-shaped data model
 // tailored to the TUI diff view. It is renderer-agnostic (no styling imports)
 // and produces immutable structures safe to share across goroutines.
 package diffmodel

@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/devenjarvis/baton/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
 )
 
 // FileSelectedMsg is emitted when the user selects a file leaf in the tree.

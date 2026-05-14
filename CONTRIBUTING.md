@@ -1,12 +1,12 @@
-# Contributing to Baton
+# Contributing to Refrain
 
-Baton is an early, single-maintainer project. Focused bug reports, fixes, and small features are the easiest kind of contribution to review.
+Refrain is an early, single-maintainer project. Focused bug reports, fixes, and small features are the easiest kind of contribution to review.
 
 ## Filing issues
 
 Search existing issues (open and closed) before opening a new one.
 
-- **Bugs** — use the "Bug report" form. Include `baton doctor` output, steps to reproduce, and expected vs. actual behavior.
+- **Bugs** — use the "Bug report" form. Include `refrain doctor` output, steps to reproduce, and expected vs. actual behavior.
 - **Feature requests** — use the "Feature request" form. Describe the underlying problem, not just the proposal.
 - **Security vulnerabilities** — do not file a public issue. See [SECURITY.md](./SECURITY.md).
 
@@ -19,16 +19,16 @@ Requirements:
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH) — runtime-only
 
 ```bash
-git clone https://github.com/devenjarvis/baton.git
-cd baton
-go build -o baton .
-./baton doctor
+git clone https://github.com/devenjarvis/refrain.git
+cd refrain
+go build -o refrain .
+./refrain doctor
 ```
 
 ## Build, test, lint
 
 ```bash
-go build -o baton .         # build
+go build -o refrain .         # build
 go test ./...               # run all tests
 go test -race ./...         # run with race detector
 go vet ./...                # static analysis
@@ -36,7 +36,7 @@ golangci-lint run           # lint (config in .golangci.yml)
 gofumpt -w .                # format all Go files
 ```
 
-Always run `go test -race ./...` before opening a PR. Baton runs several goroutines per agent (PTY/VT/git) and the race detector has caught real bugs here.
+Always run `go test -race ./...` before opening a PR. Refrain runs several goroutines per agent (PTY/VT/git) and the race detector has caught real bugs here.
 
 End-to-end TUI tests live in `internal/e2e/` and require the `tu` CLI v0.6.0+:
 
@@ -73,7 +73,7 @@ main.go              Entry point
 cmd/
   root.go            Cobra root, launches TUI
   doctor.go          Environment validation (git, claude, hook round-trip)
-  hook.go            Forwards Claude hook payloads to the running baton over a unix socket
+  hook.go            Forwards Claude hook payloads to the running refrain over a unix socket
 internal/
   pty/               Raw PTY wrapper (creack/pty)
   vt/                Virtual terminal bridge (x/vt SafeEmulator + io.Pipe)
@@ -83,7 +83,7 @@ internal/
   hook/              Unix-socket server + client for Claude Code hook events
   github/            GitHub API wrapper for PRs, checks, review status
   config/            Global and per-repo settings (JSON on disk, resolved at runtime)
-  state/             Session persistence across baton restarts
+  state/             Session persistence across refrain restarts
   editor/            IDE launcher helpers (macOS app probing, quote-aware tokenizer)
   audio/             Optional chimes for status transitions
   e2e/               End-to-end TUI tests (behind the `e2e` build tag)

@@ -13,9 +13,9 @@ import (
 const (
 	DefaultAudioEnabled      = true
 	DefaultBypassPermissions = true
-	DefaultBranchPrefix      = "baton/"
+	DefaultBranchPrefix      = "refrain/"
 	DefaultAgentProgram      = "claude"
-	DefaultWorktreeDir       = ".baton/worktrees"
+	DefaultWorktreeDir       = ".refrain/worktrees"
 	DefaultSidebarWidth      = 30
 	DefaultMergeMethod       = "squash"
 
@@ -62,7 +62,7 @@ const (
 	// ctrl+enter on the modal to skip the planning step on a per-session basis.
 	DefaultPlanFirstEnabled = true
 
-	// DefaultBuildFromPlanPrompt is the initial prompt baton sends to the
+	// DefaultBuildFromPlanPrompt is the initial prompt refrain sends to the
 	// real agent when an approved plan is handed off. The agent is expected
 	// to read .claude/plan.md and execute it.
 	DefaultBuildFromPlanPrompt = "Read .claude/plan.md and execute the plan. Update task checkboxes as you complete them. Stop when all tasks are complete or when you need a decision."
@@ -116,7 +116,7 @@ func ClampSidebarWidth(w int) int {
 	return w
 }
 
-// GlobalSettings holds user-wide settings stored at ~/.baton/config.json.
+// GlobalSettings holds user-wide settings stored at ~/.refrain/config.json.
 // All fields are pointers so nil means "not set, use default."
 type GlobalSettings struct {
 	AudioEnabled      *bool   `json:"audio_enabled,omitempty"`
@@ -153,7 +153,7 @@ type GlobalSettings struct {
 	MergeMethod *string `json:"merge_method,omitempty"`
 }
 
-// RepoSettings holds per-repo overrides stored at <repo>/.baton/config.json.
+// RepoSettings holds per-repo overrides stored at <repo>/.refrain/config.json.
 // Fields here override the corresponding GlobalSettings value.
 type RepoSettings struct {
 	BypassPermissions   *bool   `json:"bypass_permissions,omitempty"`
@@ -380,21 +380,21 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 	return r
 }
 
-// globalSettingsFile returns the path to ~/.baton/config.json.
+// globalSettingsFile returns the path to ~/.refrain/config.json.
 func globalSettingsFile() (string, error) {
-	dir, err := BatonDir()
+	dir, err := RefrainDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "config.json"), nil
 }
 
-// repoSettingsFile returns the path to <repoPath>/.baton/config.json.
+// repoSettingsFile returns the path to <repoPath>/.refrain/config.json.
 func repoSettingsFile(repoPath string) string {
-	return filepath.Join(repoPath, ".baton", "config.json")
+	return filepath.Join(repoPath, ".refrain", "config.json")
 }
 
-// LoadGlobalSettings reads ~/.baton/config.json.
+// LoadGlobalSettings reads ~/.refrain/config.json.
 // Returns an empty GlobalSettings (no error) if the file does not exist.
 func LoadGlobalSettings() (*GlobalSettings, error) {
 	path, err := globalSettingsFile()
@@ -417,7 +417,7 @@ func LoadGlobalSettings() (*GlobalSettings, error) {
 	return &s, nil
 }
 
-// SaveGlobalSettings writes settings atomically to ~/.baton/config.json.
+// SaveGlobalSettings writes settings atomically to ~/.refrain/config.json.
 func SaveGlobalSettings(s *GlobalSettings) error {
 	path, err := globalSettingsFile()
 	if err != nil {
@@ -426,7 +426,7 @@ func SaveGlobalSettings(s *GlobalSettings) error {
 	return atomicWriteJSON(path, s)
 }
 
-// LoadRepoSettings reads <repoPath>/.baton/config.json.
+// LoadRepoSettings reads <repoPath>/.refrain/config.json.
 // Returns an empty RepoSettings (no error) if the file does not exist.
 func LoadRepoSettings(repoPath string) (*RepoSettings, error) {
 	path := repoSettingsFile(repoPath)
@@ -446,7 +446,7 @@ func LoadRepoSettings(repoPath string) (*RepoSettings, error) {
 	return &s, nil
 }
 
-// SaveRepoSettings writes settings atomically to <repoPath>/.baton/config.json.
+// SaveRepoSettings writes settings atomically to <repoPath>/.refrain/config.json.
 func SaveRepoSettings(repoPath string, s *RepoSettings) error {
 	return atomicWriteJSON(repoSettingsFile(repoPath), s)
 }

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/devenjarvis/baton/internal/agent"
-	"github.com/devenjarvis/baton/internal/github"
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/github"
 )
 
 // TestPrPollInterval_BurstOverridesBaseline verifies the burst window shortens
@@ -47,7 +47,7 @@ func TestBranchRenamedEventArmsBurst(t *testing.T) {
 		event: agent.Event{
 			Type:      agent.EventBranchRenamed,
 			SessionID: "sess-1",
-			Branch:    "baton/new-name",
+			Branch:    "refrain/new-name",
 		},
 	})
 	got := model.(App).prPollStates["sess-1"]

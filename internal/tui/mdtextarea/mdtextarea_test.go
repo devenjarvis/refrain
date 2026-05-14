@@ -7,8 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/devenjarvis/baton/internal/tui/mdrender"
-	"github.com/devenjarvis/baton/internal/tui/mdrender/testutil"
+	"github.com/devenjarvis/refrain/internal/tui/mdrender"
+	"github.com/devenjarvis/refrain/internal/tui/mdrender/testutil"
 	"github.com/muesli/termenv"
 )
 

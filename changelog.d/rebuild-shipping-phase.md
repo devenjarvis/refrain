@@ -4,7 +4,7 @@
 - **`m` to merge**: press `m` in the shipping panel to merge the PR (squash by default; gated on CI green + approved review). `M` force-merges regardless of merge-ready state. On success the session immediately transitions to Complete.
 - **`r` to address feedback**: press `r` to synthesize a prompt from failing CI check names (with URLs) and reviewer `CHANGES_REQUESTED` / `COMMENTED` threads, spawn a new agent in the existing session worktree, and transition the session back to BUILDING. The PR stays open.
 - **`p` opens PR in browser** from within the shipping panel; `t` opens the agent terminal; `esc` returns to the pipeline.
-- **`MergeMethod` config**: global and per-repo setting (`"squash"` / `"merge"` / `"rebase"`, default `"squash"`) controls how baton merges PRs.
+- **`MergeMethod` config**: global and per-repo setting (`"squash"` / `"merge"` / `"rebase"`, default `"squash"`) controls how refrain merges PRs.
 - **`GetReviewThreads` GitHub API**: new method on `github.Client` fetches review state + inline comments grouped by reviewer; cached on `prCacheEntry.threads`.
 - **`MergePR` GitHub API**: new method on `github.Client` calls the GitHub merge endpoint.
 - **`CheckRun.URL` field**: check run detail URL (from `html_url`) is now included in `github.CheckStatus.Runs` and surfaced in the `r` feedback prompt.

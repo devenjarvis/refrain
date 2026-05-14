@@ -13,13 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/config"
-	"github.com/devenjarvis/baton/internal/git"
-	"github.com/devenjarvis/baton/internal/hook"
-	"github.com/devenjarvis/baton/internal/planner"
-	"github.com/devenjarvis/baton/internal/setlist"
-	"github.com/devenjarvis/baton/internal/songs"
-	"github.com/devenjarvis/baton/internal/state"
+	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/git"
+	"github.com/devenjarvis/refrain/internal/hook"
+	"github.com/devenjarvis/refrain/internal/migrate"
+	"github.com/devenjarvis/refrain/internal/planner"
+	"github.com/devenjarvis/refrain/internal/setlist"
+	"github.com/devenjarvis/refrain/internal/songs"
+	"github.com/devenjarvis/refrain/internal/state"
 )
 
 // EventType represents the kind of agent event.
@@ -149,8 +150,8 @@ var ErrSessionNotFound = errors.New("session not found")
 
 // NewManager creates a new agent manager for the given repo.
 //
-// The manager owns a hook.Server listening on <repoPath>/.baton/hook.sock that
-// routes Claude Code hook events to agents by BATON_AGENT_ID. If the socket
+// The manager owns a hook.Server listening on <repoPath>/.refrain/hook.sock that
+// routes Claude Code hook events to agents by REFRAIN_AGENT_ID. If the socket
 // fails to start (e.g. filesystem permissions), the manager logs to stderr
 // and continues with hooks disabled; spawned agents will then never transition
 // out of Active.
@@ -169,15 +170,18 @@ func NewManager(repoPath string, settings config.ResolvedSettings) *Manager {
 		plannerQuestions: make(chan PlannerQuestion, 8),
 	}
 
-	batonDir := filepath.Join(repoPath, ".baton")
-	if err := os.MkdirAll(batonDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "baton: creating %s: %v (hooks disabled)\n", batonDir, err)
+	if err := migrate.RepoState(repoPath); err != nil {
+		fmt.Fprintf(os.Stderr, "refrain: %v\n", err)
+	}
+	refrainDir := filepath.Join(repoPath, ".refrain")
+	if err := os.MkdirAll(refrainDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "refrain: creating %s: %v (hooks disabled)\n", refrainDir, err)
 		return m
 	}
 	socketPath := hookSocketPath(repoPath)
 	srv, err := hook.NewServer(socketPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "baton: starting hook server on %s: %v (hooks disabled)\n", socketPath, err)
+		fmt.Fprintf(os.Stderr, "refrain: starting hook server on %s: %v (hooks disabled)\n", socketPath, err)
 		return m
 	}
 	m.hookServer = srv
@@ -248,20 +252,20 @@ func (m *Manager) getTaskSummarizer() TaskSummarizer {
 
 // hookSocketPath returns the unix socket path for a given repoPath.
 //
-// Preferred layout: <repoPath>/.baton/hook.sock — easy to inspect and cleaned
-// up with the rest of baton's per-repo state. macOS limits unix socket paths
+// Preferred layout: <repoPath>/.refrain/hook.sock — easy to inspect and cleaned
+// up with the rest of refrain's per-repo state. macOS limits unix socket paths
 // to 104 bytes, so when the preferred path would exceed a safe threshold we
 // fall back to a short hashed name under os.TempDir(). Tests exercise the
 // fallback path via deeply nested temp directories.
 func hookSocketPath(repoPath string) string {
-	preferred := filepath.Join(repoPath, ".baton", "hook.sock")
+	preferred := filepath.Join(repoPath, ".refrain", "hook.sock")
 	// 104 is the darwin sun_path limit; leave headroom for the trailing NUL
 	// and any quirks. 100 is comfortably below.
 	if len(preferred) < 100 {
 		return preferred
 	}
 	h := sha256.Sum256([]byte(repoPath))
-	return filepath.Join(os.TempDir(), fmt.Sprintf("baton-%x.sock", h[:8]))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("refrain-%x.sock", h[:8]))
 }
 
 // dispatchHookEvents reads hook events from the server and routes each to the
@@ -430,7 +434,7 @@ func (m *Manager) maybeRenameFromPrompt(sess *Session, a *Agent, prompt string) 
 // second prompt arriving while the summarizer is running is a no-op.
 //
 // Failures are retried by callHaikuWithRetry up to haikuSummaryAttempts times,
-// with each attempt + the final outcome written to .baton/logs/haiku.log
+// with each attempt + the final outcome written to .refrain/logs/haiku.log
 // under kind=summary so a single shared file traces both the branch-namer
 // and the summarizer flows. The DefaultTaskSummarizer's silent ("", nil)
 // return contract is preserved at the public boundary: this function always
@@ -536,8 +540,8 @@ func (m *Manager) PlannerQuestions() <-chan PlannerQuestion { return m.plannerQu
 // long-lived agents.
 //
 // StartDraft also spawns a per-session planner.Server bound to a unix socket
-// under .baton/ so the planner Sonnet subprocess can call ask_user back into
-// baton. The server is created BEFORE the drafter runs and torn down by
+// under .refrain/ so the planner Sonnet subprocess can call ask_user back into
+// refrain. The server is created BEFORE the drafter runs and torn down by
 // runDraft after the subprocess exits, so a partially-started draft never
 // leaks a listener. If the server fails to bind (rare — typically the macOS
 // 104-byte sun_path limit), drafting still proceeds with ask_user disabled
@@ -638,16 +642,16 @@ func (m *Manager) tryPumpPlannerQuestion(sessionID string, ev planner.PlannerQue
 }
 
 // plannerQuestionSocketPath returns the unix socket path for a per-session
-// planner question server. Mirrors hookSocketPath: prefer .baton/ for
+// planner question server. Mirrors hookSocketPath: prefer .refrain/ for
 // observability, fall back to a hashed name in os.TempDir when the path
 // would exceed the macOS 104-byte sun_path limit.
 func plannerQuestionSocketPath(repoPath, sessionID string) string {
-	preferred := filepath.Join(repoPath, ".baton", "planner-q-"+sessionID+".sock")
+	preferred := filepath.Join(repoPath, ".refrain", "planner-q-"+sessionID+".sock")
 	if len(preferred) < 100 {
 		return preferred
 	}
 	h := sha256.Sum256([]byte(repoPath + "|" + sessionID))
-	return filepath.Join(os.TempDir(), fmt.Sprintf("baton-pq-%x.sock", h[:8]))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("refrain-pq-%x.sock", h[:8]))
 }
 
 // runDraft executes a Draft call against drafter and writes the resulting
@@ -893,7 +897,7 @@ func (m *Manager) emitBranchRenamed(sess *Session, _ *Agent, newBranch string) {
 }
 
 // ReconcileExternalBranchRename updates the in-memory branch name for a session
-// after the user has renamed the branch outside baton (e.g. `git branch -m`),
+// after the user has renamed the branch outside refrain (e.g. `git branch -m`),
 // then fires EventBranchRenamed so the burst-polling window arms and the sidebar
 // label refreshes. No git operations are performed.
 func (m *Manager) ReconcileExternalBranchRename(sessionID, newBranch string) {
@@ -934,7 +938,7 @@ func (m *Manager) FindAgentAndSession(agentID string) (*Agent, *Session) {
 // If the resolved PlanModel changed and the current planDrafter is still the
 // package default (i.e. tests haven't injected a mock via SetPlanDrafter),
 // the drafter is rebuilt with the new model so the next StartDraft picks up
-// the change without requiring a baton restart. A test-injected drafter is
+// the change without requiring a refrain restart. A test-injected drafter is
 // left alone — overriding it here would silently break SetPlanDrafter's
 // contract.
 func (m *Manager) UpdateSettings(s config.ResolvedSettings) {
@@ -1542,9 +1546,9 @@ func (m *Manager) RepoPath() string {
 	return m.repoPath
 }
 
-// Detach snapshots all sessions into a BatonState, kills all agents but preserves
+// Detach snapshots all sessions into a RefrainState, kills all agents but preserves
 // worktrees, and shuts down the manager. Returns the state for persistence.
-func (m *Manager) Detach() *state.BatonState {
+func (m *Manager) Detach() *state.RefrainState {
 	close(m.done)
 
 	// Stop hooks + drain watchers before snapshotting so any in-flight
@@ -1640,7 +1644,7 @@ func (m *Manager) Detach() *state.BatonState {
 		return nil
 	}
 
-	return &state.BatonState{
+	return &state.RefrainState{
 		Version:  1,
 		SavedAt:  time.Now(),
 		Sessions: sessionStates,

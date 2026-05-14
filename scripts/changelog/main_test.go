@@ -96,10 +96,10 @@ func TestBasicAssembly(t *testing.T) {
 	}
 
 	// New comparison links must be present
-	if !strings.Contains(got, "[0.2.0]: https://github.com/devenjarvis/baton/compare/v0.1.0...v0.2.0") {
+	if !strings.Contains(got, "[0.2.0]: https://github.com/devenjarvis/refrain/compare/v0.1.0...v0.2.0") {
 		t.Errorf("expected new versioned comparison link, got:\n%s", got)
 	}
-	if !strings.Contains(got, "[Unreleased]: https://github.com/devenjarvis/baton/compare/v0.2.0...HEAD") {
+	if !strings.Contains(got, "[Unreleased]: https://github.com/devenjarvis/refrain/compare/v0.2.0...HEAD") {
 		t.Errorf("expected updated Unreleased link, got:\n%s", got)
 	}
 }
@@ -108,7 +108,7 @@ func TestBasicAssembly(t *testing.T) {
 // header block, one prior versioned section, and comparison links at the bottom.
 const minimalChangelog = `# Changelog
 
-All notable changes to Baton will be documented in this file.
+All notable changes to Refrain will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -119,6 +119,6 @@ Every PR should update the ` + "`[Unreleased]`" + ` section with a short entry d
 
 Initial public release.
 
-[Unreleased]: https://github.com/devenjarvis/baton/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/devenjarvis/baton/releases/tag/v0.1.0
+[Unreleased]: https://github.com/devenjarvis/refrain/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/devenjarvis/refrain/releases/tag/v0.1.0
 `

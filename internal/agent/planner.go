@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/config"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 // PlannerQuestionSocketEnv is the environment variable the planner Sonnet
 // subprocess inherits to point its MCP bridge at the right unix socket.
 // Exported so cmd/plannerquestion.go (and tests) can reference the same
 // name without hardcoding the string in two places.
-const PlannerQuestionSocketEnv = "BATON_PLANNER_QUESTION_SOCKET"
+const PlannerQuestionSocketEnv = "REFRAIN_PLANNER_QUESTION_SOCKET"
 
 // ErrEmptyPrompt is returned when Draft is called with an empty user prompt.
 var ErrEmptyPrompt = errors.New("planner: empty user prompt")
@@ -40,7 +40,7 @@ type PlanDrafter interface {
 // DraftRequest is the input to PlanDrafter.Draft.
 //
 // QuestionSocket, when non-empty, points at a unix socket served by an
-// internal/planner.Server in the running baton process. The drafter wires
+// internal/planner.Server in the running refrain process. The drafter wires
 // it into the Sonnet subprocess as an MCP server so the planner can pause
 // and call ask_user; an empty value disables the feature for this draft.
 //
@@ -113,7 +113,7 @@ Every task follows test-first ordering. If a task has no meaningful test, say so
 
   - go test -race ./...
   - go vet ./...
-  - Manual: launch baton, do <X>, observe <Y>
+  - Manual: launch refrain, do <X>, observe <Y>
 
 ` + "`## Not in scope`" + ` — what this plan deliberately excludes. Use this to head off scope creep — if the developer's prompt implies a wider change, name the slice you're cutting and why.
 
@@ -151,7 +151,7 @@ CURRENT PLAN:
 // `claude -p --model <model>` with the planning instruction piped on stdin.
 // An empty model falls back to config.DefaultPlanModel so callers that
 // haven't migrated to the parameterized form keep their existing behavior.
-// Env stripped of baton hook wiring so the subprocess does not register
+// Env stripped of refrain hook wiring so the subprocess does not register
 // against the running TUI's hook socket as the parent agent.
 //
 // Cancellation is caller-driven via ctx (no wall-clock timeout in the default
@@ -219,7 +219,7 @@ func (d *defaultPlanDrafter) Revise(ctx context.Context, req ReviseRequest) (str
 // `ask_user` bridge is registered. Claude prefixes tool names with the
 // server key (`mcp__<name>__<tool>`), so this constant determines the
 // concrete tool name that ends up on the --tools allowlist below.
-const plannerQuestionMCPName = "baton_planner_question"
+const plannerQuestionMCPName = "refrain_planner_question"
 
 // plannerQuestionToolName is the fully-qualified tool name Claude exposes
 // for the ask_user bridge after MCP namespacing. Kept as a derived constant
@@ -236,7 +236,7 @@ const plannerQuestionToolName = "mcp__" + plannerQuestionMCPName + "__ask_user"
 // worktree-local CLAUDE.md guidance reaches the drafter.
 //
 // When questionSocket is non-empty, the argv is augmented to register the
-// `baton planner-question-server` MCP bridge so the planner can pause and
+// `refrain planner-question-server` MCP bridge so the planner can pause and
 // ask the user for clarification mid-draft. When empty (e.g. revise calls
 // or tests that don't care), the planner runs with zero MCP servers.
 //
@@ -285,12 +285,12 @@ func buildClaudePlannerArgs(model, questionSocket string) []string {
 // plannerMCPConfigJSON renders the --mcp-config payload. With an empty
 // socket path it returns the canonical `{"mcpServers":{}}` shape required
 // by claude's strict validator. With a socket path it adds a single server
-// entry that re-execs the running baton binary as the question bridge.
+// entry that re-execs the running refrain binary as the question bridge.
 //
 // The socket path is also written into the server entry's env map so it
 // reaches the MCP child reliably. Setting it on the parent claude process
 // alone is not enough: Claude Code does not always forward its full env to
-// MCP subprocess hosts, and a missing BATON_PLANNER_QUESTION_SOCKET makes
+// MCP subprocess hosts, and a missing REFRAIN_PLANNER_QUESTION_SOCKET makes
 // the bridge exit silently — the planner then sees ask_user as a tool error
 // and moves past without surfacing the question to the editor.
 func plannerMCPConfigJSON(questionSocket string) string {
@@ -299,10 +299,10 @@ func plannerMCPConfigJSON(questionSocket string) string {
 	}
 	bin, err := os.Executable()
 	if err != nil || bin == "" {
-		// Best effort: fall back to looking up `baton` on PATH. If that also
+		// Best effort: fall back to looking up `refrain` on PATH. If that also
 		// fails, omit the server — better to plan without ask_user than to
 		// hand claude a config it can't spawn.
-		if p, lookErr := exec.LookPath("baton"); lookErr == nil {
+		if p, lookErr := exec.LookPath("refrain"); lookErr == nil {
 			bin = p
 		} else {
 			return `{"mcpServers":{}}`
@@ -327,13 +327,13 @@ func plannerMCPConfigJSON(questionSocket string) string {
 }
 
 // runClaudePlanner runs `claude -p --model <model>` with instruction on
-// stdin and returns the trimmed raw stdout (markdown). Strips baton's hook
+// stdin and returns the trimmed raw stdout (markdown). Strips refrain's hook
 // env so the subprocess does not register against the running TUI's hook
 // socket as the parent agent. When questionSocket is non-empty, the
-// BATON_PLANNER_QUESTION_SOCKET env is added so the spawned MCP bridge
-// (registered via buildClaudePlannerArgs) can dial back into baton.
+// REFRAIN_PLANNER_QUESTION_SOCKET env is added so the spawned MCP bridge
+// (registered via buildClaudePlannerArgs) can dial back into refrain.
 // When cwd is non-empty, cmd.Dir is set so the subprocess reads the correct
-// repo when multiple repos are registered in baton.
+// repo when multiple repos are registered in refrain.
 func runClaudePlanner(ctx context.Context, claudePath, model, instruction, questionSocket, cwd string) (string, error) {
 	cmd := exec.CommandContext(ctx, claudePath, buildClaudePlannerArgs(model, questionSocket)...)
 	cmd.Stdin = strings.NewReader(instruction)

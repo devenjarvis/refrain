@@ -49,5 +49,5 @@ func TestReconcileExternalBranchRename_UnknownSession(t *testing.T) {
 	defer mgr.Shutdown()
 
 	// Should not panic on unknown session ID.
-	mgr.ReconcileExternalBranchRename("nonexistent-id", "baton/new-branch")
+	mgr.ReconcileExternalBranchRename("nonexistent-id", "refrain/new-branch")
 }

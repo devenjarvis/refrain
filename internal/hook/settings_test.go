@@ -10,7 +10,7 @@ import (
 
 func TestWriteHooksFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".baton-hooks.json")
+	path := filepath.Join(dir, ".refrain-hooks.json")
 
 	if err := WriteHooksFile(path); err != nil {
 		t.Fatalf("WriteHooksFile: %v", err)
@@ -72,7 +72,7 @@ func TestWriteHooksFile(t *testing.T) {
 			t.Errorf("event %q: expected type 'command', got %q", event, hook.Type)
 		}
 		if !strings.HasPrefix(hook.Command, batonPath) {
-			t.Errorf("event %q: command %q does not start with baton path %q", event, hook.Command, batonPath)
+			t.Errorf("event %q: command %q does not start with refrain path %q", event, hook.Command, batonPath)
 		}
 		if !strings.Contains(hook.Command, "hook "+wantCLIEvents[event]) {
 			t.Errorf("event %q: command %q missing CLI event %q", event, hook.Command, wantCLIEvents[event])

@@ -161,7 +161,7 @@ func run(changelogPath, fragmentsDir, version, notesFile string, now time.Time) 
 	prevVersionRe := regexp.MustCompile(`\[Unreleased\]: https://github\.com/([^/]+/[^/]+)/compare/v([^.]+\.[^.]+\.[^.]+)\.\.\.HEAD`)
 	prevMatch := prevVersionRe.FindStringSubmatch(updated)
 
-	repoSlug := "devenjarvis/baton" // fallback
+	repoSlug := "devenjarvis/refrain" // fallback
 	prevVersion := ""
 	if prevMatch != nil {
 		repoSlug = prevMatch[1]

@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/devenjarvis/baton/internal/agent"
+	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/muesli/termenv"
 )
 
@@ -977,7 +977,7 @@ func TestRenderFocusSessionCard_BranchChipAndElapsedGlyph(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTestWithPath("s", "my-session", dir)
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
-	sess.UpdateBranch("baton/add-dark-mode")
+	sess.UpdateBranch("refrain/add-dark-mode")
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
 	d := newDashboardModel()

@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/devenjarvis/baton/internal/planner"
+	"github.com/devenjarvis/refrain/internal/planner"
 )
 
 func shortPlannerSocketPath(t *testing.T) string {
 	t.Helper()
 	h := sha256.Sum256([]byte(t.Name() + fmt.Sprintf("-%d", time.Now().UnixNano())))
-	p := filepath.Join(os.TempDir(), fmt.Sprintf("baton-pq-%x.sock", h[:6]))
+	p := filepath.Join(os.TempDir(), fmt.Sprintf("refrain-pq-%x.sock", h[:6]))
 	t.Cleanup(func() { _ = os.Remove(p) })
 	return p
 }
@@ -214,7 +214,7 @@ func TestPlannerQuestion_UnknownMethodReturnsError(t *testing.T) {
 
 func TestPlannerQuestion_ToolsCall_DialFailureReturnsToolError(t *testing.T) {
 	// Point at a socket that isn't bound — AskQuestion will fail to dial.
-	socketPath := filepath.Join(os.TempDir(), "baton-nonexistent.sock")
+	socketPath := filepath.Join(os.TempDir(), "refrain-nonexistent.sock")
 	_ = os.Remove(socketPath)
 
 	resps := runStdioServer(t, socketPath, []string{
