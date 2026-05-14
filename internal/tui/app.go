@@ -2039,7 +2039,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// to advance is a deliberate action, while taking a break is
 				// the catch-all everywhere else — so the cursor location is
 				// the disambiguator the user already has at hand.
-				if a.focusCursorSection == focusSectionPlanning {
+				if !a.focusBreakMode && a.focusCursorSection == focusSectionPlanning {
 					planning := a.dashboard.planningSessions()
 					if len(planning) > 0 {
 						idx := a.focusPlanningIdx

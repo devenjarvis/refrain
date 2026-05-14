@@ -2532,6 +2532,29 @@ func TestBKey_OutsidePlanning_FallsThroughToBreak(t *testing.T) {
 	}
 }
 
+// TestBKey_InBreakMode_FromPlanningCursor_ExitsBreak verifies that pressing 'b'
+// while the break overlay is active exits the break regardless of which pipeline
+// section the cursor is on. The Planning-advance branch must not intercept the
+// press when focusBreakMode is true.
+func TestBKey_InBreakMode_FromPlanningCursor_ExitsBreak(t *testing.T) {
+	app, sessP, _, _, _ := makeFourPhaseApp(t)
+	app.focusBreakMode = true
+	app.focusBreakTimerUp = true // single-press clean exit
+	// makeFourPhaseApp already sets focusCursorSection = focusSectionPlanning
+	app.focusPlanningIdx = 0
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	app = model.(App)
+
+	if app.focusBreakMode {
+		t.Fatal("expected 'b' in break mode to exit the break overlay; focusBreakMode is still true")
+	}
+	if sessP.LifecyclePhase() != agent.LifecyclePlanning {
+		t.Errorf("Planning session phase changed unexpectedly: got %v, want %v",
+			sessP.LifecyclePhase(), agent.LifecyclePlanning)
+	}
+}
+
 // TestTick_BreakDoesNotEnterWhilePanelOpen pins M1: the auto-break entry must
 // only fire when the user is on the pipeline (focusList). If the user is in
 // the shipping panel mid-merge, the review panel, the plan editor, or
