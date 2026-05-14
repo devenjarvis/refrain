@@ -578,28 +578,6 @@ func TestFirstUncompletedTask(t *testing.T) {
 	}
 }
 
-func TestSecondUncompletedTask(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		plan string
-		want string
-	}{
-		{"empty", "", ""},
-		{"no tasks", "# just a header\n", ""},
-		{"one open task only", "- [ ] only task\n", ""},
-		{"all done", "- [x] one\n- [X] two\n", ""},
-		{"two open tasks", "- [ ] first\n- [ ] second\n", "second"},
-		{"closed between two open", "- [ ] first\n- [x] done\n- [ ] second\n", "second"},
-		{"trims surrounding whitespace", "- [ ] first\n  - [ ]   trim me  \n", "trim me"},
-		{"skips blank task body", "- [ ] first\n- [ ]   \n- [ ] real second\n", "real second"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := secondUncompletedTask(tc.plan); got != tc.want {
-				t.Errorf("secondUncompletedTask(%q) = %q, want %q", tc.plan, got, tc.want)
-			}
-		})
-	}
-}
 
 func TestPlanningStatusBadge_PhaseTransitions(t *testing.T) {
 	dir := t.TempDir()

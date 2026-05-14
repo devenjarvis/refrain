@@ -948,31 +948,6 @@ func buildingCurrentTask(sess *agent.Session) string {
 	return ""
 }
 
-// secondUncompletedTask returns the text of the second "- [ ]" line in plan,
-// or "" if fewer than two open tasks exist. Uses the same whitespace-trimming
-// and blank-body-skipping rules as firstUncompletedTask so both helpers agree
-// on what constitutes a valid open task. The "second open task" approximation
-// is intentional — deriving the truly-in-flight task from git commits would
-// require per-tick git I/O that the plan cache exists to avoid.
-func secondUncompletedTask(plan string) string {
-	count := 0
-	for _, raw := range strings.Split(plan, "\n") {
-		line := strings.TrimLeft(raw, " \t")
-		if !strings.HasPrefix(line, "- [ ]") {
-			continue
-		}
-		text := strings.TrimSpace(strings.TrimPrefix(line, "- [ ]"))
-		if text == "" {
-			continue
-		}
-		count++
-		if count == 2 {
-			return text
-		}
-	}
-	return ""
-}
-
 // focusSessionDescription chooses the description lines for a session card in
 // focus mode and reports whether they should render in pending (italic) style.
 // Priority: TaskSummary → OriginalPrompt → "…". Building-phase todo/plan task
