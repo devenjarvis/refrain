@@ -168,7 +168,6 @@ jobs:
       - performance-review
       - testing-review
       - correctness-review
-      - deep-review
     if: always() && !cancelled()
     runs-on: ubuntu-latest
     steps:
