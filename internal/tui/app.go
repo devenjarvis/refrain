@@ -4421,10 +4421,26 @@ outer:
 			ps.inFlight = true
 			a.prPollsInFlight++
 			fetchThreads := sess.LifecyclePhase() == agent.LifecycleShipping
-			cmds = append(cmds, a.refreshPRStatusForSession(sess.ID, sess.Branch(), repo.Path, sess.Worktree.Path, fetchThreads, 0))
+			cachedPRNumber := a.cachedPRNumberForFallback(sess)
+			cmds = append(cmds, a.refreshPRStatusForSession(sess.ID, sess.Branch(), repo.Path, sess.Worktree.Path, fetchThreads, cachedPRNumber))
 		}
 	}
 	return cmds
+}
+
+// cachedPRNumberForFallback returns the cached PR number for a Shipping session
+// so the poll cmd can call resolveMergedFallback when the open-only lookup
+// returns nil. Returns 0 for non-Shipping sessions, preserving today's
+// 2-consecutive-nil eviction behaviour for Building/Reviewing sessions.
+func (a *App) cachedPRNumberForFallback(sess *agent.Session) int {
+	if sess.LifecyclePhase() != agent.LifecycleShipping {
+		return 0
+	}
+	entry := a.prCache[sess.ID]
+	if entry == nil || entry.pr == nil {
+		return 0
+	}
+	return entry.pr.Number
 }
 
 // prPollInterval returns the adaptive polling interval for a session.
