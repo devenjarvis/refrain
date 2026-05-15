@@ -1027,6 +1027,50 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case planEditorRetryMsg:
+		// User pressed R in the plan editor after auto-retry was exhausted.
+		// Re-issue StartDraft with the session's saved original prompt so the
+		// drafter retries from scratch. Mirrors createSessionFromPrompt's call
+		// to StartDraft at app.go:3859.
+		repoPath := msg.repoPath
+		if repoPath == "" && a.planEditor != nil {
+			repoPath = a.planEditor.repoPath
+		}
+		if repoPath == "" {
+			repoPath = a.repoPathForSession(msg.sessionID)
+		}
+		if repoPath == "" {
+			repoPath = a.activeRepo
+		}
+		mgr := a.managers[repoPath]
+		if mgr == nil {
+			if a.planEditor != nil {
+				a.planEditor.SetError("session manager not found")
+			}
+			return a, nil
+		}
+		sess := mgr.GetSession(msg.sessionID)
+		if sess == nil {
+			if a.planEditor != nil {
+				a.planEditor.SetError("session not found")
+			}
+			return a, nil
+		}
+		prompt := sess.OriginalPrompt()
+		if err := mgr.StartDraft(msg.sessionID, prompt); err != nil {
+			if a.planEditor != nil {
+				a.planEditor.SetError("retry draft: " + err.Error())
+			}
+			return a, nil
+		}
+		// Reflect the drafting state immediately; EventStatusChanged will
+		// keep the editor in sync as the goroutine progresses.
+		if a.planEditor != nil && a.planEditor.sess != nil &&
+			a.planEditor.sess.ID == msg.sessionID {
+			a.planEditor.SetDrafting(true)
+		}
+		return a, nil
+
 	case planEditorRestoreMsg:
 		// Single-step undo: restore plan.prev.md → plan.md and reload the
 		// editor. No-op when no snapshot exists.

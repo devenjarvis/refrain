@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -4922,4 +4923,91 @@ func TestPollAllSessions_PassesCachedPRNumberForShippingOnly(t *testing.T) {
 	if got := app.cachedPRNumberForFallback(building); got != 0 {
 		t.Errorf("InProgress session: got %d, want 0", got)
 	}
+}
+
+// recordingDrafter records the prompt passed to Draft so tests can assert
+// the correct value was forwarded by the App's planEditorRetryMsg handler.
+// It returns a minimal valid plan immediately so cleanup doesn't deadlock.
+type recordingDrafter struct {
+	prompts []string
+	mu      sync.Mutex
+}
+
+func (r *recordingDrafter) Draft(_ context.Context, req agent.DraftRequest) (string, error) {
+	r.mu.Lock()
+	r.prompts = append(r.prompts, req.UserPrompt)
+	r.mu.Unlock()
+	return "# Goal\nTest plan.\n\n## Tasks\n- [ ] one\n", nil
+}
+
+func (r *recordingDrafter) Revise(_ context.Context, _ agent.ReviseRequest) (string, error) {
+	return "", errors.New("test: Revise not implemented")
+}
+
+func (r *recordingDrafter) Calls() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.prompts))
+	copy(out, r.prompts)
+	return out
+}
+
+// TestApp_PlanEditorRetryMsg_CallsStartDraftWithOriginalPrompt verifies that
+// dispatching a planEditorRetryMsg causes the App to call Manager.StartDraft
+// with the session's OriginalPrompt, transitioning the session to
+// LifecycleDrafting.
+func TestApp_PlanEditorRetryMsg_CallsStartDraftWithOriginalPrompt(t *testing.T) {
+	dir := t.TempDir()
+	worktreeDir := t.TempDir()
+
+	sess := agent.NewSessionForTestWithPath("retry-sess", "retry", worktreeDir)
+	sess.SetLifecyclePhase(agent.LifecyclePlanning)
+	sess.SetDraftError(errors.New("overloaded"))
+	sess.SetOriginalPrompt("add dark mode")
+
+	drafter := &recordingDrafter{}
+
+	// Shutdown must be deferred before close(block) — LIFO ensures goroutines
+	// complete before the manager waits on m.watchers.
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+	mgr.SetPlanDrafter(drafter)
+	mgr.AddSessionForTest(sess)
+
+	app := NewApp()
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+
+	// Open the plan editor on the session so the App can refresh it on status
+	// changes; this mirrors the real flow where the editor was already open.
+	editor := newPlanEditor(sess, dir, 80, 30)
+	app.planEditor = &editor
+	app.dashboard.panelFocus = focusPlanEditor
+
+	// Dispatch planEditorRetryMsg — this should call StartDraft.
+	model, _ := app.Update(planEditorRetryMsg{sessionID: sess.ID, repoPath: dir})
+	app = model.(App)
+
+	// StartDraft sets LifecycleDrafting synchronously before the goroutine runs.
+	if got := sess.LifecyclePhase(); got != agent.LifecycleDrafting {
+		t.Errorf("LifecyclePhase after retry = %v, want LifecycleDrafting", got)
+	}
+	if !sess.IsDrafting() {
+		t.Error("IsDrafting() should be true after planEditorRetryMsg")
+	}
+
+	// Verify the stub was invoked with the correct prompt. The goroutine starts
+	// asynchronously so poll briefly.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if calls := drafter.Calls(); len(calls) > 0 {
+			if calls[0] != "add dark mode" {
+				t.Errorf("Draft called with %q, want %q", calls[0], "add dark mode")
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Error("stub drafter was not called within 2s of planEditorRetryMsg dispatch")
 }
