@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -118,6 +119,82 @@ func TestPrPollMsg_NilGracePeriod(t *testing.T) {
 	}
 	if got2.prPollStates["sess-1"].consecutiveNilPolls != 0 {
 		t.Errorf("consecutiveNilPolls should reset to 0 after eviction, got %d", got2.prPollStates["sess-1"].consecutiveNilPolls)
+	}
+}
+
+// TestResolveMergedFallback verifies the six cases of the merged-fallback helper.
+func TestResolveMergedFallback(t *testing.T) {
+	ctx := context.Background()
+	mergedPR := &github.PRState{State: "merged", Number: 42}
+	closedPR := &github.PRState{State: "closed", Number: 43}
+	openPR := &github.PRState{State: "open", Number: 44}
+
+	tests := []struct {
+		name           string
+		cachedPRNumber int
+		refreshReturn  *github.PRState
+		refreshErr     error
+		want           *github.PRState
+		wantCalled     bool
+	}{
+		{
+			name:           "zero cachedPRNumber skips refresh",
+			cachedPRNumber: 0,
+			wantCalled:     false,
+			want:           nil,
+		},
+		{
+			name:           "refresh error returns nil",
+			cachedPRNumber: 42,
+			refreshErr:     errors.New("network error"),
+			wantCalled:     true,
+			want:           nil,
+		},
+		{
+			name:           "refresh returns nil PR returns nil",
+			cachedPRNumber: 42,
+			refreshReturn:  nil,
+			wantCalled:     true,
+			want:           nil,
+		},
+		{
+			name:           "open PR returns nil",
+			cachedPRNumber: 44,
+			refreshReturn:  openPR,
+			wantCalled:     true,
+			want:           nil,
+		},
+		{
+			name:           "merged PR is returned",
+			cachedPRNumber: 42,
+			refreshReturn:  mergedPR,
+			wantCalled:     true,
+			want:           mergedPR,
+		},
+		{
+			name:           "closed PR is returned",
+			cachedPRNumber: 43,
+			refreshReturn:  closedPR,
+			wantCalled:     true,
+			want:           closedPR,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			refresh := func(_ context.Context, _, _ string, _ int) (*github.PRState, error) {
+				called = true
+				return tc.refreshReturn, tc.refreshErr
+			}
+			got := resolveMergedFallback(ctx, "owner", "repo", tc.cachedPRNumber, refresh)
+			if got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+			if called != tc.wantCalled {
+				t.Errorf("refresh called = %v, want %v", called, tc.wantCalled)
+			}
+		})
 	}
 }
 

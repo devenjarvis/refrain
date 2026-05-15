@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -193,6 +194,24 @@ func statePhraseStyle(phrase string) lipgloss.Style {
 	default: // "CI N/M failing"
 		return lipgloss.NewStyle().Foreground(ColorError)
 	}
+}
+
+// resolveMergedFallback fetches the authoritative PR state for a cached PR when
+// the open-only poll returns nil. It is only called for Shipping sessions so that
+// Building/Reviewing sessions retain today's 2-nil eviction behaviour.
+// Returns the PR if State is "merged" or "closed"; otherwise returns nil.
+func resolveMergedFallback(ctx context.Context, owner, repo string, cachedPRNumber int, refresh func(context.Context, string, string, int) (*github.PRState, error)) *github.PRState {
+	if cachedPRNumber <= 0 {
+		return nil
+	}
+	pr, err := refresh(ctx, owner, repo, cachedPRNumber)
+	if err != nil || pr == nil {
+		return nil
+	}
+	if pr.State == "merged" || pr.State == "closed" {
+		return pr
+	}
+	return nil
 }
 
 // prIndicatorWidth returns the approximate visible width of prIndicator output

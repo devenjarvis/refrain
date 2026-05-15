@@ -4282,7 +4282,7 @@ func TestRefreshPRStatus_WrongRepoReturnsError(t *testing.T) {
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
 	wrongRepoPath := "/nonexistent/wrong-repo"
-	cmd := app.refreshPRStatusForSession(sess.ID, sess.Branch(), wrongRepoPath, "", false)
+	cmd := app.refreshPRStatusForSession(sess.ID, sess.Branch(), wrongRepoPath, "", false, 0)
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd from refreshPRStatusForSession with wrong repo")
 	}
@@ -4890,5 +4890,36 @@ func TestAgentEvent_IdleLeavesShippingPhaseAlone(t *testing.T) {
 
 	if sess.LifecyclePhase() != agent.LifecycleShipping {
 		t.Errorf("phase: got %v, want LifecycleShipping (idle event must not demote Shipping session)", sess.LifecyclePhase())
+	}
+}
+
+// TestPollAllSessions_PassesCachedPRNumberForShippingOnly verifies that
+// cachedPRNumberForFallback returns the cached PR number only for Shipping
+// sessions, and 0 for all other lifecycle phases.
+func TestPollAllSessions_PassesCachedPRNumberForShippingOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	shipping := agent.NewSessionForTest("ship-sess", "ship-branch")
+	shipping.SetLifecyclePhase(agent.LifecycleShipping)
+
+	building := agent.NewSessionForTest("build-sess", "build-branch")
+	building.SetLifecyclePhase(agent.LifecycleInProgress)
+
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+	mgr.AddSessionForTest(shipping)
+	mgr.AddSessionForTest(building)
+
+	app := NewApp()
+	app.managers[dir] = mgr
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+	app.prCache[shipping.ID] = &prCacheEntry{pr: &github.PRState{Number: 42}}
+	app.prCache[building.ID] = &prCacheEntry{pr: &github.PRState{Number: 99}}
+
+	if got := app.cachedPRNumberForFallback(shipping); got != 42 {
+		t.Errorf("Shipping session: got %d, want 42", got)
+	}
+	if got := app.cachedPRNumberForFallback(building); got != 0 {
+		t.Errorf("InProgress session: got %d, want 0", got)
 	}
 }
