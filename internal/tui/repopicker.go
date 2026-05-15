@@ -82,6 +82,7 @@ func (m *repoPickerModel) setRepos(repos []config.Repo, counts map[string]int, i
 	m.filter = ""
 	m.scrollOffset = 0
 	m.selected = 0
+	m.pendingRemoveIdx = -1
 	m.applyFilter()
 	if initialPath != "" {
 		for i, idx := range m.filtered {
@@ -130,6 +131,7 @@ func (m repoPickerModel) Update(msg tea.Msg) (repoPickerModel, tea.Cmd) {
 			// treat `a` as a normal filter character so repo names like "alpha"
 			// stay reachable. Only triggers add-repo when the filter is empty.
 			if m.filter == "" {
+				m.pendingRemoveIdx = -1
 				return m, func() tea.Msg { return repoPickerAddRepoMsg{} }
 			}
 			m.filter += key

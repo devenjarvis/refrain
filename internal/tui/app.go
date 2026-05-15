@@ -1411,6 +1411,28 @@ func (a *App) addRepo(path string) tea.Cmd {
 	return nil
 }
 
+// returnFromConfigForm closes the repo config form and returns to the repo
+// picker if one was pending, or back to the dashboard list otherwise.
+func (a App) returnFromConfigForm() (tea.Model, tea.Cmd) {
+	if a.repoPickerPendingFromConfig {
+		a.repoPickerPendingFromConfig = false
+		counts := make(map[string]int, len(a.cfg.Repos))
+		for _, repo := range a.cfg.Repos {
+			if mgr := a.managers[repo.Path]; mgr != nil {
+				counts[repo.Path] = mgr.AgentCount()
+			}
+		}
+		a.repoPicker.setRepos(a.cfg.Repos, counts, a.dashboard.configRepoPath)
+		a.dashboard.repoConfigForm = nil
+		a.dashboard.configRepoPath = ""
+		a.view = ViewRepoPicker
+		return a, nil
+	}
+	a.dashboard.panelFocus = focusList
+	a.dashboard.repoConfigForm = nil
+	return a, nil
+}
+
 func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case configFormSaveMsg:
@@ -1439,43 +1461,11 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		if a.repoPickerPendingFromConfig {
-			a.repoPickerPendingFromConfig = false
-			counts := make(map[string]int, len(a.cfg.Repos))
-			for _, repo := range a.cfg.Repos {
-				if mgr := a.managers[repo.Path]; mgr != nil {
-					counts[repo.Path] = mgr.AgentCount()
-				}
-			}
-			a.repoPicker.setRepos(a.cfg.Repos, counts, a.dashboard.configRepoPath)
-			a.dashboard.repoConfigForm = nil
-			a.dashboard.configRepoPath = ""
-			a.view = ViewRepoPicker
-			return a, nil
-		}
-		a.dashboard.panelFocus = focusList
-		a.dashboard.repoConfigForm = nil
-		return a, nil
+		return a.returnFromConfigForm()
 
 	case configFormCancelMsg:
 		// Repo config form cancelled.
-		if a.repoPickerPendingFromConfig {
-			a.repoPickerPendingFromConfig = false
-			counts := make(map[string]int, len(a.cfg.Repos))
-			for _, repo := range a.cfg.Repos {
-				if mgr := a.managers[repo.Path]; mgr != nil {
-					counts[repo.Path] = mgr.AgentCount()
-				}
-			}
-			a.repoPicker.setRepos(a.cfg.Repos, counts, a.dashboard.configRepoPath)
-			a.dashboard.repoConfigForm = nil
-			a.dashboard.configRepoPath = ""
-			a.view = ViewRepoPicker
-			return a, nil
-		}
-		a.dashboard.panelFocus = focusList
-		a.dashboard.repoConfigForm = nil
-		return a, nil
+		return a.returnFromConfigForm()
 
 	case tea.PasteMsg:
 		// Prompt modal consumes paste while open (same precedence as the

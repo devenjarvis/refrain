@@ -2413,6 +2413,7 @@ func TestRepoPicker_ManageMode_Remove_BlockedWhenSessionsExist(t *testing.T) {
 // TestRepoPicker_ManageMode_Remove_DeletesAndReassignsActive verifies that removing
 // the active repo reassigns active to the first remaining repo.
 func TestRepoPicker_ManageMode_Remove_DeletesAndReassignsActive(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dir1 := t.TempDir()
 	dir2 := t.TempDir()
 
