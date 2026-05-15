@@ -255,18 +255,3 @@ func TestRender_SideBySideFallsBackUnderThreshold(t *testing.T) {
 		t.Error("SxS request under threshold should match unified render")
 	}
 }
-
-func TestFileHash_Stable(t *testing.T) {
-	raw := "diff --git a/foo.go b/foo.go\n" +
-		"index abc..def 100644\n" +
-		"--- a/foo.go\n" +
-		"+++ b/foo.go\n" +
-		"@@ -1 +1 @@\n" +
-		"-a\n" +
-		"+b\n"
-	m1, _ := diffmodel.Parse(raw)
-	m2, _ := diffmodel.Parse(raw)
-	if diff.FileHash(&m1.Files[0]) != diff.FileHash(&m2.Files[0]) {
-		t.Error("FileHash should be stable across parses of identical input")
-	}
-}

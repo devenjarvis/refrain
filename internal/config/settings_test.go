@@ -257,40 +257,6 @@ func TestSaveLoadRoundTrip_Repo(t *testing.T) {
 	}
 }
 
-// ---- LoadResolved ----
-
-func TestLoadResolved_MergesGlobalAndRepo(t *testing.T) {
-	dir := configDirInTmp(t)
-	repoPath := t.TempDir()
-
-	// Write global settings
-	_ = os.MkdirAll(dir, 0o755)
-	globalData, _ := json.Marshal(config.GlobalSettings{
-		AudioEnabled: boolPtr(false),
-		BranchPrefix: strPtr("global/"),
-	})
-	_ = os.WriteFile(filepath.Join(dir, "config.json"), globalData, 0o644)
-
-	// Write repo settings
-	_ = os.MkdirAll(filepath.Join(repoPath, ".refrain"), 0o755)
-	repoData, _ := json.Marshal(config.RepoSettings{
-		BranchPrefix: strPtr("repo/"),
-	})
-	_ = os.WriteFile(filepath.Join(repoPath, ".refrain", "config.json"), repoData, 0o644)
-
-	r, err := config.LoadResolved(repoPath)
-	if err != nil {
-		t.Fatalf("LoadResolved() error = %v", err)
-	}
-
-	if r.AudioEnabled {
-		t.Error("AudioEnabled should be false (from global)")
-	}
-	if r.BranchPrefix != "repo/" {
-		t.Errorf("BranchPrefix = %q, want repo/ (repo overrides global)", r.BranchPrefix)
-	}
-}
-
 // ---- JSON omitempty behavior ----
 
 func TestGlobalSettings_OmitsNilFields(t *testing.T) {

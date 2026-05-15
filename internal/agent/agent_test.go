@@ -297,73 +297,7 @@ func TestSessionStartHookCapturesSessionID(t *testing.T) {
 	}
 }
 
-func TestStopHookClearsComposing(t *testing.T) {
-	repo := setupTestRepo(t)
-	mgr := NewManager(repo, defaultTestSettings())
-	defer mgr.Shutdown()
-
-	cfg := Config{Name: "test-stop-hook", Task: "test", Rows: 24, Cols: 80}
-	a, err := mgr.CreateWithCommand(cfg, func(name string) *exec.Cmd {
-		return exec.Command("bash", "-c", "echo ready; cat")
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	time.Sleep(300 * time.Millisecond)
-	a.SendText("hello")
-	a.mu.RLock()
-	if !a.composing {
-		a.mu.RUnlock()
-		t.Fatal("expected composing true before Stop hook")
-	}
-	a.mu.RUnlock()
-
-	a.OnHookEvent(hookEvent("stop"))
-
-	a.mu.RLock()
-	if a.composing {
-		a.mu.RUnlock()
-		t.Error("expected composing cleared after Stop hook")
-	}
-	a.mu.RUnlock()
-}
-
-func TestComposingClearedOnEnter(t *testing.T) {
-	repo := setupTestRepo(t)
-	mgr := NewManager(repo, defaultTestSettings())
-	defer mgr.Shutdown()
-
-	cfg := Config{Name: "test-composing-clear", Task: "test", Rows: 24, Cols: 80}
-	a, err := mgr.CreateWithCommand(cfg, func(name string) *exec.Cmd {
-		return exec.Command("bash", "-c", "echo ready; cat")
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	time.Sleep(500 * time.Millisecond)
-
-	// SendText sets composing = true.
-	a.SendText("hello")
-	a.mu.RLock()
-	if !a.composing {
-		a.mu.RUnlock()
-		t.Fatal("expected composing to be true after SendText")
-	}
-	a.mu.RUnlock()
-
-	// SendKey(Enter) clears composing.
-	a.SendKey(xvt.KeyPressEvent{Code: xvt.KeyEnter})
-	a.mu.RLock()
-	if a.composing {
-		a.mu.RUnlock()
-		t.Fatal("expected composing to be false after Enter")
-	}
-	a.mu.RUnlock()
-}
-
-func TestPasteSetsComposing(t *testing.T) {
+func TestPasteUpdatesLastInput(t *testing.T) {
 	repo := setupTestRepo(t)
 	mgr := NewManager(repo, defaultTestSettings())
 	defer mgr.Shutdown()
@@ -378,13 +312,8 @@ func TestPasteSetsComposing(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Paste sets composing = true and updates lastInput.
 	a.Paste("pasted content")
 	a.mu.RLock()
-	if !a.composing {
-		a.mu.RUnlock()
-		t.Fatal("expected composing to be true after Paste")
-	}
 	if a.lastInput.IsZero() {
 		a.mu.RUnlock()
 		t.Fatal("expected lastInput to be set after Paste")

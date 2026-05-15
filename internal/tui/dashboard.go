@@ -31,16 +31,6 @@ func truncateVisible(s string, n int) string {
 	return ansi.Truncate(s, n, "…")
 }
 
-// tickerSlice returns a maxWidth-wide window of s starting at rune offset.
-// Returns "" when offset >= len(runes).
-func tickerSlice(s string, offset, maxWidth int) string {
-	runes := []rune(s)
-	if offset >= len(runes) {
-		return ""
-	}
-	return truncateVisible(string(runes[offset:]), maxWidth)
-}
-
 // Timing constants for the sidebar session-name marquee ticker.
 const (
 	tickerPauseStart = 2 * time.Second

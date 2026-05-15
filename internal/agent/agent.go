@@ -59,20 +59,17 @@ type Agent struct {
 	pty      *bpty.PTY
 	terminal *vt.Terminal
 
-	mu               sync.RWMutex
-	displayName      string
-	claudeSessionID  string
-	hasClaudeName    bool
-	status           Status
-	waitingReason    string
-	askingQuestion   bool
-	lastOutput       time.Time
-	lastInput        time.Time
-	composing        bool
-	exitErr          error
-	chimedForTurn    bool
-	sessionStartedAt time.Time
-	cleanExit        bool
+	mu              sync.RWMutex
+	displayName     string
+	claudeSessionID string
+	hasClaudeName   bool
+	status          Status
+	waitingReason   string
+	askingQuestion  bool
+	lastOutput      time.Time
+	lastInput       time.Time
+	exitErr         error
+	chimedForTurn   bool
 
 	todos          []TodoItem
 	todosUpdatedAt time.Time
@@ -465,7 +462,6 @@ func (a *Agent) OnHookEvent(e hook.Event) (changed bool) {
 		if e.SessionID != "" {
 			a.claudeSessionID = e.SessionID
 		}
-		a.sessionStartedAt = time.Now()
 		if a.status != StatusActive {
 			a.status = StatusActive
 			return true
@@ -482,9 +478,6 @@ func (a *Agent) OnHookEvent(e hook.Event) (changed bool) {
 			return false
 		}
 		a.waitingReason = ""
-		// Claude finished its turn; the user is now in control. Clear the
-		// composing flag so input-display logic returns to its idle baseline.
-		a.composing = false
 		// Scan the visible viewport to find the last non-empty line and detect
 		// a trailing "?". RenderRegion holds only the terminal's own emulator
 		// lock; there is no a.mu path that would invert the order, so holding
@@ -509,9 +502,9 @@ func (a *Agent) OnHookEvent(e hook.Event) (changed bool) {
 		return false
 
 	case hook.KindSessionEnd:
-		// Flag a clean exit for observability. Actual teardown still goes
-		// through the PTY close path (readLoop -> close(done)).
-		a.cleanExit = true
+		// Actual teardown still goes through the PTY close path
+		// (readLoop -> close(done)); we just clear any in-flight waitingReason
+		// so the row doesn't keep that hint after exit.
 		a.waitingReason = ""
 		return false
 
@@ -614,12 +607,9 @@ func (a *Agent) SendKey(key xvt.KeyPressEvent) {
 	a.mu.Lock()
 	a.lastInput = time.Now()
 	if key.Code == xvt.KeyEnter {
-		a.composing = false
 		// Enter re-arms the chime: the user just submitted a new turn.
 		// Other keys (edits, backspace, arrow keys) must not reset the flag.
 		a.chimedForTurn = false
-	} else {
-		a.composing = true
 	}
 	a.mu.Unlock()
 	a.terminal.SendKey(key)
@@ -657,7 +647,6 @@ func (a *Agent) CursorVisible() bool {
 func (a *Agent) SendText(text string) {
 	a.mu.Lock()
 	a.lastInput = time.Now()
-	a.composing = true
 	a.mu.Unlock()
 	a.terminal.SendText(text)
 }
@@ -666,7 +655,6 @@ func (a *Agent) SendText(text string) {
 func (a *Agent) Paste(text string) {
 	a.mu.Lock()
 	a.lastInput = time.Now()
-	a.composing = true
 	a.mu.Unlock()
 	a.terminal.Paste(text)
 }

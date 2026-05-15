@@ -242,47 +242,6 @@ func RemoveWorktree(repoPath string, wt *WorktreeInfo, deleteBranch bool) error 
 	return nil
 }
 
-// ListWorktrees returns all refrain-managed worktrees in the repo.
-// branchPrefix controls which branches are considered refrain-managed;
-// pass empty string to use the default ("refrain/").
-func ListWorktrees(repoPath, branchPrefix string) ([]*WorktreeInfo, error) {
-	if branchPrefix == "" {
-		branchPrefix = "refrain/"
-	}
-
-	out, err := runGit(repoPath, "worktree", "list", "--porcelain")
-	if err != nil {
-		return nil, err
-	}
-
-	base, _ := BaseBranch(repoPath)
-	branchRef := "branch refs/heads/" + branchPrefix
-
-	var worktrees []*WorktreeInfo
-	var current *WorktreeInfo
-
-	for _, line := range strings.Split(out, "\n") {
-		switch {
-		case strings.HasPrefix(line, "worktree "):
-			path := strings.TrimPrefix(line, "worktree ")
-			current = &WorktreeInfo{Path: path}
-		case strings.HasPrefix(line, branchRef):
-			if current != nil {
-				branch := strings.TrimPrefix(line, "branch refs/heads/")
-				name := strings.TrimPrefix(branch, branchPrefix)
-				current.Branch = branch
-				current.Name = name
-				current.BaseBranch = base
-				worktrees = append(worktrees, current)
-			}
-		case line == "":
-			current = nil
-		}
-	}
-
-	return worktrees, nil
-}
-
 // FindPRTemplate searches worktreePath for a GitHub PR template file and
 // returns its contents verbatim, or "" if none is found. Search order:
 //  1. .github/PULL_REQUEST_TEMPLATE.md

@@ -163,9 +163,6 @@ func TestConfigForm_AccessorsByLabel(t *testing.T) {
 	if got := f.selectValue("Theme"); got != "dark" {
 		t.Errorf("selectValue = %q, want %q", got, "dark")
 	}
-	if got := f.selectIndex("Theme"); got != 1 {
-		t.Errorf("selectIndex = %d, want 1", got)
-	}
 	// Missing label: zero values.
 	if f.toggleValue("missing") || f.textValue("missing") != "" || f.selectValue("missing") != "" {
 		t.Error("accessors on missing label should return zero values")

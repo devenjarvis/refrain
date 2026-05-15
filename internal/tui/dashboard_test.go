@@ -127,6 +127,16 @@ func tickerDashboard(sessions ...*agent.Session) dashboardModel {
 // past returns a time in the past so ticker pause/advance checks pass immediately.
 func past() time.Time { return time.Now().Add(-time.Hour) }
 
+// tickerSlice returns a maxWidth-wide window of s starting at rune offset.
+// Returns "" when offset >= len(runes). Used by the marquee-math tests below.
+func tickerSlice(s string, offset, maxWidth int) string {
+	runes := []rune(s)
+	if offset >= len(runes) {
+		return ""
+	}
+	return truncateVisible(string(runes[offset:]), maxWidth)
+}
+
 func TestTickerSlice_Basic(t *testing.T) {
 	got := tickerSlice("hello world", 6, 5)
 	if got != "world" {

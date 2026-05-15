@@ -41,24 +41,3 @@ func WrapCell(text string, width int) []string {
 	}
 	return segments
 }
-
-// ZipWrappedRow pairs two wrapped-cell outputs into the same number of
-// physical rows. The shorter side is padded with empty strings so the
-// renderer can always paint left+right without length mismatches.
-func ZipWrappedRow(left, right []string) ([]string, []string) {
-	n := len(left)
-	if len(right) > n {
-		n = len(right)
-	}
-	l := make([]string, n)
-	r := make([]string, n)
-	for i := 0; i < n; i++ {
-		if i < len(left) {
-			l[i] = left[i]
-		}
-		if i < len(right) {
-			r[i] = right[i]
-		}
-	}
-	return l, r
-}

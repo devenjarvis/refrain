@@ -6,7 +6,6 @@ package diff
 import (
 	"bytes"
 	"fmt"
-	"hash/fnv"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
@@ -544,23 +543,4 @@ func formatGutter(n, width int) string {
 		s = s[len(s)-width:]
 	}
 	return s
-}
-
-// FileHash returns a stable short hash of the file's identity and hunks for
-// use as part of a composite cache key in higher layers that hold multiple
-// renderers.
-func FileHash(f *diffmodel.File) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(f.Path))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(f.OldPath))
-	for _, hk := range f.Hunks {
-		_, _ = fmt.Fprintf(h, "#%d,%d,%d,%d#", hk.OldStart, hk.OldCount, hk.NewStart, hk.NewCount)
-		for _, l := range hk.Lines {
-			_, _ = h.Write([]byte{byte(l.Kind)})
-			_, _ = h.Write([]byte(l.Text))
-			_, _ = h.Write([]byte{0})
-		}
-	}
-	return h.Sum64()
 }

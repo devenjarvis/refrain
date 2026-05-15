@@ -110,33 +110,6 @@ func TestCreateWorktree(t *testing.T) {
 	}
 }
 
-func TestListWorktrees(t *testing.T) {
-	repo := initTestRepo(t)
-
-	_, err := git.CreateWorktree(repo, "agent1", "", "", "")
-	if err != nil {
-		t.Fatalf("CreateWorktree agent1: %v", err)
-	}
-	_, err = git.CreateWorktree(repo, "agent2", "", "", "")
-	if err != nil {
-		t.Fatalf("CreateWorktree agent2: %v", err)
-	}
-
-	list, err := git.ListWorktrees(repo, "")
-	if err != nil {
-		t.Fatalf("ListWorktrees: %v", err)
-	}
-
-	names := make(map[string]bool)
-	for _, w := range list {
-		names[w.Name] = true
-	}
-
-	if !names["agent1"] || !names["agent2"] {
-		t.Errorf("expected agent1 and agent2 in list, got %v", names)
-	}
-}
-
 func TestDiff(t *testing.T) {
 	repo := initTestRepo(t)
 

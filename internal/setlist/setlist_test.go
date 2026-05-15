@@ -1,6 +1,8 @@
 package setlist_test
 
 import (
+	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,8 +20,33 @@ func setlistDirInTmp(t *testing.T) string {
 	return filepath.Join(base, ".refrain")
 }
 
+// readSetlist reads the entries from the on-disk setlist file. Used by the
+// Append round-trip test in lieu of a production Load() helper.
+func readSetlist(t *testing.T, path string) []setlist.Entry {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	var entries []setlist.Entry
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var e setlist.Entry
+		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
+			t.Fatalf("unmarshal %q: %v", scanner.Text(), err)
+		}
+		entries = append(entries, e)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	return entries
+}
+
 func TestAppend_RoundTrip(t *testing.T) {
-	setlistDirInTmp(t)
+	dir := setlistDirInTmp(t)
 
 	entries := []setlist.Entry{
 		{
@@ -55,12 +82,9 @@ func TestAppend_RoundTrip(t *testing.T) {
 		}
 	}
 
-	loaded, err := setlist.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
+	loaded := readSetlist(t, filepath.Join(dir, "setlist.jsonl"))
 	if len(loaded) != len(entries) {
-		t.Fatalf("Load() len = %d, want %d", len(loaded), len(entries))
+		t.Fatalf("len = %d, want %d", len(loaded), len(entries))
 	}
 	for i, want := range entries {
 		got := loaded[i]
@@ -88,49 +112,6 @@ func TestAppend_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingFile_ReturnsNil(t *testing.T) {
-	setlistDirInTmp(t)
-
-	entries, err := setlist.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v, want nil", err)
-	}
-	if entries != nil {
-		t.Fatalf("Load() = %v, want nil", entries)
-	}
-}
-
-func TestLoad_MalformedLineTolerated(t *testing.T) {
-	dir := setlistDirInTmp(t)
-
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	path := filepath.Join(dir, "setlist.jsonl")
-
-	content := `{"playedAt":"2026-01-01T00:00:00Z","name":"First","artist":"A","isrc":"X","slug":"first"}
-this is not json at all {{{
-{"playedAt":"2026-01-02T00:00:00Z","name":"Second","artist":"B","isrc":"Y","slug":"second"}
-`
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	entries, err := setlist.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("Load() len = %d, want 2", len(entries))
-	}
-	if entries[0].Name != "First" {
-		t.Errorf("entries[0].Name = %q, want %q", entries[0].Name, "First")
-	}
-	if entries[1].Name != "Second" {
-		t.Errorf("entries[1].Name = %q, want %q", entries[1].Name, "Second")
-	}
-}
-
 func TestAppend_CreatesParentDir(t *testing.T) {
 	dir := setlistDirInTmp(t)
 
@@ -147,7 +128,7 @@ func TestAppend_CreatesParentDir(t *testing.T) {
 		Slug:     "only-song",
 	}
 	if err := setlist.Append(e); err != nil {
-		t.Fatalf("Append() error = %v", err)
+		t.Fatalf("Append() error = %v", e)
 	}
 
 	path := filepath.Join(dir, "setlist.jsonl")

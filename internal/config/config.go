@@ -221,27 +221,6 @@ func AddRepo(cfg *Config, path string) error {
 	return nil
 }
 
-// SetRepoAlias updates the Alias on the registered repo matching path and
-// persists the registry. An empty alias clears the override. Returns an error
-// if the repo is not registered.
-func SetRepoAlias(path, alias string) error {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("config: resolving path %q: %w", path, err)
-	}
-	cfg, err := Load()
-	if err != nil {
-		return err
-	}
-	for i, r := range cfg.Repos {
-		if r.Path == absPath {
-			cfg.Repos[i].Alias = alias
-			return Save(cfg)
-		}
-	}
-	return fmt.Errorf("config: repo %q is not registered", absPath)
-}
-
 // RemoveRepo removes the repo with the given path (resolved to absolute) from
 // cfg.Repos.  Returns an error if no such repo is registered.
 func RemoveRepo(cfg *Config, path string) error {

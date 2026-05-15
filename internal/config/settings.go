@@ -451,20 +451,6 @@ func SaveRepoSettings(repoPath string, s *RepoSettings) error {
 	return atomicWriteJSON(repoSettingsFile(repoPath), s)
 }
 
-// LoadResolved is a convenience that loads both global and repo settings
-// and returns the merged result.
-func LoadResolved(repoPath string) (ResolvedSettings, error) {
-	global, err := LoadGlobalSettings()
-	if err != nil {
-		return ResolvedSettings{}, fmt.Errorf("loading global settings: %w", err)
-	}
-	repo, err := LoadRepoSettings(repoPath)
-	if err != nil {
-		return ResolvedSettings{}, fmt.Errorf("loading repo settings for %s: %w", repoPath, err)
-	}
-	return Resolve(global, repo), nil
-}
-
 // MigrateBypassPermissions checks if repos.json still has the legacy
 // BypassPermissions field and migrates it to GlobalSettings.
 // This is a one-time migration; after it runs, BypassPermissions is cleared

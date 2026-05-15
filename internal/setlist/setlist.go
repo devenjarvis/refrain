@@ -5,11 +5,8 @@
 package setlist
 
 import (
-	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -65,43 +62,4 @@ func Append(e Entry) error {
 		return fmt.Errorf("setlist: closing file: %w", err)
 	}
 	return nil
-}
-
-// Load reads all entries from the setlist file. Malformed JSON lines are
-// skipped silently so a partially written or hand-edited file does not
-// surface as an error. If the file does not exist, Load returns (nil, nil).
-func Load() ([]Entry, error) {
-	path, err := Path()
-	if err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("setlist: opening file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	var entries []Entry
-	scanner := bufio.NewScanner(f)
-	// Allow long lines just in case an entry grows past the default 64KiB.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var e Entry
-		if err := json.Unmarshal(line, &e); err != nil {
-			// Tolerate malformed lines silently.
-			continue
-		}
-		entries = append(entries, e)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("setlist: scanning file: %w", err)
-	}
-	return entries, nil
 }
