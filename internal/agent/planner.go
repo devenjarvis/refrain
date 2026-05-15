@@ -352,7 +352,7 @@ func runClaudePlanner(ctx context.Context, claudePath, model, instruction, quest
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("claude planner: %w (stderr=%q)", err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("claude planner: %w (stdout=%q stderr=%q)", err, strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()))
 	}
 
 	output := strings.TrimSpace(stdout.String())
