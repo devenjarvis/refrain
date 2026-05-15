@@ -1,0 +1,3 @@
+### Added
+
+- A new non-blocking `Mutation` GitHub Actions workflow runs [gremlins](https://github.com/go-gremlins/gremlins) on every pull request against a curated allowlist of logic packages (`internal/config`, `internal/editor`, `internal/git`, `internal/hook`, `internal/agent`, `internal/state`, `internal/github`). Per-package reports are uploaded as a workflow artifact and a sticky PR comment summarizes mutation scores. Thresholds in `.gremlins.yaml` are set to `0` so the job never fails on score — the goal is to establish a baseline before tightening into a merge gate in a follow-up. Reproduce locally with `gremlins unleash ./internal/<pkg>/...` after `go install github.com/go-gremlins/gremlins/cmd/gremlins@latest`.

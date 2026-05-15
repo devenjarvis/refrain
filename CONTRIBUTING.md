@@ -44,6 +44,13 @@ End-to-end TUI tests live in `internal/e2e/` and require the `tu` CLI v0.6.0+:
 go test -tags e2e -timeout 300s -v ./internal/e2e/
 ```
 
+A `Mutation` workflow runs [gremlins](https://github.com/go-gremlins/gremlins) on every PR against a curated set of logic packages and posts a sticky PR comment with per-package mutation scores. It is **non-blocking** while we establish a baseline — failures do not gate merges yet. To reproduce locally:
+
+```bash
+go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
+gremlins unleash ./internal/config/...
+```
+
 ## PR workflow
 
 1. Fork the repo and branch from `main`.

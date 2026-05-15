@@ -1,0 +1,97 @@
+name: Mutation
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      PACKAGES: >-
+        internal/config
+        internal/editor
+        internal/git
+        internal/hook
+        internal/agent
+        internal/state
+        internal/github
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@test.com"
+
+      - name: Install gremlins
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
+
+      - name: Run gremlins per package
+        id: gremlins
+        run: |
+          set +e
+          mkdir -p reports
+          for pkg in $PACKAGES; do
+            slug="${pkg//\//_}"
+            echo "::group::gremlins unleash ./$pkg/..."
+            gremlins unleash "./$pkg/..." > "reports/${slug}.txt" 2>&1
+            status=$?
+            echo "exit=$status" >> "reports/${slug}.txt"
+            echo "::endgroup::"
+          done
+
+      - name: Build summary
+        run: |
+          {
+            echo "# Mutation testing baseline"
+            echo
+            echo "| Package | Mutation score | Killed | Lived | Not covered | Not viable | Timed out |"
+            echo "| --- | --- | --- | --- | --- | --- | --- |"
+          } > reports/summary.md
+          for pkg in $PACKAGES; do
+            slug="${pkg//\//_}"
+            file="reports/${slug}.txt"
+            score=$(grep -Eo 'Mutator coverage: [0-9.]+%' "$file" | tail -1 | awk '{print $3}')
+            killed=$(grep -Eo 'Killed: [0-9]+' "$file" | tail -1 | awk '{print $2}')
+            lived=$(grep -Eo 'Lived: [0-9]+' "$file" | tail -1 | awk '{print $2}')
+            notcov=$(grep -Eo 'Not covered: [0-9]+' "$file" | tail -1 | awk '{print $3}')
+            notvia=$(grep -Eo 'Not viable: [0-9]+' "$file" | tail -1 | awk '{print $3}')
+            timeout=$(grep -Eo 'Timed out: [0-9]+' "$file" | tail -1 | awk '{print $3}')
+            echo "| \`$pkg\` | ${score:-n/a} | ${killed:-0} | ${lived:-0} | ${notcov:-0} | ${notvia:-0} | ${timeout:-0} |" >> reports/summary.md
+          done
+          {
+            echo
+            echo "Per-package reports are attached as the \`gremlins-reports\` workflow artifact."
+            echo
+            echo "This job is **non-blocking** while we establish a baseline. See \`.gremlins.yaml\` and the follow-up issue for how thresholds will be tuned and gated."
+          } >> reports/summary.md
+          cat reports/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: gremlins-reports
+          path: reports/
+          retention-days: 14
+
+      - name: Post PR comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: gremlins
+          path: reports/summary.md
