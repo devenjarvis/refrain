@@ -150,9 +150,9 @@ var (
 // and 5s gaps keeps worst-case wall-clock under ~15s of added overhead.
 // Declared as vars so tests can swap to fast values via setPlanDraftRetryForTesting.
 var (
-	planDraftAttempts       = 3
-	planDraftPerAttemptCap  = 5 * time.Minute
-	planDraftBackoff        = []time.Duration{2 * time.Second, 5 * time.Second}
+	planDraftAttempts      = 3
+	planDraftPerAttemptCap = 5 * time.Minute
+	planDraftBackoff       = []time.Duration{2 * time.Second, 5 * time.Second}
 )
 
 // ErrSessionNotFound is returned by KillSession when the given session ID is
