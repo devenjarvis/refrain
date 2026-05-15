@@ -1,0 +1,3 @@
+### Added
+
+- A new non-blocking `Mutation` GitHub Actions workflow runs [gremlins](https://github.com/go-gremlins/gremlins) on every pull request in **diff mode**: only lines changed against the PR base are mutated, so the run scales with PR size rather than codebase size. The full gremlins report uploads as a workflow artifact and a sticky PR comment summarizes test efficacy, mutator coverage, and per-file mutation counts. Thresholds in `.gremlins.yaml` are pinned to `0` so the job never fails on score — the goal is to establish a baseline before tightening into a merge gate in a follow-up. Reproduce locally with `gremlins unleash --diff origin/main .` after `go install github.com/go-gremlins/gremlins/cmd/gremlins@latest`.

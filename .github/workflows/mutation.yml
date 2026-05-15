@@ -1,0 +1,143 @@
+name: Mutation
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.base_ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@test.com"
+
+      - name: Skip when no Go changes
+        id: gocheck
+        run: |
+          mkdir -p reports
+          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -E '\.go$' | grep -v '_test\.go$' > /tmp/changed-go.txt; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "Go files changed:"
+            cat /tmp/changed-go.txt
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No production Go files changed; skipping mutation testing."
+          fi
+
+      - name: Install gremlins
+        if: steps.gocheck.outputs.has_changes == 'true'
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
+
+      - name: Run gremlins (diff mode)
+        if: steps.gocheck.outputs.has_changes == 'true'
+        run: |
+          set +e
+          gremlins unleash \
+            --diff "origin/${{ github.base_ref }}" \
+            --timeout-coefficient 4 \
+            -o reports/mutation.json \
+            . > reports/mutation.txt 2>&1
+          status=$?
+          echo "exit=$status" >> reports/mutation.txt
+
+      - name: Build summary
+        run: |
+          {
+            echo "# Mutation testing baseline"
+            echo
+          } > reports/summary.md
+          if [ "${{ steps.gocheck.outputs.has_changes }}" != "true" ]; then
+            echo "_No production Go files changed in this PR; mutation testing skipped._" >> reports/summary.md
+          elif [ ! -s reports/mutation.json ]; then
+            echo "_gremlins produced no JSON output. See the \`gremlins-reports\` artifact for the raw log._" >> reports/summary.md
+          else
+            counts=$(jq -r '
+              [.files[]?.mutations[]?.status] as $s
+              | {
+                  killed: ($s | map(select(. == "KILLED")) | length),
+                  lived: ($s | map(select(. == "LIVED")) | length),
+                  notcov: ($s | map(select(. == "NOT COVERED")) | length),
+                  timeout: ($s | map(select(. == "TIMED OUT")) | length),
+                  notvia: ($s | map(select(. == "NOT VIABLE")) | length)
+                }
+              | "\(.killed) \(.lived) \(.notcov) \(.timeout) \(.notvia)"
+            ' reports/mutation.json)
+            read killed lived notcov timeout notvia <<< "$counts"
+            covered=$(( killed + lived ))
+            total=$(( covered + notcov + notvia + timeout ))
+            if [ "$covered" -gt 0 ]; then
+              efficacy=$(awk -v k="$killed" -v c="$covered" 'BEGIN { printf "%.2f%%", (k/c)*100 }')
+            else
+              efficacy="n/a"
+            fi
+            if [ "$total" -gt 0 ]; then
+              mcov=$(awk -v c="$covered" -v t="$total" 'BEGIN { printf "%.2f%%", (c/t)*100 }')
+            else
+              mcov="n/a"
+            fi
+            {
+              echo "Scoped to lines changed vs \`origin/${{ github.base_ref }}\`."
+              echo
+              echo "| Test efficacy | Mutator coverage | Killed | Lived | Not covered | Timed out | Not viable |"
+              echo "| --- | --- | --- | --- | --- | --- | --- |"
+              echo "| $efficacy | $mcov | $killed | $lived | $notcov | $timeout | $notvia |"
+              echo
+              echo "**Per-file breakdown:**"
+              echo
+              echo "| File | Killed | Lived | Not covered | Timed out | Not viable |"
+              echo "| --- | --- | --- | --- | --- | --- |"
+              jq -r '
+                .files[]? as $f
+                | [$f.mutations[].status] as $s
+                | "| `\($f.file_name)` | \($s | map(select(. == "KILLED")) | length) | \($s | map(select(. == "LIVED")) | length) | \($s | map(select(. == "NOT COVERED")) | length) | \($s | map(select(. == "TIMED OUT")) | length) | \($s | map(select(. == "NOT VIABLE")) | length) |"
+              ' reports/mutation.json
+            } >> reports/summary.md
+          fi
+          {
+            echo
+            echo "Full report attached as the \`gremlins-reports\` workflow artifact."
+            echo
+            echo "This job is **non-blocking** while we establish a baseline. Diff-mode is used so the run scales with PR size, not codebase size; thresholds will be tuned and gated in a follow-up."
+          } >> reports/summary.md
+          cat reports/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gremlins-reports
+          path: reports/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Post PR comment
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: gremlins
+          path: reports/summary.md
