@@ -43,7 +43,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 4"
+          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 10"
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} for SECURITY issues ONLY.
 
@@ -78,7 +78,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 4"
+          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 10"
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} for PERFORMANCE issues ONLY.
 
@@ -109,7 +109,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 4"
+          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 10"
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} for TEST COVERAGE issues ONLY.
 
@@ -139,7 +139,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 4"
+          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 10"
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} for CORRECTNESS / LOGIC issues ONLY.
 
@@ -184,7 +184,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 10"
+          claude_args: "--model claude-haiku-4-5-20251001 --max-turns 25"
           prompt: |
             You are the final reviewer for PR #${{ github.event.pull_request.number }}.
             Specialist agents have written findings JSON files to /tmp/findings/.
