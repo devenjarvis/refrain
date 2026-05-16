@@ -604,8 +604,8 @@ func TestPipelineDoubleClickActivatesReview(t *testing.T) {
 	if app.dashboard.panelFocus != focusReview {
 		t.Fatalf("expected focusReview after double-click, got %v", app.dashboard.panelFocus)
 	}
-	if app.reviewPanel == nil || app.reviewPanel.Session() != sessR {
-		t.Fatalf("expected reviewSession=sessR, got %v", app.reviewPanel)
+	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
+		t.Fatalf("expected reviewSession=sessR, got %v", app.modals.Review())
 	}
 }
 
@@ -677,9 +677,7 @@ func TestMouseWheelForwardsInAltScreen(t *testing.T) {
 	app.dashboard.items = []listItem{
 		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
 	}
-	app.dashboard.panelFocus = focusLaunch
-	app.focusLaunchAgent = ag
-	app.focusLaunchSession = sess
+	app.openLaunchPanel(sess, ag)
 
 	// Set a non-zero offset so we can tell the wheel branch didn't mutate it.
 	app.dashboard.scrollOffset = 5
@@ -1207,8 +1205,8 @@ func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 	if app.dashboard.panelFocus != focusReview {
 		t.Fatalf("expected panelFocus=focusReview after r, got %v", app.dashboard.panelFocus)
 	}
-	if app.reviewPanel == nil || app.reviewPanel.Session() != sessR {
-		t.Fatalf("expected reviewSession=sessR, got %v", app.reviewPanel)
+	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
+		t.Fatalf("expected reviewSession=sessR, got %v", app.modals.Review())
 	}
 	if sessR.LifecyclePhase() != agent.LifecycleInReview {
 		t.Errorf("expected sessR phase=InReview, got %v", sessR.LifecyclePhase())
@@ -1613,8 +1611,8 @@ func TestFocusModeEnterOnActiveOpensFocusLaunch(t *testing.T) {
 	if app.dashboard.panelFocus != focusLaunch {
 		t.Fatalf("expected panelFocus=focusLaunch after enter on active, got %v", app.dashboard.panelFocus)
 	}
-	if app.focusLaunchAgent == nil || app.focusLaunchAgent.ID != ag.ID {
-		t.Fatalf("expected focusLaunchAgent=ag, got %v", app.focusLaunchAgent)
+	if app.modals.LaunchAgent() == nil || app.modals.LaunchAgent().ID != ag.ID {
+		t.Fatalf("expected focusLaunchAgent=ag, got %v", app.modals.LaunchAgent())
 	}
 }
 
@@ -1745,9 +1743,7 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
 		{kind: listItemSession, repoPath: dir, session: sessR},
 	}
-	app.dashboard.panelFocus = focusLaunch
-	app.focusLaunchAgent = ag
-	app.focusLaunchSession = sess
+	app.openLaunchPanel(sess, ag)
 
 	for _, ch := range []rune{'m', 'r'} {
 		model, _ := app.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
@@ -1756,11 +1752,11 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 		if app.dashboard.panelFocus != focusLaunch {
 			t.Fatalf("press %q: expected panelFocus=focusLaunch (key forwarded to agent), got %v", ch, app.dashboard.panelFocus)
 		}
-		if app.focusLaunchAgent == nil || app.focusLaunchAgent.ID != ag.ID {
-			t.Fatalf("press %q: expected focusLaunchAgent unchanged, got %v", ch, app.focusLaunchAgent)
+		if app.modals.LaunchAgent() == nil || app.modals.LaunchAgent().ID != ag.ID {
+			t.Fatalf("press %q: expected focusLaunchAgent unchanged, got %v", ch, app.modals.LaunchAgent())
 		}
-		if app.focusLaunchSession == nil || app.focusLaunchSession.ID != sess.ID {
-			t.Fatalf("press %q: expected focusLaunchSession unchanged, got %v", ch, app.focusLaunchSession)
+		if app.modals.LaunchSession() == nil || app.modals.LaunchSession().ID != sess.ID {
+			t.Fatalf("press %q: expected focusLaunchSession unchanged, got %v", ch, app.modals.LaunchSession())
 		}
 		if sess.LifecyclePhase() != agent.LifecycleInProgress {
 			t.Fatalf("press %q: expected sess phase unchanged=InProgress, got %v", ch, sess.LifecyclePhase())
@@ -1768,8 +1764,8 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 		if sessR.LifecyclePhase() != agent.LifecycleReadyForReview {
 			t.Fatalf("press %q: expected sessR phase unchanged=ReadyForReview, got %v", ch, sessR.LifecyclePhase())
 		}
-		if app.reviewPanel != nil {
-			t.Fatalf("press %q: expected reviewSession=nil, got %v", ch, app.reviewPanel)
+		if app.modals.Review() != nil {
+			t.Fatalf("press %q: expected reviewSession=nil, got %v", ch, app.modals.Review())
 		}
 	}
 }
@@ -1936,8 +1932,8 @@ func TestFocusMode_RKey_EmptyQueue_ShowsError(t *testing.T) {
 	if app.dashboard.panelFocus == focusReview {
 		t.Error("expected panelFocus to stay focusList, got focusReview")
 	}
-	if app.reviewPanel != nil {
-		t.Errorf("expected reviewSession to stay nil, got %v", app.reviewPanel)
+	if app.modals.Review() != nil {
+		t.Errorf("expected reviewSession to stay nil, got %v", app.modals.Review())
 	}
 }
 
@@ -1958,8 +1954,8 @@ func TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel(t *testing.T) {
 	if app.dashboard.panelFocus != focusReview {
 		t.Errorf("expected panelFocus=focusReview, got %v", app.dashboard.panelFocus)
 	}
-	if app.reviewPanel == nil || app.reviewPanel.Session() != sessR {
-		t.Errorf("expected reviewSession=sessR, got %v", app.reviewPanel)
+	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
+		t.Errorf("expected reviewSession=sessR, got %v", app.modals.Review())
 	}
 	if sessR.LifecyclePhase() != agent.LifecycleInReview {
 		t.Errorf("expected sessR phase=InReview, got %v", sessR.LifecyclePhase())
@@ -1972,8 +1968,7 @@ func TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel(t *testing.T) {
 func TestReviewPanel_CKey_MarksComplete(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	app.reviewPanel = newReviewPanel(sessR, app.width, app.height)
-	app.dashboard.panelFocus = focusReview
+	app.openReview(newReviewPanel(sessR, app.width, app.height))
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	app = model.(App)
@@ -1981,8 +1976,8 @@ func TestReviewPanel_CKey_MarksComplete(t *testing.T) {
 	if app.dashboard.panelFocus != focusList {
 		t.Errorf("expected panelFocus=focusList after c, got %v", app.dashboard.panelFocus)
 	}
-	if app.reviewPanel != nil {
-		t.Errorf("expected reviewSession cleared, got %v", app.reviewPanel)
+	if app.modals.Review() != nil {
+		t.Errorf("expected reviewSession cleared, got %v", app.modals.Review())
 	}
 }
 
@@ -1999,8 +1994,7 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.reviewPanel = newReviewPanel(sess, app.width, app.height)
-	app.dashboard.panelFocus = focusReview
+	app.openReview(newReviewPanel(sess, app.width, app.height))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -2010,8 +2004,8 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 	if got.dashboard.panelFocus != focusList {
 		t.Errorf("expected panelFocus=focusList after c, got %v", got.dashboard.panelFocus)
 	}
-	if got.reviewPanel != nil {
-		t.Errorf("expected reviewSession cleared after c, got %v", got.reviewPanel)
+	if got.modals.Review() != nil {
+		t.Errorf("expected reviewSession cleared after c, got %v", got.modals.Review())
 	}
 	if cmd == nil {
 		t.Fatal("expected a cmd to trigger async session cleanup after marking complete")
@@ -2038,8 +2032,7 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 func TestReviewPanel_TKey_NoAgents_ShowsError(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	app.reviewPanel = newReviewPanel(sessR, app.width, app.height)
-	app.dashboard.panelFocus = focusReview
+	app.openReview(newReviewPanel(sessR, app.width, app.height))
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
 	app = model.(App)
@@ -2050,8 +2043,8 @@ func TestReviewPanel_TKey_NoAgents_ShowsError(t *testing.T) {
 	if !strings.Contains(app.err, "no agents") {
 		t.Errorf("expected error to mention no agents, got %q", app.err)
 	}
-	if app.reviewPanel != nil {
-		t.Errorf("expected reviewSession cleared after t, got %v", app.reviewPanel)
+	if app.modals.Review() != nil {
+		t.Errorf("expected reviewSession cleared after t, got %v", app.modals.Review())
 	}
 	// Phase preserved so the session is still in REVIEW QUEUE.
 	if sessR.LifecyclePhase() != agent.LifecycleInReview {
@@ -2071,8 +2064,7 @@ func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.reviewPanel = newReviewPanel(sessR, app.width, app.height)
-	app.dashboard.panelFocus = focusReview
+	app.openReview(newReviewPanel(sessR, app.width, app.height))
 	app.prComposeModal.SetSize(120, 39)
 	_ = app.prComposeModal.Open("My PR Title", "My PR Body", false)
 
@@ -2092,8 +2084,7 @@ func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
 func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	app.reviewPanel = newReviewPanel(sessR, app.width, app.height)
-	app.dashboard.panelFocus = focusReview
+	app.openReview(newReviewPanel(sessR, app.width, app.height))
 	// ghClient must be non-nil to pass the auth guard before startPRDraftCmd.
 	app.ghClient = &github.Client{}
 
@@ -2866,7 +2857,21 @@ func TestTick_BreakDoesNotEnterWhilePanelOpen(t *testing.T) {
 			app := NewApp()
 			app.wellness.focusSessionMinutes = 1
 			app.wellness.sessionStart = time.Now().Add(-2 * time.Minute) // long past deadline
-			app.dashboard.panelFocus = tc.focus
+			// Stub an overlay into the requested focus state. The break-defer
+			// guard reads modals.IsList(); the specific model doesn't matter.
+			switch tc.focus {
+			case focusLaunch:
+				app.modals.OpenLaunch(nil, nil)
+			case focusReview:
+				app.modals.OpenReview(&reviewPanelModel{})
+			case focusShipping:
+				app.modals.OpenShipping(&shippingPanelModel{})
+			case focusPlanEditor:
+				app.modals.OpenPlanEditor(&planEditorModel{})
+			case focusConfig:
+				app.modals.OpenConfig(&configForm{}, "/repo")
+			}
+			app.syncModalsToDashboard()
 
 			model, _ := app.Update(tickMsg(time.Now()))
 			app = model.(App)
@@ -2885,7 +2890,7 @@ func TestTick_BreakEntersOnPipeline(t *testing.T) {
 	app := NewApp()
 	app.wellness.focusSessionMinutes = 1
 	app.wellness.sessionStart = time.Now().Add(-2 * time.Minute)
-	app.dashboard.panelFocus = focusList
+	// Default modal state is focusList (zero value); no setup needed.
 
 	model, _ := app.Update(tickMsg(time.Now()))
 	app = model.(App)
@@ -2925,7 +2930,7 @@ func TestActivateFocusCursor_Shipping_OpensShippingPanel(t *testing.T) {
 	if app.dashboard.panelFocus != focusShipping {
 		t.Fatalf("expected panelFocus=focusShipping, got %v", app.dashboard.panelFocus)
 	}
-	if app.shippingPanel == nil || app.shippingPanel.Session() != sessS {
+	if app.modals.Shipping() == nil || app.modals.Shipping().Session() != sessS {
 		t.Fatalf("expected shippingSession to be set to the selected session")
 	}
 }
@@ -2970,8 +2975,7 @@ func TestMergePRMsg_ClosesPanel(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.shippingPanel = newShippingPanel(sess, app.width, app.height)
-	app.dashboard.panelFocus = focusShipping
+	app.openShipping(newShippingPanel(sess, app.width, app.height))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -2981,7 +2985,7 @@ func TestMergePRMsg_ClosesPanel(t *testing.T) {
 	if got.dashboard.panelFocus == focusShipping {
 		t.Error("shipping panel should close after successful merge")
 	}
-	if got.shippingPanel != nil {
+	if got.modals.Shipping() != nil {
 		t.Error("shippingSession should be nil after merge")
 	}
 	if cmd == nil {
@@ -3014,8 +3018,7 @@ func TestPRPollMsg_ExternalMergeClosesPanelAndTransitions(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.shippingPanel = newShippingPanel(sess, app.width, app.height)
-	app.dashboard.panelFocus = focusShipping
+	app.openShipping(newShippingPanel(sess, app.width, app.height))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -3029,7 +3032,7 @@ func TestPRPollMsg_ExternalMergeClosesPanelAndTransitions(t *testing.T) {
 	if got.dashboard.panelFocus == focusShipping {
 		t.Error("shipping panel should close when external merge is detected")
 	}
-	if got.shippingPanel != nil {
+	if got.modals.Shipping() != nil {
 		t.Error("shippingSession should be nil after external merge")
 	}
 	if cmd == nil {
@@ -3061,8 +3064,7 @@ func TestPRPollMsg_ExternalCloseCleansSession(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.shippingPanel = newShippingPanel(sess, app.width, app.height)
-	app.dashboard.panelFocus = focusShipping
+	app.openShipping(newShippingPanel(sess, app.width, app.height))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -3076,7 +3078,7 @@ func TestPRPollMsg_ExternalCloseCleansSession(t *testing.T) {
 	if got.dashboard.panelFocus == focusShipping {
 		t.Error("shipping panel should close when PR is closed")
 	}
-	if got.shippingPanel != nil {
+	if got.modals.Shipping() != nil {
 		t.Error("shippingSession should be nil after PR close")
 	}
 	if cmd == nil {
@@ -3162,8 +3164,7 @@ func TestPRPollMsg_ExternalOpenPRPromotesInReviewToShipping_ClosesReviewPanel(t 
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.reviewPanel = newReviewPanel(sess, app.width, app.height)
-	app.dashboard.panelFocus = focusReview
+	app.openReview(newReviewPanel(sess, app.width, app.height))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -3180,7 +3181,7 @@ func TestPRPollMsg_ExternalOpenPRPromotesInReviewToShipping_ClosesReviewPanel(t 
 	if got.dashboard.panelFocus != focusList {
 		t.Errorf("panelFocus = %v, want focusList", got.dashboard.panelFocus)
 	}
-	if got.reviewPanel != nil {
+	if got.modals.Review() != nil {
 		t.Error("reviewSession should be nil after auto-promotion closes the panel")
 	}
 }
@@ -3293,8 +3294,7 @@ func TestPRPollMsg_CompleteNotPromoted(t *testing.T) {
 // TestMergePRMsg_ErrorSetsError verifies that a mergePRMsg error is surfaced.
 func TestMergePRMsg_ErrorSetsError(t *testing.T) {
 	app := NewApp()
-	app.dashboard.panelFocus = focusShipping
-	app.shippingPanel = newShippingPanel(agent.NewSessionForTest("s", "ship"), app.width, app.height)
+	app.openShipping(newShippingPanel(agent.NewSessionForTest("s", "ship"), app.width, app.height))
 
 	model, _ := app.Update(mergePRMsg{sessionID: "s", err: errors.New("403 forbidden")})
 	got := model.(App)
@@ -3314,8 +3314,7 @@ func TestShippingPanel_MKeyGatedOnReady(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 
 	app := NewApp()
-	app.shippingPanel = newShippingPanel(sess, app.width, app.height)
-	app.dashboard.panelFocus = focusShipping
+	app.openShipping(newShippingPanel(sess, app.width, app.height))
 	app.prCache = map[string]*prCacheEntry{
 		sess.ID: {pr: &github.PRState{Number: 1, MergeableState: "dirty"}},
 	}
@@ -3995,7 +3994,7 @@ func TestPlannerQuestionMsg_AutoOpensPlanEditor(t *testing.T) {
 	app.activeRepo = dir
 	app.resolvedCache[dir] = config.ResolvedSettings{AgentProgram: "bash"}
 	// Confirm no editor is open.
-	if app.planEditor != nil {
+	if app.modals.PlanEditor() != nil {
 		t.Fatal("precondition: planEditor should be nil")
 	}
 
@@ -4015,16 +4014,16 @@ func TestPlannerQuestionMsg_AutoOpensPlanEditor(t *testing.T) {
 		app = model.(App)
 	}
 
-	if app.planEditor == nil {
+	if app.modals.PlanEditor() == nil {
 		t.Fatal("expected plan editor to open automatically on plannerQuestionMsg")
 	}
-	if app.planEditor.sess == nil || app.planEditor.sess.ID != sess.ID {
-		t.Errorf("editor opened for wrong session: got %v", app.planEditor.sess)
+	if app.modals.PlanEditor().sess == nil || app.modals.PlanEditor().sess.ID != sess.ID {
+		t.Errorf("editor opened for wrong session: got %v", app.modals.PlanEditor().sess)
 	}
 	if app.dashboard.panelFocus != focusPlanEditor {
 		t.Errorf("expected panelFocus=focusPlanEditor, got %v", app.dashboard.panelFocus)
 	}
-	if !app.planEditor.HasPendingQuestion() {
+	if !app.modals.PlanEditor().HasPendingQuestion() {
 		t.Error("expected editor to have a pending question after plannerQuestionMsg")
 	}
 }
@@ -4044,8 +4043,7 @@ func TestPlannerQuestionMsg_DoesNotReplaceOpenEditor(t *testing.T) {
 	app.dashboard.height = 39
 
 	editorA := newPlanEditor(sessA, "", 120, 39)
-	app.planEditor = &editorA
-	app.dashboard.panelFocus = focusPlanEditor
+	app.openPlanEditorPanel(&editorA)
 
 	answerCh := make(chan string, 1)
 	msg := plannerQuestionMsg{
@@ -4063,7 +4061,7 @@ func TestPlannerQuestionMsg_DoesNotReplaceOpenEditor(t *testing.T) {
 		app = model.(App)
 	}
 
-	if app.planEditor == nil || app.planEditor.sess != sessA {
+	if app.modals.PlanEditor() == nil || app.modals.PlanEditor().sess != sessA {
 		t.Error("session A's editor should remain open; got replaced or nil")
 	}
 	if app.dashboard.panelFocus != focusPlanEditor {
@@ -4211,8 +4209,7 @@ func TestPlannerQuestionMsg_SkippedSessionMissing(t *testing.T) {
 	app.dashboard.height = 39
 	app.managers[dir] = mgr
 	app.activeRepo = dir
-	// Dashboard visible, no editor open.
-	app.dashboard.panelFocus = focusList
+	// Dashboard visible, no editor open. modals zero value = focusList.
 
 	answerCh := make(chan string, 1)
 	msg := plannerQuestionMsg{
@@ -4240,7 +4237,7 @@ func TestPlannerQuestionMsg_SkippedSessionMissing(t *testing.T) {
 	if app.err == "" {
 		t.Error("expected app.err to be set when planner question is skipped")
 	}
-	if app.planEditor != nil {
+	if app.modals.PlanEditor() != nil {
 		t.Error("expected planEditor to remain nil when session is not found")
 	}
 }
@@ -4305,8 +4302,7 @@ func TestShippingPanel_CursorAndScrollKeys(t *testing.T) {
 	sess := agent.NewSessionForTest("ship-cs", "ship")
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
-	app.shippingPanel = newShippingPanel(sess, app.width, app.height)
-	app.dashboard.panelFocus = focusShipping
+	app.openShipping(newShippingPanel(sess, app.width, app.height))
 	app.width = 120
 	app.height = 40
 	app.prCache[sess.ID] = &prCacheEntry{
@@ -4321,47 +4317,47 @@ func TestShippingPanel_CursorAndScrollKeys(t *testing.T) {
 	// j moves cursor down.
 	m, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got := m.(App)
-	if got.shippingPanel.feedbackCursor != 1 {
-		t.Errorf("after j: cursor = %d, want 1", got.shippingPanel.feedbackCursor)
+	if got.modals.Shipping().feedbackCursor != 1 {
+		t.Errorf("after j: cursor = %d, want 1", got.modals.Shipping().feedbackCursor)
 	}
-	if got.shippingPanel.detailScroll != 0 {
-		t.Errorf("after j: scroll should reset to 0, got %d", got.shippingPanel.detailScroll)
+	if got.modals.Shipping().detailScroll != 0 {
+		t.Errorf("after j: scroll should reset to 0, got %d", got.modals.Shipping().detailScroll)
 	}
 
 	// j again.
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got = m.(App)
-	if got.shippingPanel.feedbackCursor != 2 {
-		t.Errorf("after j×2: cursor = %d, want 2", got.shippingPanel.feedbackCursor)
+	if got.modals.Shipping().feedbackCursor != 2 {
+		t.Errorf("after j×2: cursor = %d, want 2", got.modals.Shipping().feedbackCursor)
 	}
 
 	// j past end clamps.
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got = m.(App)
-	if got.shippingPanel.feedbackCursor != 2 {
-		t.Errorf("j past end: cursor = %d, want 2 (clamped)", got.shippingPanel.feedbackCursor)
+	if got.modals.Shipping().feedbackCursor != 2 {
+		t.Errorf("j past end: cursor = %d, want 2 (clamped)", got.modals.Shipping().feedbackCursor)
 	}
 
 	// k moves cursor up.
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	got = m.(App)
-	if got.shippingPanel.feedbackCursor != 1 {
-		t.Errorf("after k: cursor = %d, want 1", got.shippingPanel.feedbackCursor)
+	if got.modals.Shipping().feedbackCursor != 1 {
+		t.Errorf("after k: cursor = %d, want 1", got.modals.Shipping().feedbackCursor)
 	}
 
 	// pgdn increments detail scroll.
-	got.shippingPanel.detailScroll = 0
+	got.modals.Shipping().detailScroll = 0
 	m, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	got = m.(App)
-	if got.shippingPanel.detailScroll <= 0 {
-		t.Errorf("pgdn: scroll = %d, want >0", got.shippingPanel.detailScroll)
+	if got.modals.Shipping().detailScroll <= 0 {
+		t.Errorf("pgdn: scroll = %d, want >0", got.modals.Shipping().detailScroll)
 	}
 
 	// j resets detail scroll to 0.
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got = m.(App)
-	if got.shippingPanel.detailScroll != 0 {
-		t.Errorf("j after scroll: scroll should reset to 0, got %d", got.shippingPanel.detailScroll)
+	if got.modals.Shipping().detailScroll != 0 {
+		t.Errorf("j after scroll: scroll should reset to 0, got %d", got.modals.Shipping().detailScroll)
 	}
 }
 
@@ -4369,8 +4365,7 @@ func TestShippingPanel_VerdictKeys(t *testing.T) {
 	sess := agent.NewSessionForTest("ship-v", "ship")
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
-	app.shippingPanel = newShippingPanel(sess, app.width, app.height)
-	app.dashboard.panelFocus = focusShipping
+	app.openShipping(newShippingPanel(sess, app.width, app.height))
 	app.width = 120
 	app.height = 40
 	// One inline comment with ID=42.
@@ -4420,8 +4415,7 @@ func TestAddressFeedback_ClearsTriage(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.shippingPanel = newShippingPanel(sess, app.width, app.height)
-	app.dashboard.panelFocus = focusShipping
+	app.openShipping(newShippingPanel(sess, app.width, app.height))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 	app.width = 120
@@ -4480,8 +4474,7 @@ func TestAddressFeedback_RefusesOnMergedPR(t *testing.T) {
 			mgr.AddSessionForTest(sess)
 
 			app := NewApp()
-			app.shippingPanel = newShippingPanel(sess, app.width, app.height)
-			app.dashboard.panelFocus = focusShipping
+			app.openShipping(newShippingPanel(sess, app.width, app.height))
 			app.managers[dir] = mgr
 			app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 			app.width = 120
@@ -4549,8 +4542,7 @@ func TestReviewPanel_EnterDoesNotChangeView(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.reviewPanel = newReviewPanel(sessR, app.width, app.height)
-	app.dashboard.panelFocus = focusReview
+	app.openReview(newReviewPanel(sessR, app.width, app.height))
 	app.reviewDiffCache[sessR.ID] = entry
 
 	for _, key := range []string{"enter", "space"} {
@@ -4603,13 +4595,12 @@ func TestReviewPanel_ScrollBindingsAdvanceViewport(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.reviewPanel = newReviewPanel(sessR, app.width, app.height)
-	app.dashboard.panelFocus = focusReview
+	app.openReview(newReviewPanel(sessR, app.width, app.height))
 	app.reviewDiffCache[sessR.ID] = entry
 	// Load diff content and set viewport dimensions before sending scroll keys.
-	app.reviewPanel.RefreshDiffViewport(app.panelServices())
+	app.modals.Review().RefreshDiffViewport(app.panelServices())
 
-	if !app.reviewPanel.diffVP.AtTop() {
+	if !app.modals.Review().diffVP.AtTop() {
 		t.Fatal("expected viewport at top before scrolling")
 	}
 
@@ -4617,7 +4608,7 @@ func TestReviewPanel_ScrollBindingsAdvanceViewport(t *testing.T) {
 	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	updated := model.(App)
 
-	if updated.reviewPanel.diffVP.AtTop() {
+	if updated.modals.Review().diffVP.AtTop() {
 		t.Error("pgdown: inline diff viewport did not scroll; viewport must advance when diff content exceeds viewport height")
 	}
 	if updated.dashboard.panelFocus != focusReview {
@@ -4655,8 +4646,8 @@ func TestCreateResult_SkipFocusLaunch_StaysOnDashboard(t *testing.T) {
 	if app.dashboard.panelFocus == focusLaunch {
 		t.Error("panelFocus: got focusLaunch, want focusList (skipFocusLaunch should suppress terminal open)")
 	}
-	if app.focusLaunchAgent != nil {
-		t.Errorf("focusLaunchAgent: got %v, want nil", app.focusLaunchAgent.ID)
+	if app.modals.LaunchAgent() != nil {
+		t.Errorf("focusLaunchAgent: got %v, want nil", app.modals.LaunchAgent().ID)
 	}
 	if app.cursor.Section() != focusSectionBuilding {
 		t.Errorf("focusCursorSection: got %v, want focusSectionBuilding", app.cursor.Section())
@@ -4750,8 +4741,8 @@ func TestApprovePlanAndSpawn_StaysOnDashboard(t *testing.T) {
 	if app.dashboard.panelFocus == focusLaunch {
 		t.Error("panelFocus: got focusLaunch after plan approval, want focusList")
 	}
-	if app.focusLaunchAgent != nil {
-		t.Errorf("focusLaunchAgent: got %v, want nil", app.focusLaunchAgent.ID)
+	if app.modals.LaunchAgent() != nil {
+		t.Errorf("focusLaunchAgent: got %v, want nil", app.modals.LaunchAgent().ID)
 	}
 }
 
@@ -4979,8 +4970,7 @@ func TestApp_PlanEditorRetryMsg_CallsStartDraftWithOriginalPrompt(t *testing.T) 
 	// Open the plan editor on the session so the App can refresh it on status
 	// changes; this mirrors the real flow where the editor was already open.
 	editor := newPlanEditor(sess, dir, 80, 30)
-	app.planEditor = &editor
-	app.dashboard.panelFocus = focusPlanEditor
+	app.openPlanEditorPanel(&editor)
 
 	// Dispatch planEditorRetryMsg — this should call StartDraft.
 	model, _ := app.Update(planEditorRetryMsg{sessionID: sess.ID, repoPath: dir})

@@ -20,9 +20,9 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case configFormSaveMsg:
 		// Repo config form saved.
-		if a.dashboard.repoConfigForm != nil && a.dashboard.configRepoPath != "" {
-			repoPath := a.dashboard.configRepoPath
-			alias := strings.TrimSpace(a.dashboard.repoConfigForm.textValue("Alias"))
+		if form := a.modals.Config(); form != nil && a.modals.ConfigRepoPath() != "" {
+			repoPath := a.modals.ConfigRepoPath()
+			alias := strings.TrimSpace(form.textValue("Alias"))
 			settings := a.extractRepoSettings()
 			if err := config.SaveRepoSettings(repoPath, settings); err != nil {
 				a.setError(err.Error())
@@ -62,8 +62,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := a.prComposeModal.Update(msg)
 			return a, cmd
 		}
-		if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
-			a.focusLaunchAgent.Paste(msg.Content)
+		if ag := a.modals.LaunchAgent(); ag != nil {
+			ag.Paste(msg.Content)
 			return a, nil
 		}
 
@@ -80,12 +80,12 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 		// focusLaunch: forward all keys to the launch agent; esc/ctrl+e returns to focus pipeline.
-		if a.dashboard.panelFocus == focusLaunch {
+		if a.modals.Is(focusLaunch) {
 			return a.updateFocusLaunchKeys(msg)
 		}
 
 		// When the config panel has focus, skip all app-level bindings.
-		if a.dashboard.panelFocus == focusConfig {
+		if a.modals.Is(focusConfig) {
 			a.confirmQuit = false
 			break
 		}
@@ -124,7 +124,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Pipeline view key handling (the only dashboard mode).
-		if a.dashboard.panelFocus != focusReview && a.dashboard.panelFocus != focusShipping {
+		if !a.modals.Is(focusReview) && !a.modals.Is(focusShipping) {
 			switch msg.String() {
 			case "up", "k":
 				a.cursor.MoveUp(a.dashboard.sectionCounts())
@@ -233,12 +233,11 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				sess := reviewItems[idx].session
 				sess.SetLifecyclePhase(agent.LifecycleInReview)
-				a.reviewPanel = newReviewPanel(sess, a.width, a.height)
-				a.dashboard.panelFocus = focusReview
+				a.openReview(newReviewPanel(sess, a.width, a.height))
 				if _, ok := a.reviewDiffCache[sess.ID]; !ok {
 					return a, a.fetchReviewDiffCmd(sess)
 				}
-				a.reviewPanel.RefreshDiffViewport(a.panelServices())
+				a.modals.Review().RefreshDiffViewport(a.panelServices())
 				return a, nil
 			case "n":
 				if a.cfg != nil && len(a.cfg.Repos) > 1 {
@@ -273,7 +272,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Enter/right on a repo header: open repo config in right panel.
-		if (msg.String() == "enter" || msg.String() == "right") && a.dashboard.panelFocus == focusList {
+		if (msg.String() == "enter" || msg.String() == "right") && a.modals.IsList() {
 			item := a.dashboard.selectedItem()
 			if item != nil && item.kind == listItemRepo {
 				a.initRepoConfigForm(item.repoPath)
@@ -334,18 +333,19 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// focusLaunch: tab bar click switches the active agent; clicks inside
 		// the agent terminal seed a text selection.
-		if a.dashboard.panelFocus == focusLaunch && a.focusLaunchSession != nil {
+		if sess := a.modals.LaunchSession(); sess != nil {
 			tabBarY := dashboardTopY + 1
 			if msg.Y == tabBarY {
 				if idx := a.focusLaunchTabIndexAt(msg.X); idx >= 0 {
-					agents := a.focusLaunchSession.Agents()
-					a.focusLaunchAgent = agents[idx]
+					agents := sess.Agents()
+					a.modals.SetLaunchAgent(agents[idx])
+					a.syncModalsToDashboard()
 					a.dashboard.scrollOffset = 0
-					a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+					agents[idx].Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 				}
 				return a, nil
 			}
-			if a.focusLaunchAgent != nil {
+			if ag := a.modals.LaunchAgent(); ag != nil {
 				if termX, termY, inVP := a.screenToTermCellFocusLaunch(msg.X, msg.Y); inVP {
 					a.dashboard.selection = selection{
 						anchorX: termX,
@@ -353,7 +353,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 						cursorX: termX,
 						cursorY: termY,
 						active:  true,
-						agentID: a.focusLaunchAgent.ID,
+						agentID: ag.ID,
 					}
 				} else {
 					a.dashboard.clearSelection()
@@ -363,10 +363,10 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// focusReview: delegate left-pane row clicks to the panel.
-		if a.dashboard.panelFocus == focusReview && a.reviewPanel != nil {
-			before := a.reviewPanel.TaskCursor()
-			a.reviewPanel.handleClick(msg, a.panelServices())
-			if a.reviewPanel.TaskCursor() != before {
+		if rp := a.modals.Review(); rp != nil {
+			before := rp.TaskCursor()
+			rp.handleClick(msg, a.panelServices())
+			if rp.TaskCursor() != before {
 				return a, nil
 			}
 		}
@@ -428,7 +428,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// only seed in focusLaunch (see MouseClickMsg), so any motion outside
 		// focusLaunch can be ignored here.
 		if a.dashboard.selection.active && msg.Button == tea.MouseLeft &&
-			a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
+			a.modals.LaunchAgent() != nil {
 			tx, ty, inVP := a.screenToTermCellFocusLaunch(msg.X, msg.Y)
 			if inVP {
 				a.dashboard.selection.cursorX = tx
@@ -444,12 +444,11 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.dashboard.selection.dragSeen {
 				// Real drag — copy the highlighted region. Selections only seed
 				// in focusLaunch (see MouseClickMsg), so this is the only path.
-				if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil && a.focusLaunchAgent.ID == a.dashboard.selection.agentID {
+				if ag := a.modals.LaunchAgent(); ag != nil && ag.ID == a.dashboard.selection.agentID {
 					if sx, sy, ex, ey, ok := a.dashboard.selectionRect(); ok {
 						rect := vt.SelectionRect{
 							StartX: sx, StartY: sy, EndX: ex, EndY: ey, Active: true,
 						}
-						ag := a.focusLaunchAgent
 						var text string
 						if a.dashboard.scrollOffset > 0 {
 							vpWidth := a.dashboard.width
@@ -473,8 +472,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg, ok := msg.(tea.MouseWheelMsg); ok {
-		if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
-			ag := a.focusLaunchAgent
+		if ag := a.modals.LaunchAgent(); ag != nil {
 			if ag.IsAltScreen() {
 				termX, termY, _ := a.screenToTermCellFocusLaunch(msg.X, msg.Y)
 				if termX < 0 {
@@ -532,7 +530,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// remains in focusLaunch viewing the same agent. Any focus or agent
 	// change (esc back to pipeline, tab switch, etc.) drops it.
 	if a.dashboard.selection.active {
-		if a.dashboard.panelFocus != focusLaunch || a.focusLaunchAgent == nil || a.focusLaunchAgent.ID != a.dashboard.selection.agentID {
+		ag := a.modals.LaunchAgent()
+		if ag == nil || ag.ID != a.dashboard.selection.agentID {
 			a.dashboard.clearSelection()
 		}
 	}
@@ -547,22 +546,22 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 // off updateDashboard so the latter reads as a router, not a god-method.
 func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	a.confirmQuit = false
-	if a.focusLaunchAgent == nil {
-		a.dashboard.panelFocus = focusList
+	ag := a.modals.LaunchAgent()
+	sess := a.modals.LaunchSession()
+	if ag == nil {
+		a.closeModal()
 		a.dashboard.scrollOffset = 0
 		return a, nil
 	}
 	switch msg.String() {
 	case "esc", "ctrl+e":
-		a.resizeAgentForDashboard(a.focusLaunchAgent)
-		a.focusLaunchAgent = nil
-		a.focusLaunchSession = nil
-		a.dashboard.panelFocus = focusList
+		a.resizeAgentForDashboard(ag)
+		a.closeModal()
 		a.dashboard.scrollOffset = 0
 	case "shift+esc":
-		a.focusLaunchAgent.SendKey(xvt.KeyPressEvent{Code: tea.KeyEscape})
+		ag.SendKey(xvt.KeyPressEvent{Code: tea.KeyEscape})
 	case "pgup":
-		sbLines := len(a.focusLaunchAgent.ScrollbackLines())
+		sbLines := len(ag.ScrollbackLines())
 		maxScroll := sbLines
 		a.dashboard.scrollOffset += a.dashboard.height / 2
 		if a.dashboard.scrollOffset > maxScroll {
@@ -576,11 +575,11 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "home":
 		a.dashboard.scrollOffset = 0
 	case "alt+]", "alt+[":
-		if a.focusLaunchSession != nil {
-			agents := a.focusLaunchSession.Agents()
+		if sess != nil {
+			agents := sess.Agents()
 			idx := 0
-			for i, ag := range agents {
-				if ag.ID == a.focusLaunchAgent.ID {
+			for i, candidate := range agents {
+				if candidate.ID == ag.ID {
 					idx = i
 					break
 				}
@@ -590,13 +589,14 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			} else {
 				idx = (idx - 1 + len(agents)) % len(agents)
 			}
-			a.focusLaunchAgent = agents[idx]
+			a.modals.SetLaunchAgent(agents[idx])
+			a.syncModalsToDashboard()
 			a.dashboard.scrollOffset = 0
-			a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+			agents[idx].Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 		}
 	case "ctrl+t":
-		if a.focusLaunchSession != nil {
-			repoPath := a.repoPathForSession(a.focusLaunchSession.ID)
+		if sess != nil {
+			repoPath := a.repoPathForSession(sess.ID)
 			mgr := a.managers[repoPath]
 			if mgr != nil {
 				resolved := a.resolvedCache[repoPath]
@@ -605,8 +605,9 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					Cols:              a.dashboard.width,
 					BypassPermissions: resolved.BypassPermissions,
 				}
-				if newAg, err := mgr.AddShell(a.focusLaunchSession.ID, cfg); err == nil {
-					a.focusLaunchAgent = newAg
+				if newAg, err := mgr.AddShell(sess.ID, cfg); err == nil {
+					a.modals.SetLaunchAgent(newAg)
+					a.syncModalsToDashboard()
 					a.dashboard.scrollOffset = 0
 				} else {
 					a.setError(err.Error())
@@ -614,8 +615,8 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "ctrl+n":
-		if a.focusLaunchSession != nil {
-			repoPath := a.repoPathForSession(a.focusLaunchSession.ID)
+		if sess != nil {
+			repoPath := a.repoPathForSession(sess.ID)
 			mgr := a.managers[repoPath]
 			if mgr != nil {
 				resolved := a.resolvedCache[repoPath]
@@ -627,8 +628,9 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					AgentModel:        resolved.AgentModel,
 					BuildSystemPrompt: resolved.BuildSystemPrompt,
 				}
-				if newAg, err := mgr.AddAgent(a.focusLaunchSession.ID, cfg); err == nil {
-					a.focusLaunchAgent = newAg
+				if newAg, err := mgr.AddAgent(sess.ID, cfg); err == nil {
+					a.modals.SetLaunchAgent(newAg)
+					a.syncModalsToDashboard()
 					a.dashboard.scrollOffset = 0
 				} else {
 					a.setError(err.Error())
@@ -639,9 +641,9 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a.closeFocusLaunchAgent()
 	default:
 		if msg.Text != "" {
-			a.focusLaunchAgent.SendText(msg.Text)
+			ag.SendText(msg.Text)
 		} else {
-			a.focusLaunchAgent.SendKey(xvt.KeyPressEvent(msg))
+			ag.SendKey(xvt.KeyPressEvent(msg))
 		}
 	}
 	return a, nil
@@ -653,39 +655,38 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // asynchronously. Split from updateFocusLaunchKeys so the ctrl+w switch case
 // reads as one line.
 func (a App) closeFocusLaunchAgent() (tea.Model, tea.Cmd) {
-	if a.focusLaunchSession == nil || a.focusLaunchAgent == nil {
+	sess := a.modals.LaunchSession()
+	ag := a.modals.LaunchAgent()
+	if sess == nil || ag == nil {
 		return a, nil
 	}
-	agents := a.focusLaunchSession.Agents()
+	agents := sess.Agents()
 	if len(agents) == 0 {
-		a.focusLaunchAgent = nil
-		a.focusLaunchSession = nil
-		a.dashboard.panelFocus = focusList
+		a.closeModal()
 		a.dashboard.scrollOffset = 0
 		return a, nil
 	}
-	oldID := a.focusLaunchAgent.ID
-	sessionID := a.focusLaunchSession.ID
+	oldID := ag.ID
+	sessionID := sess.ID
 	currentIdx := 0
-	for i, ag := range agents {
-		if ag.ID == oldID {
+	for i, candidate := range agents {
+		if candidate.ID == oldID {
 			currentIdx = i
 			break
 		}
 	}
 	lastAgent := len(agents) == 1
 	if lastAgent {
-		a.focusLaunchAgent = nil
-		a.focusLaunchSession = nil
-		a.dashboard.panelFocus = focusList
+		a.closeModal()
 		a.dashboard.scrollOffset = 0
 	} else {
 		nextIdx := currentIdx + 1
 		if currentIdx == len(agents)-1 {
 			nextIdx = currentIdx - 1
 		}
-		a.focusLaunchAgent = agents[nextIdx]
-		a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+		a.modals.SetLaunchAgent(agents[nextIdx])
+		a.syncModalsToDashboard()
+		agents[nextIdx].Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 		a.dashboard.scrollOffset = 0
 	}
 	if a.closingAgents[oldID] {
@@ -712,27 +713,28 @@ func (a App) closeFocusLaunchAgent() (tea.Model, tea.Cmd) {
 // true exactly when the editor owns focus, signalling to the caller that no
 // further dispatch is needed.
 func (a App) handleKeysPlanEditor(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
-	if a.dashboard.panelFocus != focusPlanEditor || a.planEditor == nil {
+	pe := a.modals.PlanEditor()
+	if pe == nil {
 		return a, nil, false
 	}
-	cmd := a.planEditor.Update(msg)
+	cmd := pe.Update(msg)
 	return a, cmd, true
 }
 
 // handleKeysReviewPanel forwards a keypress to the review panel. handled is true
 // exactly when the review panel owns focus. The snapshot dance preserves the
 // invariant that svc.ClosePanel wins over a stale restore — if the panel was
-// closed mid-Update, we leave a.reviewPanel nil rather than restoring it.
+// closed mid-Update, CompareAndSetReview returns false and the modals state
+// stays nil.
 func (a App) handleKeysReviewPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
-	if a.dashboard.panelFocus != focusReview || a.reviewPanel == nil {
+	snapshot := a.modals.Review()
+	if snapshot == nil {
 		return a, nil, false
 	}
-	snapshot := a.reviewPanel
 	updated, cmd := snapshot.Update(msg, a.panelServices())
-	if a.reviewPanel == snapshot {
-		if rp, ok := updated.(*reviewPanelModel); ok {
-			a.reviewPanel = rp
-		}
+	if rp, ok := updated.(*reviewPanelModel); ok {
+		a.modals.CompareAndSetReview(snapshot, rp)
+		a.syncModalsToDashboard()
 	}
 	return a, cmd, true
 }
@@ -740,15 +742,14 @@ func (a App) handleKeysReviewPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 // handleKeysShippingPanel forwards a keypress to the shipping panel. Mirrors the
 // review-panel snapshot-and-restore pattern.
 func (a App) handleKeysShippingPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
-	if a.dashboard.panelFocus != focusShipping || a.shippingPanel == nil {
+	snapshot := a.modals.Shipping()
+	if snapshot == nil {
 		return a, nil, false
 	}
-	snapshot := a.shippingPanel
 	updated, cmd := snapshot.Update(msg, a.panelServices())
-	if a.shippingPanel == snapshot {
-		if sp, ok := updated.(*shippingPanelModel); ok {
-			a.shippingPanel = sp
-		}
+	if sp, ok := updated.(*shippingPanelModel); ok {
+		a.modals.CompareAndSetShipping(snapshot, sp)
+		a.syncModalsToDashboard()
 	}
 	return a, cmd, true
 }
@@ -989,9 +990,7 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			// Shell exists — open it in focusLaunch directly.
 			for _, ag := range sess.Agents() {
 				if ag.IsShell {
-					a.focusLaunchAgent = ag
-					a.focusLaunchSession = sess
-					a.dashboard.panelFocus = focusLaunch
+					a.openLaunchPanel(sess, ag)
 					a.dashboard.scrollOffset = 0
 					ag.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 					break

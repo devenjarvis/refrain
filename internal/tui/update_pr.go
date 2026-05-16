@@ -43,9 +43,8 @@ func (a App) handlePRCreated(msg prCreatedMsg) (tea.Model, tea.Cmd) {
 	if msg.transitionShipping {
 		if sess := a.sessionByID(msg.sessionID); sess != nil {
 			sess.SetLifecyclePhase(agent.LifecycleShipping)
-			if a.reviewPanel != nil && a.reviewPanel.SessionID() == msg.sessionID {
-				a.dashboard.panelFocus = focusList
-				a.reviewPanel = nil
+			if rp := a.modals.Review(); rp != nil && rp.SessionID() == msg.sessionID {
+				a.closeModal()
 			}
 		}
 	}
@@ -127,9 +126,8 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 			switch sess.LifecyclePhase() {
 			case agent.LifecycleInProgress, agent.LifecycleReadyForReview, agent.LifecycleInReview:
 				sess.SetLifecyclePhase(agent.LifecycleShipping)
-				if a.reviewPanel != nil && a.reviewPanel.SessionID() == msg.sessionID {
-					a.dashboard.panelFocus = focusList
-					a.reviewPanel = nil
+				if rp := a.modals.Review(); rp != nil && rp.SessionID() == msg.sessionID {
+					a.closeModal()
 				}
 			}
 		}
@@ -146,9 +144,8 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 						if !a.closingSessions[sessID] {
 							sess.SetLifecyclePhase(agent.LifecycleComplete)
 							// Close the shipping panel if this session is currently open in it.
-							if a.shippingPanel != nil && a.shippingPanel.SessionID() == sessID {
-								a.shippingPanel = nil
-								a.dashboard.panelFocus = focusList
+							if sp := a.modals.Shipping(); sp != nil && sp.SessionID() == sessID {
+								a.closeModal()
 							}
 							var agentIDs []string
 							for _, ag := range sess.Agents() {
@@ -202,8 +199,7 @@ func (a App) handleMergePR(msg mergePRMsg) (tea.Model, tea.Cmd) {
 		a.setError("merge failed: " + msg.err.Error())
 		return a, nil
 	}
-	a.shippingPanel = nil
-	a.dashboard.panelFocus = focusList
+	a.closeModal()
 	repoPath := a.repoPathForSession(msg.sessionID)
 	if repoPath == "" {
 		return a, nil

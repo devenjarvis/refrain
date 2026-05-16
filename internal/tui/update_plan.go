@@ -17,9 +17,9 @@ func (a App) handlePlannerQuestion(msg plannerQuestionMsg) (tea.Model, tea.Cmd) 
 	// discard session A's unsaved textarea edits. In that case fall through
 	// to the skip path below.
 	sessionID := msg.question.SessionID
-	focusAtArrival := panelFocusName(a.dashboard.panelFocus)
-	editorAlreadyOpen := a.planEditor != nil && a.planEditor.sess != nil &&
-		a.planEditor.sess.ID == sessionID
+	focusAtArrival := panelFocusName(a.modals.Current())
+	pe := a.modals.PlanEditor()
+	editorAlreadyOpen := pe != nil && pe.sess != nil && pe.sess.ID == sessionID
 
 	// Compute the skip disposition eagerly during the auto-open attempt so
 	// the skip path never needs a second ListSessions() call. The default
@@ -27,7 +27,7 @@ func (a App) handlePlannerQuestion(msg plannerQuestionMsg) (tea.Model, tea.Cmd) 
 	// active); the inner branches refine it for the manager-missing and
 	// session-missing cases so log readers can tell them apart.
 	skipDisp := "skipped-no-editor"
-	if !editorAlreadyOpen && a.dashboard.panelFocus != focusPlanEditor {
+	if !editorAlreadyOpen && !a.modals.Is(focusPlanEditor) {
 		mgr := a.managers[msg.repoPath]
 		if mgr == nil {
 			skipDisp = "skipped-no-manager"
@@ -36,22 +36,22 @@ func (a App) handlePlannerQuestion(msg plannerQuestionMsg) (tea.Model, tea.Cmd) 
 			for _, s := range mgr.ListSessions() {
 				if s.ID == sessionID {
 					a.openPlanEditor(s, msg.repoPath)
+					pe = a.modals.PlanEditor()
 					// Cleared because the happy-path block below logs
 					// "auto-opened" instead. openPlanEditor always sets
-					// a.planEditor, so the happy-path check is guaranteed
-					// to fire — this branch is unreachable if that
-					// guarantee ever breaks.
+					// modals.PlanEditor(), so the happy-path check is
+					// guaranteed to fire — this branch is unreachable if
+					// that guarantee ever breaks.
 					skipDisp = ""
 					break
 				}
 			}
 		}
 	}
-	if a.planEditor != nil && a.planEditor.sess != nil &&
-		a.planEditor.sess.ID == sessionID {
+	if pe != nil && pe.sess != nil && pe.sess.ID == sessionID {
 		disp := "auto-opened"
 		if editorAlreadyOpen {
-			if a.dashboard.panelFocus == focusPlanEditor {
+			if a.modals.Is(focusPlanEditor) {
 				disp = "routed-to-existing"
 			} else {
 				disp = "routed-to-background-editor"
@@ -70,7 +70,7 @@ func (a App) handlePlannerQuestion(msg plannerQuestionMsg) (tea.Model, tea.Cmd) 
 		if disp == "routed-to-background-editor" {
 			a.setError("planner question waiting — open the plan editor to answer")
 		}
-		cmd := a.planEditor.AskQuestion(msg.question.Question, msg.question.AnswerCh)
+		cmd := pe.AskQuestion(msg.question.Question, msg.question.AnswerCh)
 		if mgr := a.managers[msg.repoPath]; mgr != nil {
 			return a, tea.Batch(cmd, listenPlannerQuestions(mgr))
 		}
@@ -101,11 +101,10 @@ func (a App) handlePlanEditorClose(msg planEditorCloseMsg) (tea.Model, tea.Cmd) 
 	// If the editor was parked on a planner question, answer it with the
 	// skip-signal before tearing the editor down so the planner subprocess
 	// unblocks promptly instead of waiting for its server to close.
-	if a.planEditor != nil && a.planEditor.HasPendingQuestion() {
-		a.planEditor.resolveQuestion("")
+	if pe := a.modals.PlanEditor(); pe != nil && pe.HasPendingQuestion() {
+		pe.resolveQuestion("")
 	}
-	a.dashboard.panelFocus = focusList
-	a.planEditor = nil
+	a.closeModal()
 	return a, nil
 }
 
@@ -113,19 +112,19 @@ func (a App) handlePlanEditorAbandon(msg planEditorAbandonMsg) (tea.Model, tea.C
 	// Tear down the session entirely — the user explicitly chose to walk
 	// away from this plan. Resolve any pending planner question first so
 	// the in-flight draft drains cleanly while KillSession is in flight.
-	if a.planEditor != nil && a.planEditor.HasPendingQuestion() {
-		a.planEditor.resolveQuestion("")
+	pe := a.modals.PlanEditor()
+	if pe != nil && pe.HasPendingQuestion() {
+		pe.resolveQuestion("")
 	}
 	repoPath := msg.repoPath
-	if repoPath == "" && a.planEditor != nil {
-		repoPath = a.planEditor.repoPath
+	if repoPath == "" && pe != nil {
+		repoPath = pe.repoPath
 	}
 	if repoPath == "" {
 		repoPath = a.repoPathForSession(msg.sessionID)
 	}
 	mgr := a.managers[repoPath]
-	a.dashboard.panelFocus = focusList
-	a.planEditor = nil
+	a.closeModal()
 	if mgr == nil {
 		return a, nil
 	}
@@ -147,18 +146,18 @@ func (a App) handlePlanEditorRevise(msg planEditorReviseMsg) (tea.Model, tea.Cmd
 	// version. WritePlan errors flow up as an inline editor error and
 	// we abort the revise — otherwise the model would revise the wrong
 	// plan and overwrite the user's edits with the result.
-	if a.planEditor != nil && a.planEditor.dirty && a.planEditor.sess != nil {
-		val := a.planEditor.textarea.Value()
-		if err := a.planEditor.sess.WritePlan(val); err != nil {
-			a.planEditor.SetError("save plan: " + err.Error())
+	if a.modals.PlanEditor() != nil && a.modals.PlanEditor().dirty && a.modals.PlanEditor().sess != nil {
+		val := a.modals.PlanEditor().textarea.Value()
+		if err := a.modals.PlanEditor().sess.WritePlan(val); err != nil {
+			a.modals.PlanEditor().SetError("save plan: " + err.Error())
 			return a, nil
 		}
-		a.planEditor.plan = val
-		a.planEditor.dirty = false
+		a.modals.PlanEditor().plan = val
+		a.modals.PlanEditor().dirty = false
 	}
 	repoPath := msg.repoPath
-	if repoPath == "" && a.planEditor != nil {
-		repoPath = a.planEditor.repoPath
+	if repoPath == "" && a.modals.PlanEditor() != nil {
+		repoPath = a.modals.PlanEditor().repoPath
 	}
 	if repoPath == "" {
 		repoPath = a.repoPathForSession(msg.sessionID)
@@ -168,22 +167,22 @@ func (a App) handlePlanEditorRevise(msg planEditorReviseMsg) (tea.Model, tea.Cmd
 	}
 	mgr := a.managers[repoPath]
 	if mgr == nil {
-		if a.planEditor != nil {
-			a.planEditor.SetError("session manager not found")
+		if a.modals.PlanEditor() != nil {
+			a.modals.PlanEditor().SetError("session manager not found")
 		}
 		return a, nil
 	}
 	if err := mgr.RevisePlan(msg.sessionID, msg.critique); err != nil {
-		if a.planEditor != nil {
-			a.planEditor.SetError("revise: " + err.Error())
+		if a.modals.PlanEditor() != nil {
+			a.modals.PlanEditor().SetError("revise: " + err.Error())
 		}
 		return a, nil
 	}
 	// Reflect the revising state immediately; the EventStatusChanged
 	// dispatch above will keep it in sync as the goroutine progresses.
-	if a.planEditor != nil && a.planEditor.sess != nil &&
-		a.planEditor.sess.ID == msg.sessionID {
-		a.planEditor.SetRevising(true)
+	if a.modals.PlanEditor() != nil && a.modals.PlanEditor().sess != nil &&
+		a.modals.PlanEditor().sess.ID == msg.sessionID {
+		a.modals.PlanEditor().SetRevising(true)
 	}
 	return a, nil
 }
@@ -194,8 +193,8 @@ func (a App) handlePlanEditorRetry(msg planEditorRetryMsg) (tea.Model, tea.Cmd) 
 	// drafter retries from scratch. Mirrors createSessionFromPrompt's call
 	// to StartDraft at app.go:3859.
 	repoPath := msg.repoPath
-	if repoPath == "" && a.planEditor != nil {
-		repoPath = a.planEditor.repoPath
+	if repoPath == "" && a.modals.PlanEditor() != nil {
+		repoPath = a.modals.PlanEditor().repoPath
 	}
 	if repoPath == "" {
 		repoPath = a.repoPathForSession(msg.sessionID)
@@ -205,30 +204,30 @@ func (a App) handlePlanEditorRetry(msg planEditorRetryMsg) (tea.Model, tea.Cmd) 
 	}
 	mgr := a.managers[repoPath]
 	if mgr == nil {
-		if a.planEditor != nil {
-			a.planEditor.SetError("session manager not found")
+		if a.modals.PlanEditor() != nil {
+			a.modals.PlanEditor().SetError("session manager not found")
 		}
 		return a, nil
 	}
 	sess := mgr.GetSession(msg.sessionID)
 	if sess == nil {
-		if a.planEditor != nil {
-			a.planEditor.SetError("session not found")
+		if a.modals.PlanEditor() != nil {
+			a.modals.PlanEditor().SetError("session not found")
 		}
 		return a, nil
 	}
 	prompt := sess.OriginalPrompt()
 	if err := mgr.StartDraft(msg.sessionID, prompt); err != nil {
-		if a.planEditor != nil {
-			a.planEditor.SetError("retry draft: " + err.Error())
+		if a.modals.PlanEditor() != nil {
+			a.modals.PlanEditor().SetError("retry draft: " + err.Error())
 		}
 		return a, nil
 	}
 	// Reflect the drafting state immediately; EventStatusChanged will
 	// keep the editor in sync as the goroutine progresses.
-	if a.planEditor != nil && a.planEditor.sess != nil &&
-		a.planEditor.sess.ID == msg.sessionID {
-		a.planEditor.SetDrafting(true)
+	if a.modals.PlanEditor() != nil && a.modals.PlanEditor().sess != nil &&
+		a.modals.PlanEditor().sess.ID == msg.sessionID {
+		a.modals.PlanEditor().SetDrafting(true)
 	}
 	return a, nil
 }
@@ -236,21 +235,21 @@ func (a App) handlePlanEditorRetry(msg planEditorRetryMsg) (tea.Model, tea.Cmd) 
 func (a App) handlePlanEditorRestore(msg planEditorRestoreMsg) (tea.Model, tea.Cmd) {
 	// Single-step undo: restore plan.prev.md → plan.md and reload the
 	// editor. No-op when no snapshot exists.
-	if a.planEditor == nil || a.planEditor.sess == nil {
+	if a.modals.PlanEditor() == nil || a.modals.PlanEditor().sess == nil {
 		return a, nil
 	}
-	sess := a.planEditor.sess
+	sess := a.modals.PlanEditor().sess
 	if sess.ID != msg.sessionID {
 		return a, nil
 	}
 	_, restored, err := sess.RestorePrevPlan()
 	switch {
 	case err != nil:
-		a.planEditor.SetError("undo: " + err.Error())
+		a.modals.PlanEditor().SetError("undo: " + err.Error())
 	case !restored:
-		a.planEditor.SetError("nothing to undo")
+		a.modals.PlanEditor().SetError("nothing to undo")
 	default:
-		a.planEditor.Reload()
+		a.modals.PlanEditor().Reload()
 	}
 	return a, nil
 }
@@ -366,8 +365,7 @@ func (a *App) openPlanEditor(sess *agent.Session, repoPath string) {
 	if sess.IsDrafting() {
 		editor.SetDrafting(true)
 	}
-	a.planEditor = &editor
-	a.dashboard.panelFocus = focusPlanEditor
+	a.openPlanEditorPanel(&editor)
 	a.dashboard.scrollOffset = 0
 }
 
@@ -377,8 +375,8 @@ func (a *App) openPlanEditor(sess *agent.Session, repoPath string) {
 // on disk by the time this fires (the editor's `a` handler writes it).
 func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd) {
 	repoPath := msg.repoPath
-	if repoPath == "" && a.planEditor != nil {
-		repoPath = a.planEditor.repoPath
+	if repoPath == "" && a.modals.PlanEditor() != nil {
+		repoPath = a.modals.PlanEditor().repoPath
 	}
 	if repoPath == "" {
 		repoPath = a.repoPathForSession(msg.sessionID)
@@ -388,8 +386,7 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 	}
 	mgr := a.managers[repoPath]
 	if mgr == nil {
-		a.dashboard.panelFocus = focusList
-		a.planEditor = nil
+		a.closeModal()
 		a.setError("session manager not found")
 		return a, nil
 	}
@@ -402,8 +399,7 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 		}
 	}
 	if sess == nil {
-		a.dashboard.panelFocus = focusList
-		a.planEditor = nil
+		a.closeModal()
 		a.setError("session not found")
 		return a, nil
 	}
@@ -431,8 +427,7 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 		Task:              prompt,
 	}
 
-	a.dashboard.panelFocus = focusList
-	a.planEditor = nil
+	a.closeModal()
 	sessID := sess.ID
 	// Phase transition is intentionally inside the closure: if AddAgent
 	// fails, the session stays in LifecyclePlanning so the user can retry

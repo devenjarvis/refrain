@@ -14,14 +14,12 @@ func (a App) returnFromConfigForm() (tea.Model, tea.Cmd) {
 				counts[repo.Path] = mgr.AgentCount()
 			}
 		}
-		a.repoPicker.setRepos(a.cfg.Repos, counts, a.dashboard.configRepoPath)
-		a.dashboard.repoConfigForm = nil
-		a.dashboard.configRepoPath = ""
+		a.repoPicker.setRepos(a.cfg.Repos, counts, a.modals.ConfigRepoPath())
+		a.closeModal()
 		a.view = ViewRepoPicker
 		return a, nil
 	}
-	a.dashboard.panelFocus = focusList
-	a.dashboard.repoConfigForm = nil
+	a.closeModal()
 	return a, nil
 }
 
@@ -96,14 +94,12 @@ func (a *App) initRepoConfigForm(repoPath string) {
 	fields = addTextInput(fields, "Worktree Directory", worktreeDir, config.DefaultWorktreeDir, inputWidth)
 
 	form := newConfigForm(fields, a.dashboard.fixedTermWidth())
-	a.dashboard.repoConfigForm = &form
-	a.dashboard.configRepoPath = repoPath
-	a.dashboard.panelFocus = focusConfig
+	a.openConfigForm(&form, repoPath)
 }
 
 // extractRepoSettings reads form values and creates a RepoSettings struct.
 func (a App) extractRepoSettings() *config.RepoSettings {
-	form := a.dashboard.repoConfigForm
+	form := a.modals.Config()
 	if form == nil {
 		return &config.RepoSettings{}
 	}

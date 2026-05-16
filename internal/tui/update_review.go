@@ -18,8 +18,8 @@ func (a App) handleReviewDiff(msg reviewDiffMsg) (tea.Model, tea.Cmd) {
 	if msg.err == nil && msg.entry != nil {
 		a.reviewDiffCache[msg.sessionID] = msg.entry
 		// Refresh the inline diff viewport when data arrives for the open session.
-		if a.reviewPanel != nil && a.reviewPanel.SessionID() == msg.sessionID && len(msg.entry.groups) > 0 {
-			a.reviewPanel.RefreshDiffViewport(a.panelServices())
+		if rp := a.modals.Review(); rp != nil && rp.SessionID() == msg.sessionID && len(msg.entry.groups) > 0 {
+			rp.RefreshDiffViewport(a.panelServices())
 		}
 		// If the entry has task groups, dispatch a reviewer per group.
 		if len(msg.entry.groups) > 0 {
@@ -236,8 +236,7 @@ func (a App) handleShippingFeedbackRequest(req shippingFeedbackRequestMsg) (tea.
 	}
 
 	sessID := sess.ID
-	a.shippingPanel = nil
-	a.dashboard.panelFocus = focusList
+	a.closeModal()
 	delete(a.feedbackTriage, sessID)
 	return a, func() tea.Msg {
 		ag, err := mgr.AddAgent(sessID, cfg)
@@ -441,9 +440,8 @@ func (a App) handleReviewReworkRequest(req reviewReworkRequestMsg) (tea.Model, t
 		Task:              req.prompt,
 	}
 	sessID := sess.ID
-	a.reviewPanel = nil
+	a.closeModal()
 	delete(a.reviewDiffCache, sessID)
-	a.dashboard.panelFocus = focusList
 	return a, func() tea.Msg {
 		ag, err := mgr.AddAgent(sessID, cfg)
 		if err != nil {

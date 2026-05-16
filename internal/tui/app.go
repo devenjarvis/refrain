@@ -175,14 +175,17 @@ type App struct {
 
 	agentLimitModalActive bool
 	cursor                FocusedCursor // pipeline cursor: section + per-section indices
-	focusLaunchAgent      *agent.Agent
-	focusLaunchSession    *agent.Session
-	reviewDiffCache       map[string]*reviewDiffEntry                // keyed by session ID; lifetime exceeds panel
-	reviewPanel           *reviewPanelModel                          // non-nil while panelFocus == focusReview
-	shippingPanel         *shippingPanelModel                        // non-nil while panelFocus == focusShipping
-	feedbackTriage        map[string]map[string]*feedbackTriageEntry // keyed by sessionID → itemKey
-	planEditor            *planEditorModel                           // non-nil while panelFocus == focusPlanEditor
-	promptModal           promptModalModel                           // overlay for plan-first new-session prompt
+	// modals owns panel focus and the lifetime of every overlay model. The
+	// invariant "the model for panelFocus X is non-nil iff modals.Current() == X"
+	// is enforced by the Modals type; see internal/tui/modals.go. App callers
+	// must reach overlay models via modals.Review(), modals.Shipping(), etc.,
+	// and must transition via app.openReview / openShipping / openPlanEditor /
+	// openConfig / openLaunch / closeModal helpers (which keep the dashboard
+	// mirror fields in sync).
+	modals          Modals
+	reviewDiffCache map[string]*reviewDiffEntry                // keyed by session ID; lifetime exceeds panel
+	feedbackTriage  map[string]map[string]*feedbackTriageEntry // keyed by sessionID → itemKey
+	promptModal     promptModalModel                           // overlay for plan-first new-session prompt
 
 	// closingAgents and closingSessions track in-flight kill requests so the
 	// dashboard can render a "closing…" indicator while the async teardown runs.
@@ -220,6 +223,58 @@ type App struct {
 	// review panel (p key), where confirming the PR should transition the
 	// session to LifecycleShipping and close the review panel.
 	prModalTransitionShipping bool
+}
+
+// syncModalsToDashboard mirrors the current Modals state into the dashboard
+// model's render-time fields. The dashboard renderer reads these fields
+// directly; calling this after every Modals mutation keeps the two in sync.
+// Modal callers should prefer the openX / closeModal helpers below, which
+// invoke this automatically.
+func (a *App) syncModalsToDashboard() {
+	a.dashboard.panelFocus = a.modals.Current()
+	a.dashboard.repoConfigForm = a.modals.Config()
+	a.dashboard.configRepoPath = a.modals.ConfigRepoPath()
+	a.dashboard.focusLaunchAgent = a.modals.LaunchAgent()
+	a.dashboard.focusLaunchSession = a.modals.LaunchSession()
+}
+
+// openReview opens the review panel and syncs the dashboard mirror.
+func (a *App) openReview(rp *reviewPanelModel) {
+	a.modals.OpenReview(rp)
+	a.syncModalsToDashboard()
+}
+
+// openShipping opens the shipping panel and syncs the dashboard mirror.
+func (a *App) openShipping(sp *shippingPanelModel) {
+	a.modals.OpenShipping(sp)
+	a.syncModalsToDashboard()
+}
+
+// openPlanEditorPanel installs an existing plan editor model and syncs the
+// dashboard mirror. The high-level "open the plan editor for this session"
+// flow lives in openPlanEditor (which builds the model, then calls this).
+func (a *App) openPlanEditorPanel(pe *planEditorModel) {
+	a.modals.OpenPlanEditor(pe)
+	a.syncModalsToDashboard()
+}
+
+// openConfigForm opens the per-repo config form for repoPath and syncs.
+func (a *App) openConfigForm(form *configForm, repoPath string) {
+	a.modals.OpenConfig(form, repoPath)
+	a.syncModalsToDashboard()
+}
+
+// openLaunchPanel sets the fullscreen agent terminal target and syncs.
+func (a *App) openLaunchPanel(sess *agent.Session, ag *agent.Agent) {
+	a.modals.OpenLaunch(sess, ag)
+	a.syncModalsToDashboard()
+}
+
+// closeModal returns focus to the pipeline list and nils every overlay model.
+// This is the canonical "close any panel" path.
+func (a *App) closeModal() {
+	a.modals.Close()
+	a.syncModalsToDashboard()
 }
 
 func NewApp() App {
@@ -450,8 +505,9 @@ func (a *App) resizeAllForDashboard() {
 	if w <= 0 || h <= 0 {
 		return
 	}
+	launchAgent := a.modals.LaunchAgent()
 	for _, ag := range a.dashboard.agentItems() {
-		if a.focusLaunchAgent != nil && ag.ID == a.focusLaunchAgent.ID {
+		if launchAgent != nil && ag.ID == launchAgent.ID {
 			continue
 		}
 		ag.Resize(h, w)
@@ -489,10 +545,11 @@ func (a *App) focusLaunchTermHeight() int {
 // tab bar click at column x, or -1 if x doesn't land on any tab. Uses the same
 // label formula as renderFocusLaunchTabBar so click targets stay in sync.
 func (a *App) focusLaunchTabIndexAt(x int) int {
-	if a.focusLaunchSession == nil {
+	sess := a.modals.LaunchSession()
+	if sess == nil {
 		return -1
 	}
-	agents := a.focusLaunchSession.Agents()
+	agents := sess.Agents()
 	col := 0
 	for i, ag := range agents {
 		label := focusLaunchTabText(ag)
@@ -551,11 +608,8 @@ func (a *App) panelServices() PanelServices {
 		},
 		ClosePanel: func() {
 			// Drop the active overlay panel and return focus to the pipeline.
-			// Each panel reference is mutated; only the matching one will be
-			// non-nil at any given time so the others are no-ops.
-			a.reviewPanel = nil
-			a.shippingPanel = nil
-			a.dashboard.panelFocus = focusList
+			// Modals.Close enforces the invariant by nilling every owned model.
+			a.closeModal()
 		},
 		OpenInLaunch: func(sess *agent.Session) bool {
 			return a.openSessionInFocusLaunch(sess)
@@ -644,8 +698,7 @@ func (a *App) refreshAgentList() {
 	a.dashboard.prDraftSessionID = a.prDraftSessionID
 	a.dashboard.activeRepoName = a.activeRepoDisplayName()
 	a.dashboard.activeRepoPath = a.activeRepo
-	a.dashboard.focusLaunchAgent = a.focusLaunchAgent
-	a.dashboard.focusLaunchSession = a.focusLaunchSession
+	a.syncModalsToDashboard()
 	if a.cfg == nil {
 		// Fallback used in tests that set up managers directly without cfg.
 		if mgr := a.managers[a.activeRepo]; mgr != nil {
@@ -870,16 +923,14 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		return nil, a.openSessionInFocusLaunch(sess)
 	case focusSectionReview:
 		sess.SetLifecyclePhase(agent.LifecycleInReview)
-		a.reviewPanel = newReviewPanel(sess, a.width, a.height)
-		a.dashboard.panelFocus = focusReview
+		a.openReview(newReviewPanel(sess, a.width, a.height))
 		if _, ok := a.reviewDiffCache[sess.ID]; !ok {
 			return a.fetchReviewDiffCmd(sess), true
 		}
-		a.reviewPanel.RefreshDiffViewport(a.panelServices())
+		a.modals.Review().RefreshDiffViewport(a.panelServices())
 		return nil, true
 	case focusSectionShipping:
-		a.shippingPanel = newShippingPanel(sess, a.width, a.height-1)
-		a.dashboard.panelFocus = focusShipping
+		a.openShipping(newShippingPanel(sess, a.width, a.height-1))
 		return nil, true
 	}
 	return nil, false
@@ -905,11 +956,9 @@ func (a *App) openSessionInFocusLaunch(sess *agent.Session) bool {
 			target = ag
 		}
 	}
-	a.focusLaunchAgent = target
-	a.focusLaunchSession = sess
-	a.dashboard.panelFocus = focusLaunch
+	a.openLaunchPanel(sess, target)
 	a.dashboard.scrollOffset = 0
-	a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+	target.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 	return true
 }
 
@@ -922,28 +971,28 @@ func (a App) View() tea.View {
 
 	switch a.view {
 	case ViewDashboard:
-		if a.dashboard.panelFocus == focusReview && a.reviewPanel != nil {
+		if rp := a.modals.Review(); rp != nil {
 			var panelStr string
 			if a.prComposeModal.Active() {
 				panelStr = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
 			} else {
-				panelStr = a.reviewPanel.View(a.panelServices())
+				panelStr = rp.View(a.panelServices())
 			}
 			v := tea.NewView(panelStr)
 			v.AltScreen = true
 			return v
 		}
-		if a.dashboard.panelFocus == focusShipping && a.shippingPanel != nil {
-			panel := a.shippingPanel.View(a.panelServices())
-			if a.shippingPanel.NoteActive() {
-				panel = lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, a.shippingPanel.NoteView())
+		if sp := a.modals.Shipping(); sp != nil {
+			panel := sp.View(a.panelServices())
+			if sp.NoteActive() {
+				panel = lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, sp.NoteView())
 			}
 			v := tea.NewView(panel)
 			v.AltScreen = true
 			return v
 		}
-		if a.dashboard.panelFocus == focusPlanEditor && a.planEditor != nil {
-			v := tea.NewView(a.planEditor.View())
+		if pe := a.modals.PlanEditor(); pe != nil {
+			v := tea.NewView(pe.View())
 			v.AltScreen = true
 			return v
 		}
@@ -1062,8 +1111,7 @@ func (a App) View() tea.View {
 	v.AltScreen = true
 	if a.view == ViewDashboard {
 		v.MouseMode = tea.MouseModeCellMotion
-		if a.dashboard.panelFocus == focusLaunch && a.dashboard.scrollOffset == 0 && a.focusLaunchAgent != nil {
-			ag := a.focusLaunchAgent
+		if ag := a.modals.LaunchAgent(); ag != nil && a.dashboard.scrollOffset == 0 {
 			if !ag.IsAltScreen() && ag.CursorVisible() {
 				cursorX, cursorY := ag.CursorPosition()
 				dashboardTopY := 0

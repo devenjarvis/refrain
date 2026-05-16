@@ -37,16 +37,16 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 	// Resize agent terminals to match their current display container.
 	if a.view == ViewDashboard {
 		a.resizeAllForDashboard()
-		if a.dashboard.panelFocus == focusLaunch && a.focusLaunchAgent != nil {
-			a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+		if ag := a.modals.LaunchAgent(); ag != nil {
+			ag.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 		}
-		if a.dashboard.panelFocus == focusPlanEditor && a.planEditor != nil {
-			a.planEditor.SetSize(msg.Width, msg.Height-1)
+		if pe := a.modals.PlanEditor(); pe != nil {
+			pe.SetSize(msg.Width, msg.Height-1)
 		}
 		a.promptModal.SetSize(msg.Width, msg.Height-1)
 		a.prComposeModal.SetSize(msg.Width, msg.Height-1)
-		if a.shippingPanel != nil {
-			a.shippingPanel.Resize(msg.Width, msg.Height-1)
+		if sp := a.modals.Shipping(); sp != nil {
+			sp.Resize(msg.Width, msg.Height-1)
 		}
 	}
 	return a
@@ -224,7 +224,7 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	} else if a.wellness.focusSessionMinutes > 0 &&
-		a.dashboard.panelFocus == focusList &&
+		a.modals.IsList() &&
 		time.Since(a.wellness.sessionStart) >= time.Duration(a.wellness.focusSessionMinutes)*time.Minute {
 		// Auto-enter break when the work block elapses. The asymmetry
 		// with break-end (which waits for explicit `b`) is intentional:
@@ -282,7 +282,7 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 				// The focusLaunch agent renders fullscreen, so resize it
 				// to the fullscreen dimensions instead of shrinking it
 				// back to the preview size.
-				if a.focusLaunchAgent != nil && item.agent.ID == a.focusLaunchAgent.ID {
+				if launchAgent := a.modals.LaunchAgent(); launchAgent != nil && item.agent.ID == launchAgent.ID {
 					item.agent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 				} else {
 					item.agent.Resize(fixedH, fixedW)
@@ -419,8 +419,8 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 	// If the editor is open on the session whose drafting/revising just
 	// landed, refresh its content + state so the placeholder swaps to
 	// the rendered plan without requiring a re-open.
-	if msg.event.Type == agent.EventStatusChanged && a.planEditor != nil &&
-		a.planEditor.sess != nil && a.planEditor.sess.ID == msg.event.SessionID {
+	if pe := a.modals.PlanEditor(); msg.event.Type == agent.EventStatusChanged && pe != nil &&
+		pe.sess != nil && pe.sess.ID == msg.event.SessionID {
 		// Read both flags up-front so the Reload decision sees a coherent
 		// snapshot. RevisePlan emits EventStatusChanged synchronously with
 		// IsRevising=true (before runRevise spawns), so a naive
@@ -428,16 +428,16 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 		// the revise banner appears. Only Reload when neither subprocess
 		// is in flight — that's the single state where plan.md is stable
 		// and the editor view should reflect disk.
-		drafting := a.planEditor.sess.IsDrafting()
-		revising := a.planEditor.sess.IsRevising()
-		a.planEditor.SetDrafting(drafting)
-		a.planEditor.SetRevising(revising)
+		drafting := pe.sess.IsDrafting()
+		revising := pe.sess.IsRevising()
+		pe.SetDrafting(drafting)
+		pe.SetRevising(revising)
 		if !drafting && !revising {
-			a.planEditor.Reload()
-			if derr := a.planEditor.sess.DraftError(); derr != nil {
-				a.planEditor.SetError("draft failed: " + derr.Error())
-			} else if rerr := a.planEditor.sess.ReviseError(); rerr != nil {
-				a.planEditor.SetError("revise failed: " + rerr.Error())
+			pe.Reload()
+			if derr := pe.sess.DraftError(); derr != nil {
+				pe.SetError("draft failed: " + derr.Error())
+			} else if rerr := pe.sess.ReviseError(); rerr != nil {
+				pe.SetError("revise failed: " + rerr.Error())
 			}
 		}
 	}
@@ -473,9 +473,7 @@ func (a App) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 			if item.kind == listItemAgent && item.agent != nil && item.agent.ID == msg.agentID {
 				a.dashboard.selected = i
 				if !msg.skipFocusLaunch {
-					a.focusLaunchAgent = item.agent
-					a.focusLaunchSession = item.session
-					a.dashboard.panelFocus = focusLaunch
+					a.openLaunchPanel(item.session, item.agent)
 					a.dashboard.scrollOffset = 0
 					item.agent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 				}
@@ -511,10 +509,8 @@ func (a App) handleKillResult(msg killResultMsg) (tea.Model, tea.Cmd) {
 		delete(a.closingAgents, msg.agentID)
 		delete(a.lastKnownStatus, msg.agentID)
 		// Exit focusLaunch if the killed agent is the one being viewed.
-		if a.focusLaunchAgent != nil && a.focusLaunchAgent.ID == msg.agentID {
-			a.focusLaunchAgent = nil
-			a.focusLaunchSession = nil
-			a.dashboard.panelFocus = focusList
+		if ag := a.modals.LaunchAgent(); ag != nil && ag.ID == msg.agentID {
+			a.closeModal()
 			a.dashboard.scrollOffset = 0
 		}
 	case killScopeSession:
@@ -522,10 +518,8 @@ func (a App) handleKillResult(msg killResultMsg) (tea.Model, tea.Cmd) {
 		for _, id := range msg.agentIDs {
 			delete(a.closingAgents, id)
 			delete(a.lastKnownStatus, id)
-			if a.focusLaunchAgent != nil && a.focusLaunchAgent.ID == id {
-				a.focusLaunchAgent = nil
-				a.focusLaunchSession = nil
-				a.dashboard.panelFocus = focusList
+			if ag := a.modals.LaunchAgent(); ag != nil && ag.ID == id {
+				a.closeModal()
 				a.dashboard.scrollOffset = 0
 			}
 		}

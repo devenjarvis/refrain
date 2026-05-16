@@ -212,19 +212,20 @@ func appInFocusLaunch(t *testing.T) (App, *agent.Session, *agent.Agent) {
 	t.Helper()
 	app, sess, _ := appWithSeededSession(t, agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("primary", false, agent.StatusIdle)
-	app.focusLaunchAgent = ag
-	app.focusLaunchSession = sess
-	app.dashboard.panelFocus = focusLaunch
+	app.openLaunchPanel(sess, ag)
 	return app, sess, ag
 }
 
 func TestFocusLaunch_NilAgent_RoutesBackToList(t *testing.T) {
-	// Pinned: app.go:2425-2429 returns to focusList when focusLaunchAgent is
+	// Pinned: updateFocusLaunchKeys returns to focusList when LaunchAgent() is
 	// nil. Guards against an accidental nil-check removal that would crash
 	// on any subsequent key.
 	app, _, _ := appWithSeededSession(t, agent.LifecycleInProgress)
-	app.dashboard.panelFocus = focusLaunch
-	app.focusLaunchAgent = nil
+	// Force panelFocus into focusLaunch with no agent by reaching into Modals
+	// directly — production code can't construct this state, but the guard at
+	// the top of updateFocusLaunchKeys must still handle it.
+	app.modals.OpenLaunch(nil, nil)
+	app.syncModalsToDashboard()
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
