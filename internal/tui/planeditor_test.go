@@ -671,6 +671,225 @@ func TestPlanEditor_R_NoopWhenNoOriginalPrompt(t *testing.T) {
 	}
 }
 
+func TestPlanEditor_JK_ScrollLines(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	// Long plan so we have scroll travel.
+	var sb strings.Builder
+	sb.WriteString("# Goal\nDo X\n\n## Spec\n")
+	for i := 0; i < 60; i++ {
+		sb.WriteString("line ")
+		sb.WriteString(strings.Repeat(".", 5))
+		sb.WriteString("\n")
+	}
+	if err := sess.WritePlan(sb.String()); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	if editor.scrollOff != 0 {
+		t.Fatalf("scrollOff = %d, want 0 initially", editor.scrollOff)
+	}
+	editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if editor.scrollOff != 1 {
+		t.Errorf("after j, scrollOff = %d, want 1", editor.scrollOff)
+	}
+	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	if editor.scrollOff != 0 {
+		t.Errorf("after k, scrollOff = %d, want 0", editor.scrollOff)
+	}
+	// down/up are aliases for j/k.
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if editor.scrollOff != 1 {
+		t.Errorf("after down, scrollOff = %d, want 1", editor.scrollOff)
+	}
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if editor.scrollOff != 0 {
+		t.Errorf("after up, scrollOff = %d, want 0", editor.scrollOff)
+	}
+}
+
+func TestPlanEditor_K_AtTop_ClampedToZero(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	if err := sess.WritePlan("# Goal\n\n## Spec\nbody\n"); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	if editor.scrollOff != 0 {
+		t.Errorf("k at top moved scroll, got %d, want 0", editor.scrollOff)
+	}
+}
+
+func TestPlanEditor_CtrlD_CtrlU_HalfPage(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	var sb strings.Builder
+	sb.WriteString("# Goal\n")
+	for i := 0; i < 60; i++ {
+		sb.WriteString("line\n")
+	}
+	if err := sess.WritePlan(sb.String()); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	editor.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if editor.scrollOff == 0 {
+		t.Errorf("ctrl+d did not scroll")
+	}
+	pre := editor.scrollOff
+	editor.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	if editor.scrollOff >= pre {
+		t.Errorf("ctrl+u did not reverse scroll: pre=%d post=%d", pre, editor.scrollOff)
+	}
+}
+
+func TestPlanEditor_GHomeAndShiftGEnd_Jump(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	var sb strings.Builder
+	sb.WriteString("# Goal\n")
+	for i := 0; i < 60; i++ {
+		sb.WriteString("line\n")
+	}
+	if err := sess.WritePlan(sb.String()); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	// G jumps to bottom.
+	editor.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	if editor.scrollOff == 0 {
+		t.Errorf("G did not move scroll")
+	}
+	// g jumps back to top.
+	editor.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if editor.scrollOff != 0 {
+		t.Errorf("g did not jump to top, got %d", editor.scrollOff)
+	}
+	// home/end aliases.
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	if editor.scrollOff == 0 {
+		t.Errorf("end did not move scroll")
+	}
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	if editor.scrollOff != 0 {
+		t.Errorf("home did not jump to top, got %d", editor.scrollOff)
+	}
+}
+
+func TestPlanEditor_U_NothingToUndo_ShowsInlineError(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	if err := sess.WritePlan("# Goal\n"); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	editor.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
+	if editor.errMsg == "" {
+		t.Error("u with no prev plan should set an inline error message")
+	}
+	if !strings.Contains(editor.errMsg, "nothing to undo") {
+		t.Errorf("errMsg = %q, want it to contain 'nothing to undo'", editor.errMsg)
+	}
+}
+
+func TestPlanEditor_DraftingState_BlocksAllExceptEscAndQ(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	if err := sess.WritePlan("# Goal\nDo X\n"); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	editor.drafting = true
+	editor.scrollOff = 0
+
+	// Try a bunch of keys; they should all be no-ops.
+	for _, k := range []tea.KeyPressMsg{
+		{Code: 'j', Text: "j"},
+		{Code: 'k', Text: "k"},
+		{Code: 'G', Text: "G"},
+		{Code: 'i', Text: "i"},
+		{Code: 'a', Text: "a"},
+		{Code: 'r', Text: "r"},
+		{Code: 'R', Text: "R"},
+		{Code: 'u', Text: "u"},
+		{Code: tea.KeyTab},
+	} {
+		editor.Update(k)
+	}
+	if editor.scrollOff != 0 {
+		t.Errorf("scroll changed during drafting, got %d", editor.scrollOff)
+	}
+	if editor.mode != planEditorModeScroll {
+		t.Errorf("mode changed during drafting to %v", editor.mode)
+	}
+	if editor.errMsg != "" {
+		t.Errorf("errMsg set during drafting: %q", editor.errMsg)
+	}
+}
+
+func TestPlanEditor_ReviseInput_EnterOnEmpty_ShowsError(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	if err := sess.WritePlan("# Goal\n"); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if editor.mode != planEditorModeReviseInput {
+		t.Fatalf("test prereq: mode = %v, want reviseInput", editor.mode)
+	}
+	editor.reviseInput.SetValue("   ")
+	cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		if _, bad := cmd().(planEditorReviseMsg); bad {
+			t.Error("empty critique should NOT emit reviseMsg")
+		}
+	}
+	if editor.errMsg == "" {
+		t.Error("empty critique should set an inline error")
+	}
+}
+
+func TestPlanEditor_ReviseInput_EscCancels(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	if err := sess.WritePlan("# Goal\n"); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	editor.reviseInput.SetValue("partial input")
+	cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd != nil {
+		if _, bad := cmd().(planEditorReviseMsg); bad {
+			t.Error("esc in revise mode must not emit reviseMsg")
+		}
+	}
+	if editor.mode != planEditorModeScroll {
+		t.Errorf("esc should return to scroll mode, got %v", editor.mode)
+	}
+}
+
+func TestPlanEditor_ScrollMode_UnknownKey_NoOp(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	if err := sess.WritePlan("# Goal\nDo X\n"); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	before := struct {
+		scroll int
+		mode   planEditorMode
+		err    string
+		dirty  bool
+	}{editor.scrollOff, editor.mode, editor.errMsg, editor.dirty}
+	cmd := editor.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	if cmd != nil {
+		t.Errorf("unknown key produced cmd %T, want nil", cmd())
+	}
+	after := struct {
+		scroll int
+		mode   planEditorMode
+		err    string
+		dirty  bool
+	}{editor.scrollOff, editor.mode, editor.errMsg, editor.dirty}
+	if before != after {
+		t.Errorf("unknown key changed state: before=%+v after=%+v", before, after)
+	}
+}
+
 func TestPlanEditor_R_NoopWhenDrafting(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	sess.SetDraftError(errors.New("boom"))
