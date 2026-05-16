@@ -309,7 +309,7 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 	var diffCmd tea.Cmd
 	if sess := a.dashboard.selectedSession(); sess != nil {
 		entry := a.diffStatsCache[sess.ID]
-		stale := entry == nil || time.Since(entry.lastRefresh) > 5*time.Second
+		stale := entry == nil || time.Since(entry.lastRefresh) > DiffStatsCacheTTL
 		if (stale || idleTransition) && !a.diffRefreshInFlight {
 			diffCmd = a.refreshDiffStatsCmd()
 		}
@@ -408,7 +408,7 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 			ps = &prSessionState{}
 			a.prPollStates[msg.event.SessionID] = ps
 		}
-		ps.burstUntil = time.Now().Add(60 * time.Second)
+		ps.burstUntil = time.Now().Add(PRPollBurstAfterCreate)
 		ps.lastPoll = time.Time{}
 		// Clearing lastRemoteSHA forces getRemoteSHA to re-check against
 		// the new branch name on the next tick instead of comparing against

@@ -51,7 +51,7 @@ func (a App) handlePRCreated(msg prCreatedMsg) (tea.Model, tea.Cmd) {
 	a.updateDashboardPRCache()
 	// Re-arm a burst poll so the new PR is discovered quickly.
 	if ps := a.prPollStates[msg.sessionID]; ps != nil {
-		ps.burstUntil = time.Now().Add(60 * time.Second)
+		ps.burstUntil = time.Now().Add(PRPollBurstAfterCreate)
 	}
 	// Auto-open in browser if configured.
 	repoPath := a.repoPathForSession(msg.sessionID)
@@ -116,7 +116,7 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 	// Arm a short burst so the unknown → known transition resolves promptly.
 	// Use max semantics to preserve a longer push burst that may already be active.
 	if ps != nil && (msg.pr.MergeableState == "" || msg.pr.MergeableState == "unknown") {
-		if newBurst := time.Now().Add(15 * time.Second); newBurst.After(ps.burstUntil) {
+		if newBurst := time.Now().Add(PRPollBurstUnknownMergeable); newBurst.After(ps.burstUntil) {
 			ps.burstUntil = newBurst
 		}
 	}
@@ -173,7 +173,7 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 		newState := msg.checks.State
 		if prevState == "pending" && (newState == "success" || newState == "failure") {
 			// Flash the session row.
-			ps.flashUntil = time.Now().Add(2 * time.Second)
+			ps.flashUntil = time.Now().Add(PRCIFlashDuration)
 			if newState == "success" {
 				ps.flashColor = "success"
 			} else {
@@ -230,8 +230,8 @@ func (a App) handleMergePR(msg mergePRMsg) (tea.Model, tea.Cmd) {
 
 func (a *App) pollAllSessions() []tea.Cmd {
 	const (
-		maxConcurrent    = 3
-		shaCheckInterval = 2 * time.Second
+		maxConcurrent    = MaxConcurrentPRPolls
+		shaCheckInterval = PRSHACheckInterval
 	)
 
 	var cmds []tea.Cmd
@@ -288,7 +288,7 @@ outer:
 				// SHA changed — arm a burst so the next minute of polls runs
 				// on the short (2s) cadence, then fall through to schedule an
 				// immediate poll.
-				ps.burstUntil = now.Add(60 * time.Second)
+				ps.burstUntil = now.Add(PRPollBurstAfterCreate)
 			}
 
 			ps.lastPoll = now
@@ -322,21 +322,21 @@ func (a *App) prPollInterval(sessionID string, ps *prSessionState) time.Duration
 	// Event-driven burst (branch rename, new push): poll aggressively for a
 	// short window so state transitions become visible within ~2s.
 	if ps != nil && time.Now().Before(ps.burstUntil) {
-		return 2 * time.Second
+		return PRPollDuringBurst
 	}
 	entry := a.prCache[sessionID]
 	// No PR found yet but branch may have been pushed.
 	if entry == nil || entry.pr == nil {
 		if ps.lastRemoteSHA != "" {
-			return 10 * time.Second // branch pushed, waiting for PR
+			return PRPollAfterPush // branch pushed, waiting for PR
 		}
-		return 30 * time.Second // stable, no activity
+		return PRPollStable // stable, no activity
 	}
 	// PR exists — adapt based on check state.
 	if entry.checks != nil && entry.checks.State == "pending" {
-		return 5 * time.Second
+		return PRPollCIPending
 	}
-	return 30 * time.Second
+	return PRPollStable
 }
 
 // getRemoteSHA runs `git rev-parse origin/<branch>` to detect pushes.
@@ -395,7 +395,7 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 	}
 	ghClient := a.ghClient
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), PRPollClientTimeout)
 		defer cancel()
 
 		rawURL, err := git.GetRemoteURL(repoPath)
@@ -547,7 +547,7 @@ func (a *App) mergePRCmdWithMode(sessionID string, force bool) tea.Cmd {
 	}
 	prNum := entry.pr.Number
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), PRPollClientTimeout)
 		defer cancel()
 		rawURL, err := git.GetRemoteURL(repoPath)
 		if err != nil {
@@ -595,7 +595,7 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 	sessionID := sess.ID
 
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), PRPollParentTimeout)
 		defer cancel()
 
 		// Resolve owner/repo from the parent repo's remote URL.

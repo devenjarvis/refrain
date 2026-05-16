@@ -104,7 +104,7 @@ func (f *fakeManager) CreateSessionWithCommand(_ agent.Config, _ func(string) *e
 	return nil, nil, nil
 }
 
-func (f *fakeManager) CreateSessionOnBranch(_ string, _ string, _ agent.Config) (*agent.Session, *agent.Agent, error) {
+func (f *fakeManager) CreateSessionOnBranch(_, _ string, _ agent.Config) (*agent.Session, *agent.Agent, error) {
 	return nil, nil, nil
 }
 
@@ -132,11 +132,11 @@ func (f *fakeManager) KillSession(sessionID string) error {
 
 func (f *fakeManager) ResumeSession(_ state.SessionState, _ agent.Config) error { return nil }
 
-func (f *fakeManager) StartDraft(_ string, _ string) error              { return nil }
-func (f *fakeManager) RevisePlan(_ string, _ string) error              { return nil }
-func (f *fakeManager) SetPlanDrafter(_ agent.PlanDrafter)               {}
-func (f *fakeManager) ReviewerAgent() agent.ReviewerAgent               { return nil }
-func (f *fakeManager) ReconcileExternalBranchRename(_ string, _ string) {}
+func (f *fakeManager) StartDraft(_, _ string) error              { return nil }
+func (f *fakeManager) RevisePlan(_, _ string) error              { return nil }
+func (f *fakeManager) SetPlanDrafter(_ agent.PlanDrafter)        {}
+func (f *fakeManager) ReviewerAgent() agent.ReviewerAgent        { return nil }
+func (f *fakeManager) ReconcileExternalBranchRename(_, _ string) {}
 
 func (f *fakeManager) UpdateSettings(s config.ResolvedSettings) {
 	f.updateSettings = append(f.updateSettings, s)

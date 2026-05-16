@@ -329,7 +329,7 @@ func initAppCmd() tea.Cmd {
 }
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(DashboardTickInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
@@ -517,10 +517,11 @@ func (a *App) resizeAllForDashboard() {
 	}
 }
 
-// setError sets an error message that displays for ~3 seconds (30 ticks at 100ms).
+// setError sets an error message that displays for ErrorOverlayTicks of the
+// dashboard tick (~3 seconds at the current 100ms tick interval).
 func (a *App) setError(msg string) {
 	a.err = msg
-	a.errTicks = 30
+	a.errTicks = ErrorOverlayTicks
 }
 
 // activeRepoDisplayName returns the display name for the active repo (alias or base path).
