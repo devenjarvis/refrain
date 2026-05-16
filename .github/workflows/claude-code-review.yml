@@ -42,7 +42,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: "--model claude-haiku-4-5-20251001 --max-turns 4"
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} for SECURITY issues ONLY.
@@ -77,7 +77,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: "--model claude-haiku-4-5-20251001 --max-turns 4"
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} for PERFORMANCE issues ONLY.
@@ -108,7 +108,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: "--model claude-haiku-4-5-20251001 --max-turns 4"
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} for TEST COVERAGE issues ONLY.
@@ -138,7 +138,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: "--model claude-haiku-4-5-20251001 --max-turns 4"
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} for CORRECTNESS / LOGIC issues ONLY.
@@ -183,7 +183,7 @@ jobs:
         run: ls -la /tmp/findings || true
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: "--model claude-haiku-4-5-20251001 --max-turns 10"
           prompt: |
             You are the final reviewer for PR #${{ github.event.pull_request.number }}.
