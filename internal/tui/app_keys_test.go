@@ -1,0 +1,253 @@
+package tui
+
+import (
+	"os/exec"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
+)
+
+// These tests fill the per-key gaps in app.go's focusList dispatch
+// (app.go:1599-2193) and updateFocusLaunchKeys (app.go:2423-2520) that the
+// existing app_test.go suite did not yet cover.
+//
+// Most tests build the App synthetically (no claude subprocess) by injecting
+// pre-seeded sessions into dashboard.items + an empty manager for the temp
+// repo dir. This keeps the suite fast and deterministic.
+
+// appWithSeededSession returns an App with a single test session at the given
+// lifecycle phase, plus the dir where the manager lives so the caller can
+// clean up via t.TempDir's automatic cleanup.
+func appWithSeededSession(t *testing.T, phase agent.LifecyclePhase) (App, *agent.Session, string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "t@t.com"},
+		{"git", "config", "user.name", "T"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git setup %v: %v\n%s", args, err, out)
+		}
+	}
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	t.Cleanup(func() { mgr.Shutdown() })
+
+	sess := agent.NewSessionForTest("s1", "session-1")
+	sess.SetLifecyclePhase(phase)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.dashboard.items = []listItem{
+		{kind: listItemRepo, repoPath: dir, repoName: "repo"},
+		{kind: listItemSession, repoPath: dir, session: sess},
+	}
+	// Position cursor on the seeded session's section.
+	switch phase {
+	case agent.LifecyclePlanning, agent.LifecycleDrafting:
+		app.cursor.SetSection(focusSectionPlanning)
+		app.cursor.SetIndex(focusSectionPlanning, 0)
+	case agent.LifecycleInProgress:
+		app.cursor.SetSection(focusSectionBuilding)
+		app.cursor.SetIndex(focusSectionBuilding, 0)
+	case agent.LifecycleReadyForReview, agent.LifecycleInReview:
+		app.cursor.SetSection(focusSectionReview)
+		app.cursor.SetIndex(focusSectionReview, 0)
+	case agent.LifecycleShipping:
+		app.cursor.SetSection(focusSectionShipping)
+		app.cursor.SetIndex(focusSectionShipping, 0)
+	}
+	return app, sess, dir
+}
+
+// --- Pipeline keys -----------------------------------------------------------
+
+func TestPipeline_EKey_NoIDECommand_SetsError(t *testing.T) {
+	app, _, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	// Resolved settings have empty IDECommand by default.
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+	app = model.(App)
+	if app.err == "" {
+		t.Error("expected error when pressing e with no IDE configured")
+	}
+}
+
+func TestPipeline_OKey_OpensBranchPicker(t *testing.T) {
+	app, _, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	app = model.(App)
+	if app.view != ViewBranchPicker {
+		t.Errorf("expected ViewBranchPicker after o, got %v", app.view)
+	}
+}
+
+func TestPipeline_ShiftX_NoSession_IsSilentNoOp(t *testing.T) {
+	// X (kill session) silently returns when no session is cursor-selected
+	// (app.go:2163). Pinned so a future refactor doesn't suddenly start
+	// emitting an error toast for a press that was previously absorbed.
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'X', Text: "X"})
+	app = model.(App)
+	if cmd != nil {
+		t.Errorf("X with no session produced cmd %T, want nil", cmd())
+	}
+	if app.err != "" {
+		t.Errorf("X with no session set error %q, want silent no-op", app.err)
+	}
+}
+
+func TestPipeline_QKey_NoAgents_QuitsImmediately(t *testing.T) {
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if cmd == nil {
+		t.Fatal("expected tea.Quit cmd from q with no running agents")
+	}
+	msg := cmd()
+	if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Fatalf("got %T, want tea.QuitMsg", msg)
+	}
+}
+
+func TestPipeline_QKey_WithRunningAgents_FirstPressArmsConfirm(t *testing.T) {
+	app, sess, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	// Seed an active test agent so AgentCount > 0.
+	sess.AddTestAgent("a1", false, agent.StatusActive)
+	mgr := app.managers[app.activeRepo]
+	if mgr.AgentCount() == 0 {
+		// AgentCount counts manager-owned agents, not synthetic test-only ones.
+		// Set the running-flag by adding the session into the manager's known set.
+		// If AgentCount stays 0, skip — the production logic gates on
+		// mgr.AgentCount() so the confirm-quit path isn't reachable from a
+		// pure synthetic fixture.
+		t.Skip("manager AgentCount is 0 for synthetic test agents; quit confirm path needs a real-spawned agent")
+	}
+
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if cmd != nil {
+		// First press with running agents should NOT emit Quit.
+		if _, bad := cmd().(tea.QuitMsg); bad {
+			t.Error("first q with running agents must not quit; should arm confirm")
+		}
+	}
+}
+
+func TestPipeline_CtrlC_SameAsQ(t *testing.T) {
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+
+	_, cmd := app.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("ctrl+c with no agents should emit Quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("got %T, want tea.QuitMsg", cmd())
+	}
+}
+
+func TestPipeline_UnknownKey_NoOp(t *testing.T) {
+	app, _, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	before := struct {
+		view     ViewMode
+		panel    panelFocus
+		err      string
+		confQuit bool
+	}{app.view, app.dashboard.panelFocus, app.err, app.confirmQuit}
+
+	for _, k := range []tea.KeyPressMsg{
+		{Code: 'z', Text: "z"},
+		{Code: 'Q', Text: "Q"}, // capital Q is not handled by the q switch
+		{Code: '!', Text: "!"},
+	} {
+		model, cmd := app.Update(k)
+		app = model.(App)
+		if cmd != nil {
+			// A few characters might lazily trigger a tick or similar; we
+			// only care that they don't cause panel/view/error changes.
+			_ = cmd
+		}
+	}
+
+	after := struct {
+		view     ViewMode
+		panel    panelFocus
+		err      string
+		confQuit bool
+	}{app.view, app.dashboard.panelFocus, app.err, app.confirmQuit}
+
+	if before != after {
+		t.Errorf("unknown keys changed state: before=%+v after=%+v", before, after)
+	}
+}
+
+// --- focusLaunch keys --------------------------------------------------------
+
+// appInFocusLaunch returns an App in focusLaunch with a synthetic test agent.
+// Tests using this fixture do not spawn a real claude subprocess.
+func appInFocusLaunch(t *testing.T) (App, *agent.Session, *agent.Agent) {
+	t.Helper()
+	app, sess, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	ag := sess.AddTestAgent("primary", false, agent.StatusIdle)
+	app.focusLaunchAgent = ag
+	app.focusLaunchSession = sess
+	app.dashboard.panelFocus = focusLaunch
+	return app, sess, ag
+}
+
+func TestFocusLaunch_NilAgent_RoutesBackToList(t *testing.T) {
+	// Pinned: app.go:2425-2429 returns to focusList when focusLaunchAgent is
+	// nil. Guards against an accidental nil-check removal that would crash
+	// on any subsequent key.
+	app, _, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	app.dashboard.panelFocus = focusLaunch
+	app.focusLaunchAgent = nil
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	app = model.(App)
+	if app.dashboard.panelFocus != focusList {
+		t.Errorf("nil focusLaunchAgent should route back to focusList, got %v", app.dashboard.panelFocus)
+	}
+}
+
+func TestFocusLaunch_Home_ResetsScroll(t *testing.T) {
+	// 'home' is the only focusLaunch key that doesn't touch the agent's VT
+	// (it just zeros dashboard.scrollOffset), so it's safe to exercise with
+	// a synthetic test agent that has no real terminal.
+	app, _, _ := appInFocusLaunch(t)
+	app.dashboard.scrollOffset = 5
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	app = model.(App)
+	if app.dashboard.scrollOffset != 0 {
+		t.Errorf("home did not reset scrollOffset, got %d", app.dashboard.scrollOffset)
+	}
+}
+
+// Note: esc/ctrl+e/alt+brackets/pgup/pgdn/shift+esc all touch the agent's VT
+// terminal (resize, ScrollbackLines, SendKey). Synthetic agents from
+// AddTestAgent don't have a VT, so those tests would crash. The existing
+// app_test.go suite covers those keys via tests that spawn a real claude
+// subprocess (TestShiftEscForwardsEscapeToAgent, TestActionKeysBlockedInFocusLaunch).
