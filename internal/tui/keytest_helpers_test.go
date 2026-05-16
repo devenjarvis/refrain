@@ -33,11 +33,6 @@ func keyCtrlRune(r rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl}
 }
 
-// keyAltRune constructs an alt+<letter> key press.
-func keyAltRune(r rune) tea.KeyPressMsg {
-	return tea.KeyPressMsg{Code: r, Mod: tea.ModAlt}
-}
-
 // keyNamed constructs a named-key press (e.g. tea.KeyEscape, tea.KeyPgDown).
 // msg.String() returns the keystroke form ("esc", "pgdown", etc.).
 func keyNamed(code rune) tea.KeyPressMsg {
@@ -47,16 +42,6 @@ func keyNamed(code rune) tea.KeyPressMsg {
 // keyShiftNamed constructs shift+<named-key>.
 func keyShiftNamed(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: code, Mod: tea.ModShift}
-}
-
-// runCmd invokes cmd (if non-nil) and returns its produced message. For
-// tea.BatchCmd / sequence commands the caller should use runCmdAll instead.
-func runCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
-	t.Helper()
-	if cmd == nil {
-		return nil
-	}
-	return cmd()
 }
 
 // runCmdAll recursively flattens tea.BatchMsg into a slice of concrete
