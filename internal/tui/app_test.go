@@ -1168,15 +1168,15 @@ func TestBacklogGate_WarnOnN(t *testing.T) {
 	// First n when no backlog — no warning, focusBacklogWarning stays false.
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
-	if app.focusBacklogWarning {
+	if app.wellness.focusBacklogWarning {
 		t.Error("focusBacklogWarning should not be set when backlog is below limit")
 	}
 
 	// Verify the warning is cleared when a non-n key is pressed after being set.
-	app.focusBacklogWarning = true
+	app.wellness.focusBacklogWarning = true
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.focusBacklogWarning {
+	if app.wellness.focusBacklogWarning {
 		t.Error("focusBacklogWarning should be cleared by a non-n key press")
 	}
 }
@@ -2807,13 +2807,13 @@ func TestBKey_OutsidePlanning_FallsThroughToBreak(t *testing.T) {
 	app, _, sessB, _, _ := makeFourPhaseApp(t)
 	app.cursor.SetSection(focusSectionBuilding)
 	app.cursor.SetIndex(focusSectionBuilding, 0)
-	if app.focusBreakMode {
+	if app.wellness.focusBreakMode {
 		t.Fatal("precondition: focusBreakMode should be false")
 	}
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	app = model.(App)
-	if !app.focusBreakMode {
+	if !app.wellness.focusBreakMode {
 		t.Fatal("expected 'b' outside Planning to engage the break overlay")
 	}
 	if sessB.LifecyclePhase() != agent.LifecycleInProgress {
@@ -2827,15 +2827,15 @@ func TestBKey_OutsidePlanning_FallsThroughToBreak(t *testing.T) {
 // press when focusBreakMode is true.
 func TestBKey_InBreakMode_FromPlanningCursor_ExitsBreak(t *testing.T) {
 	app, sessP, _, _, _ := makeFourPhaseApp(t)
-	app.focusBreakMode = true
-	app.focusBreakTimerUp = true // single-press clean exit
+	app.wellness.focusBreakMode = true
+	app.wellness.focusBreakTimerUp = true // single-press clean exit
 	// makeFourPhaseApp already sets focusCursorSection = focusSectionPlanning
 	app.cursor.SetIndex(focusSectionPlanning, 0)
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	app = model.(App)
 
-	if app.focusBreakMode {
+	if app.wellness.focusBreakMode {
 		t.Fatal("expected 'b' in break mode to exit the break overlay; focusBreakMode is still true")
 	}
 	if sessP.LifecyclePhase() != agent.LifecyclePlanning {
@@ -2864,14 +2864,14 @@ func TestTick_BreakDoesNotEnterWhilePanelOpen(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			app := NewApp()
-			app.focusSessionMinutes = 1
-			app.sessionStart = time.Now().Add(-2 * time.Minute) // long past deadline
+			app.wellness.focusSessionMinutes = 1
+			app.wellness.sessionStart = time.Now().Add(-2 * time.Minute) // long past deadline
 			app.dashboard.panelFocus = tc.focus
 
 			model, _ := app.Update(tickMsg(time.Now()))
 			app = model.(App)
 
-			if app.focusBreakMode {
+			if app.wellness.focusBreakMode {
 				t.Errorf("break entered while panelFocus=%v; expected deferral until focusList", tc.focus)
 			}
 		})
@@ -2883,14 +2883,14 @@ func TestTick_BreakDoesNotEnterWhilePanelOpen(t *testing.T) {
 // has elapsed.
 func TestTick_BreakEntersOnPipeline(t *testing.T) {
 	app := NewApp()
-	app.focusSessionMinutes = 1
-	app.sessionStart = time.Now().Add(-2 * time.Minute)
+	app.wellness.focusSessionMinutes = 1
+	app.wellness.sessionStart = time.Now().Add(-2 * time.Minute)
 	app.dashboard.panelFocus = focusList
 
 	model, _ := app.Update(tickMsg(time.Now()))
 	app = model.(App)
 
-	if !app.focusBreakMode {
+	if !app.wellness.focusBreakMode {
 		t.Error("expected break to enter when on pipeline past session deadline")
 	}
 }
@@ -3833,34 +3833,34 @@ func TestNKeyOpensPromptModal_WhenPlanFirstEnabled(t *testing.T) {
 func TestCreateResult_SessionsCreatedCount_OnlyIncrementsForNewSession(t *testing.T) {
 	app := NewApp()
 	app.activeRepo = "/repo"
-	if app.sessionsCreatedCount != 0 {
-		t.Fatalf("initial sessionsCreatedCount = %d, want 0", app.sessionsCreatedCount)
+	if app.wellness.sessionsCreatedCount != 0 {
+		t.Fatalf("initial sessionsCreatedCount = %d, want 0", app.wellness.sessionsCreatedCount)
 	}
 
 	// New session: counter ticks.
 	model, _ := app.Update(createResultMsg{sessionID: "s1", agentID: "a1", isNewSession: true})
 	app = model.(App)
-	if app.sessionsCreatedCount != 1 {
-		t.Errorf("after isNewSession=true, sessionsCreatedCount = %d, want 1", app.sessionsCreatedCount)
+	if app.wellness.sessionsCreatedCount != 1 {
+		t.Errorf("after isNewSession=true, sessionsCreatedCount = %d, want 1", app.wellness.sessionsCreatedCount)
 	}
 
 	// AddAgent into existing session: counter must NOT tick.
 	model, _ = app.Update(createResultMsg{sessionID: "s1", agentID: "a2"})
 	app = model.(App)
-	if app.sessionsCreatedCount != 1 {
-		t.Errorf("after AddAgent (isNewSession=false), sessionsCreatedCount = %d, want 1", app.sessionsCreatedCount)
+	if app.wellness.sessionsCreatedCount != 1 {
+		t.Errorf("after AddAgent (isNewSession=false), sessionsCreatedCount = %d, want 1", app.wellness.sessionsCreatedCount)
 	}
 
 	// Another fresh session: counter ticks again.
 	model, _ = app.Update(createResultMsg{sessionID: "s2", agentID: "a3", isNewSession: true})
 	app = model.(App)
-	if app.sessionsCreatedCount != 2 {
-		t.Errorf("after second new session, sessionsCreatedCount = %d, want 2", app.sessionsCreatedCount)
+	if app.wellness.sessionsCreatedCount != 2 {
+		t.Errorf("after second new session, sessionsCreatedCount = %d, want 2", app.wellness.sessionsCreatedCount)
 	}
 
 	// agentsCreatedCount sanity: every successful createResultMsg increments.
-	if app.agentsCreatedCount != 3 {
-		t.Errorf("agentsCreatedCount = %d, want 3", app.agentsCreatedCount)
+	if app.wellness.agentsCreatedCount != 3 {
+		t.Errorf("agentsCreatedCount = %d, want 3", app.wellness.agentsCreatedCount)
 	}
 }
 

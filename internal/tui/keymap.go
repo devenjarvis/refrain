@@ -1,5 +1,74 @@
 package tui
 
+import tea "charm.land/bubbletea/v2"
+
+// KeyMap groups action-keyed bindings for the dashboard. Each field lists the
+// `tea.KeyPressMsg.String()` values that trigger the action. Mapping by action
+// (not by key) keeps the dispatch switches readable, makes per-action testing
+// possible, and is the seam for future user-configurable rebindings.
+type KeyMap struct {
+	Quit         []string // detach and exit
+	Up           []string // pipeline cursor up
+	Down         []string // pipeline cursor down
+	Activate     []string // space/enter on cursor
+	OpenRepoCfg  []string // right/enter on a repo header
+	NextRepo     []string // cycle active repo
+	NewSession   []string // create a new session
+	AddAgent     []string // add an agent to the cursor's session
+	BuildAdvance []string // promote Planning → Building OR take a break
+	MarkReady    []string // mark Planning/Building → ReadyForReview
+	OpenReview   []string // open the review panel
+	OpenTerminal []string // open or focus shell terminal
+	OpenIDE      []string // open worktree in IDE
+	OpenPR       []string // open the session's PR (or push+draft)
+	OpenBranch   []string // open branch/PR picker
+	ManageRepos  []string // open repo picker in manage mode
+	AddRepo      []string // add a repo via filesystem browser
+	Settings     []string // open global settings overlay
+	OpenDiff     []string // open the diff view
+	KillAgent    []string // kill cursor session's primary agent
+	KillSession  []string // kill cursor session entirely
+}
+
+// DefaultKeyMap returns the production binding set. Keep this aligned with the
+// keybinding tables documented in README.md and CLAUDE.md.
+func DefaultKeyMap() KeyMap {
+	return KeyMap{
+		Quit:         []string{"q", "ctrl+c"},
+		Up:           []string{"up", "k"},
+		Down:         []string{"down", "j"},
+		Activate:     []string{"space", "enter"},
+		OpenRepoCfg:  []string{"enter", "right"},
+		NextRepo:     []string{"N"},
+		NewSession:   []string{"n"},
+		AddAgent:     []string{"c"},
+		BuildAdvance: []string{"b"},
+		MarkReady:    []string{"m"},
+		OpenReview:   []string{"r"},
+		OpenTerminal: []string{"t"},
+		OpenIDE:      []string{"e"},
+		OpenPR:       []string{"p"},
+		OpenBranch:   []string{"o"},
+		ManageRepos:  []string{"R"},
+		AddRepo:      []string{"a"},
+		Settings:     []string{"s"},
+		OpenDiff:     []string{"d"},
+		KillAgent:    []string{"x"},
+		KillSession:  []string{"X"},
+	}
+}
+
+// Match reports whether msg matches any of the strings bound to action.
+func (k KeyMap) Match(msg tea.KeyPressMsg, action []string) bool {
+	s := msg.String()
+	for _, b := range action {
+		if b == s {
+			return true
+		}
+	}
+	return false
+}
+
 // ViewMode represents the current TUI view.
 type ViewMode int
 
