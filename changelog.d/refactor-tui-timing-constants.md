@@ -1,0 +1,3 @@
+### Changed
+
+- Centralized TUI timing literals in `internal/tui/consts.go`. PR poller intervals (`PRPollBurstAfterCreate`, `PRPollDuringBurst`, `PRPollAfterPush`, `PRPollCIPending`, `PRPollStable`), the burst-on-unknown-mergeable window, the SHA-check throttle, the CI flash duration, the gh-client per-call and parent timeouts, the concurrent-poll cap, the dashboard tick cadence, the pipeline double-click window, the diff-stats cache TTL, and the error overlay duration are now named constants with doc comments explaining the cadence each value drives. Tuning a single behavior is now a one-place edit instead of a grep-and-replace across `update_pr.go`, `update_keys.go`, `update_lifecycle.go`, and `app.go`. No behavior change.

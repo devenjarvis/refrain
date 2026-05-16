@@ -138,7 +138,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.updateDashboardDiffStats()
 		if sess := a.dashboard.selectedSession(); sess != nil {
 			entry := a.diffStatsCache[sess.ID]
-			if (entry == nil || time.Since(entry.lastRefresh) > 5*time.Second) && !a.diffRefreshInFlight {
+			if (entry == nil || time.Since(entry.lastRefresh) > DiffStatsCacheTTL) && !a.diffRefreshInFlight {
 				diffCmd := a.refreshDiffStatsCmd()
 				return a, tea.Batch(cmd, diffCmd)
 			}
@@ -877,7 +877,7 @@ func (a App) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	// Move the cursor to the clicked session.
 	now := time.Now()
 	isDoubleClick := !a.lastPipelineClick.IsZero() &&
-		now.Sub(a.lastPipelineClick) < 500*time.Millisecond &&
+		now.Sub(a.lastPipelineClick) < PipelineDoubleClickWindow &&
 		a.lastPipelineClickSec == section &&
 		a.lastPipelineClickIdx == idx
 	a.lastPipelineClick = now
