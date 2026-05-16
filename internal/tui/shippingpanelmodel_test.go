@@ -18,7 +18,7 @@ func newTestShippingSvc() (PanelServices, *testShippingSvcState) {
 	svc := PanelServices{
 		Width:  120,
 		Height: 40,
-		ManagerFor: func(string) (*agent.Manager, string) {
+		ManagerFor: func(string) (SessionManager, string) {
 			return nil, ""
 		},
 		PRCache: func(string) *prCacheEntry { return state.pr },

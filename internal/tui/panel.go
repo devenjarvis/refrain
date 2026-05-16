@@ -42,7 +42,7 @@ type PanelServices struct {
 	DashboardTopY int
 
 	// Lookups.
-	ManagerFor  func(sessionID string) (mgr *agent.Manager, repoPath string)
+	ManagerFor  func(sessionID string) (mgr SessionManager, repoPath string)
 	Resolved    func(repoPath string) config.ResolvedSettings
 	GHClient    func() *github.Client
 	PRCache     func(sessionID string) *prCacheEntry

@@ -1,0 +1,3 @@
+### Changed
+
+- TUI now depends on a narrow `SessionManager` interface (`internal/tui/manager_iface.go`) rather than the concrete `*agent.Manager` pointer. `App.managers` is now `map[string]SessionManager`, `PanelServices.ManagerFor` returns a `SessionManager`, and the `listenEvents` / `listenPlannerQuestions` helpers accept the interface. A compile-time assertion (`var _ SessionManager = (*agent.Manager)(nil)`) guarantees `*agent.Manager` continues to satisfy the contract. The seam unlocks fast unit tests via the new `fakeManager` test helper, which implements the full interface without spinning up PTYs, git worktrees, or a hook socket.

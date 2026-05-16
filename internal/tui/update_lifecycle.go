@@ -110,7 +110,7 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 	// Build resume work to run in the background so the TUI renders immediately.
 	type resumeItem struct {
 		repoPath  string
-		mgr       *agent.Manager
+		mgr       SessionManager
 		resumeCfg agent.Config
 		sessions  []state.SessionState
 	}
@@ -181,7 +181,7 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 			for _, ri := range resumeItems {
 				for _, ss := range ri.sessions {
 					wg.Add(1)
-					go func(mgr *agent.Manager, ss state.SessionState, cfg agent.Config) {
+					go func(mgr SessionManager, ss state.SessionState, cfg agent.Config) {
 						defer wg.Done()
 						_ = mgr.ResumeSession(ss, cfg)
 					}(ri.mgr, ss, ri.resumeCfg)

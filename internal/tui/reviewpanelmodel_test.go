@@ -21,7 +21,7 @@ func newTestSvc() (PanelServices, *testServiceState) {
 	svc := PanelServices{
 		Width:  120,
 		Height: 40,
-		ManagerFor: func(string) (*agent.Manager, string) {
+		ManagerFor: func(string) (SessionManager, string) {
 			return nil, ""
 		},
 		Resolved:    func(string) config.ResolvedSettings { return config.ResolvedSettings{} },
@@ -134,7 +134,7 @@ func TestReviewPanelModel_CKeyMarksComplete(t *testing.T) {
 	// Wire ManagerFor to a non-nil-looking entry so the panel reaches the
 	// kill path. The actual manager pointer is not exercised here because
 	// KillSessionCmd is stubbed.
-	svc.ManagerFor = func(string) (*agent.Manager, string) {
+	svc.ManagerFor = func(string) (SessionManager, string) {
 		return &agent.Manager{}, "/repo"
 	}
 
@@ -490,7 +490,7 @@ func TestReviewPanelModel_EKey_NoIDECommand_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTestWithPath("s1", "fix-auth", t.TempDir())
 	panel := newReviewPanel(sess, 120, 40)
 	svc, state := newTestSvc()
-	svc.ManagerFor = func(string) (*agent.Manager, string) { return nil, "/repo" }
+	svc.ManagerFor = func(string) (SessionManager, string) { return nil, "/repo" }
 	svc.Resolved = func(string) config.ResolvedSettings {
 		return config.ResolvedSettings{IDECommand: ""}
 	}

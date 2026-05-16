@@ -133,7 +133,10 @@ type diffStatsEntry struct {
 
 // App is the root Bubble Tea model.
 type App struct {
-	managers     map[string]*agent.Manager
+	// managers is keyed by repo path. The value satisfies the narrow
+	// SessionManager interface (see manager_iface.go); production uses
+	// *agent.Manager but tests can inject a deterministic fake.
+	managers     map[string]SessionManager
 	activeRepo   string
 	cfg          *config.Config
 	repoBrowser  fileBrowserModel
@@ -284,7 +287,7 @@ func NewApp() App {
 		cursor:          NewFocusedCursor(),
 		keys:            DefaultKeyMap(),
 		wellness:        newWellnessState(),
-		managers:        make(map[string]*agent.Manager),
+		managers:        make(map[string]SessionManager),
 		repoSettings:    make(map[string]*config.RepoSettings),
 		resolvedCache:   make(map[string]config.ResolvedSettings),
 		lastKnownStatus: make(map[string]agent.Status),
@@ -331,7 +334,7 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func listenEvents(mgr *agent.Manager) tea.Cmd {
+func listenEvents(mgr SessionManager) tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-mgr.Events()
 		if !ok {
@@ -349,7 +352,7 @@ type plannerQuestionMsg struct {
 	repoPath string
 }
 
-func listenPlannerQuestions(mgr *agent.Manager) tea.Cmd {
+func listenPlannerQuestions(mgr SessionManager) tea.Cmd {
 	return func() tea.Msg {
 		q, ok := <-mgr.PlannerQuestions()
 		if !ok {
@@ -589,7 +592,7 @@ func (a *App) panelServices() PanelServices {
 		Width:         a.width,
 		Height:        a.height,
 		DashboardTopY: a.dashboardTopY(),
-		ManagerFor: func(sessionID string) (*agent.Manager, string) {
+		ManagerFor: func(sessionID string) (SessionManager, string) {
 			repoPath := a.repoPathForSession(sessionID)
 			if repoPath == "" {
 				return nil, ""
