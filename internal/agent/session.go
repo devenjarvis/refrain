@@ -25,28 +25,27 @@ type Session struct {
 	Worktree  *git.WorktreeInfo
 	CreatedAt time.Time
 
-	mu                  sync.RWMutex
-	agents              map[string]*Agent
-	nextAgentNum        int
-	displayName         string
-	hasClaudeName       bool // true once the session's branch has been renamed from its random placeholder
-	renaming            bool // true while an async branch-rename is in flight; gates double-dispatch
-	lifecyclePhase      LifecyclePhase
-	originalPrompt      string
-	doneAt              time.Time
-	ownsBranch          bool   // true if this session created the branch (cleanup should delete it)
-	hookSocketPath      string // absolute path to the manager's hook socket ("" disables hooks)
-	taskSummary         string // short summary of the session's task, set once by the summarizer goroutine
-	hasTaskSummary      bool   // true once SetTaskSummary has been called
-	summarizing         bool   // true while an async task-summary goroutine is in flight; gates double-dispatch
-	drafting            bool   // true while a plan-drafting subprocess is in flight; gates double-dispatch
-	draftCancel         context.CancelFunc
-	draftErr            error // last drafting error, surfaced by the Planning card; cleared on successful draft
-	draftAttemptCurrent int   // current attempt number (1-based); 0 outside a draft
-	draftAttemptMax     int   // max attempts for the current draft; 0 outside a draft
-	revising            bool  // true while a plan-revising subprocess is in flight; gates double-dispatch
-	reviseCancel        context.CancelFunc
-	reviseErr           error // last revise error, surfaced by the editor; cleared on successful revise
+	mu             sync.RWMutex
+	agents         map[string]*Agent
+	nextAgentNum   int
+	displayName    string
+	hasClaudeName  bool // true once the session's branch has been renamed from its random placeholder
+	lifecyclePhase LifecyclePhase
+	originalPrompt string
+	doneAt         time.Time
+	ownsBranch     bool   // true if this session created the branch (cleanup should delete it)
+	hookSocketPath string // absolute path to the manager's hook socket ("" disables hooks)
+	taskSummary    string // short summary of the session's task, set once by the summarizer goroutine
+	hasTaskSummary bool   // true once SetTaskSummary has been called
+	// Async-task state. Each asyncJob tracks one in-flight goroutine and is
+	// accessed under s.mu (the type carries no mutex of its own — see
+	// asyncjob.go). Adding a new async task is one asyncJob field plus the
+	// thin wrappers below; the cross-job exclusivity rules (e.g. revising
+	// blocked while drafting) live in the wrappers, not on the asyncJob.
+	renameJob  asyncJob // branch rename via Haiku
+	summaryJob asyncJob // task-summary via Haiku
+	draftJob   asyncJob // plan draft via Sonnet (uses attempt/max + cancel + err)
+	reviseJob  asyncJob // plan revise via Sonnet (uses cancel + err)
 	// Plan-content cache, keyed by the mtime of the last observed plan.md.
 	// Populated lazily by CachedPlan() on first read so resumed sessions
 	// also benefit. The dashboard hot path (per-render Building card) stats
@@ -493,7 +492,7 @@ func (s *Session) HasClaudeName() bool {
 func (s *Session) IsRenaming() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.renaming
+	return s.renameJob.running
 }
 
 // SetClaudeName marks whether this session has a Claude-derived branch name.
@@ -509,19 +508,15 @@ func (s *Session) SetClaudeName(v bool) {
 func (s *Session) TryStartRename() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.hasClaudeName || s.renaming {
-		return false
-	}
-	s.renaming = true
-	return true
+	return s.renameJob.tryStart(nil, s.hasClaudeName)
 }
 
 // finishRename clears the in-flight rename flag. Called from the deferred
 // cleanup of the goroutine spawned after TryStartRename returns true.
 func (s *Session) finishRename() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.renaming = false
+	_ = s.renameJob.finish()
+	s.mu.Unlock()
 }
 
 // RenameBranch renames the session's git branch to newBranch. If the rename
@@ -737,26 +732,22 @@ func (s *Session) SetTaskSummary(summary string) {
 func (s *Session) TryStartTaskSummary() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.hasTaskSummary || s.summarizing {
-		return false
-	}
-	s.summarizing = true
-	return true
+	return s.summaryJob.tryStart(nil, s.hasTaskSummary)
 }
 
 // finishTaskSummary clears the in-flight summarizing flag. Called from the
 // deferred cleanup of the goroutine spawned after TryStartTaskSummary returns true.
 func (s *Session) finishTaskSummary() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.summarizing = false
+	_ = s.summaryJob.finish()
+	s.mu.Unlock()
 }
 
 // IsDrafting reports whether a plan-drafting subprocess is currently in flight.
 func (s *Session) IsDrafting() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.drafting
+	return s.draftJob.running
 }
 
 // TryStartDraft atomically returns true if a plan-drafting subprocess should
@@ -767,12 +758,7 @@ func (s *Session) IsDrafting() bool {
 func (s *Session) TryStartDraft(cancel context.CancelFunc) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.drafting {
-		return false
-	}
-	s.drafting = true
-	s.draftCancel = cancel
-	return true
+	return s.draftJob.tryStart(cancel, false)
 }
 
 // DraftAttempt returns the in-flight attempt counter as (current, max).
@@ -780,7 +766,7 @@ func (s *Session) TryStartDraft(cancel context.CancelFunc) bool {
 func (s *Session) DraftAttempt() (current, max int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.draftAttemptCurrent, s.draftAttemptMax
+	return s.draftJob.attempt, s.draftJob.maxAttempt
 }
 
 // SetDraftAttempt records the current retry attempt. Called by runDraftWithRetry
@@ -788,8 +774,8 @@ func (s *Session) DraftAttempt() (current, max int) {
 func (s *Session) SetDraftAttempt(current, max int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.draftAttemptCurrent = current
-	s.draftAttemptMax = max
+	s.draftJob.attempt = current
+	s.draftJob.maxAttempt = max
 }
 
 // finishDraft clears the in-flight draft flag and releases the stored cancel
@@ -799,11 +785,7 @@ func (s *Session) SetDraftAttempt(current, max int) {
 // last error stays on the session so the Planning card can show it.
 func (s *Session) finishDraft() {
 	s.mu.Lock()
-	cancel := s.draftCancel
-	s.drafting = false
-	s.draftCancel = nil
-	s.draftAttemptCurrent = 0
-	s.draftAttemptMax = 0
+	cancel := s.draftJob.finish()
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -816,7 +798,7 @@ func (s *Session) finishDraft() {
 // drain through finishDraft.
 func (s *Session) CancelDraft() {
 	s.mu.RLock()
-	cancel := s.draftCancel
+	cancel := s.draftJob.cancel
 	s.mu.RUnlock()
 	if cancel != nil {
 		cancel()
@@ -829,7 +811,7 @@ func (s *Session) CancelDraft() {
 func (s *Session) SetDraftError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.draftErr = err
+	s.draftJob.err = err
 }
 
 // DraftError returns the last drafting error, or nil if the most recent
@@ -837,14 +819,14 @@ func (s *Session) SetDraftError(err error) {
 func (s *Session) DraftError() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.draftErr
+	return s.draftJob.err
 }
 
 // IsRevising reports whether a plan-revising subprocess is currently in flight.
 func (s *Session) IsRevising() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.revising
+	return s.reviseJob.running
 }
 
 // TryStartRevise atomically returns true if a plan-revising subprocess should
@@ -855,21 +837,14 @@ func (s *Session) IsRevising() bool {
 func (s *Session) TryStartRevise(cancel context.CancelFunc) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.revising || s.drafting {
-		return false
-	}
-	s.revising = true
-	s.reviseCancel = cancel
-	return true
+	return s.reviseJob.tryStart(cancel, s.draftJob.running)
 }
 
 // finishRevise clears the in-flight revise flag and releases the stored cancel
 // func by invoking it (idempotent). Does NOT clear reviseErr.
 func (s *Session) finishRevise() {
 	s.mu.Lock()
-	cancel := s.reviseCancel
-	s.revising = false
-	s.reviseCancel = nil
+	cancel := s.reviseJob.finish()
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -881,7 +856,7 @@ func (s *Session) finishRevise() {
 // abort the subprocess promptly so the goroutine can drain through finishRevise.
 func (s *Session) CancelRevise() {
 	s.mu.RLock()
-	cancel := s.reviseCancel
+	cancel := s.reviseJob.cancel
 	s.mu.RUnlock()
 	if cancel != nil {
 		cancel()
@@ -893,7 +868,7 @@ func (s *Session) CancelRevise() {
 func (s *Session) SetReviseError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reviseErr = err
+	s.reviseJob.err = err
 }
 
 // ReviseError returns the last revise error, or nil if the most recent revise
@@ -901,7 +876,7 @@ func (s *Session) SetReviseError(err error) {
 func (s *Session) ReviseError() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.reviseErr
+	return s.reviseJob.err
 }
 
 // PlanTask is a single task item parsed from a plan file.

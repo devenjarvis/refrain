@@ -1534,175 +1534,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// focusLaunch: forward all keys to the launch agent; esc/ctrl+e returns to focus pipeline.
 		if a.dashboard.panelFocus == focusLaunch {
-			a.confirmQuit = false
-			if a.focusLaunchAgent == nil {
-				a.dashboard.panelFocus = focusList
-				a.dashboard.scrollOffset = 0
-				return a, nil
-			}
-			switch msg.String() {
-			case "esc", "ctrl+e":
-				a.resizeAgentForDashboard(a.focusLaunchAgent)
-				a.focusLaunchAgent = nil
-				a.focusLaunchSession = nil
-				a.dashboard.panelFocus = focusList
-				a.dashboard.scrollOffset = 0
-			case "shift+esc":
-				a.focusLaunchAgent.SendKey(xvt.KeyPressEvent{Code: tea.KeyEscape})
-			case "pgup":
-				sbLines := len(a.focusLaunchAgent.ScrollbackLines())
-				maxScroll := sbLines
-				a.dashboard.scrollOffset += a.dashboard.height / 2
-				if a.dashboard.scrollOffset > maxScroll {
-					a.dashboard.scrollOffset = maxScroll
-				}
-			case "pgdn":
-				a.dashboard.scrollOffset -= a.dashboard.height / 2
-				if a.dashboard.scrollOffset < 0 {
-					a.dashboard.scrollOffset = 0
-				}
-			case "home":
-				a.dashboard.scrollOffset = 0
-			case "alt+]", "alt+[":
-				if a.focusLaunchSession != nil {
-					agents := a.focusLaunchSession.Agents()
-					idx := 0
-					for i, ag := range agents {
-						if ag.ID == a.focusLaunchAgent.ID {
-							idx = i
-							break
-						}
-					}
-					if msg.String() == "alt+]" {
-						idx = (idx + 1) % len(agents)
-					} else {
-						idx = (idx - 1 + len(agents)) % len(agents)
-					}
-					a.focusLaunchAgent = agents[idx]
-					a.dashboard.scrollOffset = 0
-					a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
-				}
-			case "ctrl+t":
-				if a.focusLaunchSession != nil {
-					repoPath := a.repoPathForSession(a.focusLaunchSession.ID)
-					mgr := a.managers[repoPath]
-					if mgr != nil {
-						resolved := a.resolvedCache[repoPath]
-						cfg := agent.Config{
-							Rows:              a.focusLaunchTermHeight(),
-							Cols:              a.dashboard.width,
-							BypassPermissions: resolved.BypassPermissions,
-						}
-						if newAg, err := mgr.AddShell(a.focusLaunchSession.ID, cfg); err == nil {
-							a.focusLaunchAgent = newAg
-							a.dashboard.scrollOffset = 0
-						} else {
-							a.setError(err.Error())
-						}
-					}
-				}
-			case "ctrl+n":
-				if a.focusLaunchSession != nil {
-					repoPath := a.repoPathForSession(a.focusLaunchSession.ID)
-					mgr := a.managers[repoPath]
-					if mgr != nil {
-						resolved := a.resolvedCache[repoPath]
-						cfg := agent.Config{
-							Rows:              a.focusLaunchTermHeight(),
-							Cols:              a.dashboard.width,
-							BypassPermissions: resolved.BypassPermissions,
-							AgentProgram:      resolved.AgentProgram,
-							AgentModel:        resolved.AgentModel,
-							BuildSystemPrompt: resolved.BuildSystemPrompt,
-						}
-						if newAg, err := mgr.AddAgent(a.focusLaunchSession.ID, cfg); err == nil {
-							a.focusLaunchAgent = newAg
-							a.dashboard.scrollOffset = 0
-						} else {
-							a.setError(err.Error())
-						}
-					}
-				}
-			case "ctrl+w":
-				if a.focusLaunchSession == nil || a.focusLaunchAgent == nil {
-					return a, nil
-				}
-				agents := a.focusLaunchSession.Agents()
-				if len(agents) == 0 {
-					a.focusLaunchAgent = nil
-					a.focusLaunchSession = nil
-					a.dashboard.panelFocus = focusList
-					a.dashboard.scrollOffset = 0
-					return a, nil
-				}
-				oldID := a.focusLaunchAgent.ID
-				sessionID := a.focusLaunchSession.ID
-				currentIdx := 0
-				for i, ag := range agents {
-					if ag.ID == oldID {
-						currentIdx = i
-						break
-					}
-				}
-				if len(agents) == 1 {
-					a.focusLaunchAgent = nil
-					a.focusLaunchSession = nil
-					a.dashboard.panelFocus = focusList
-					a.dashboard.scrollOffset = 0
-					if a.closingAgents[oldID] {
-						return a, nil
-					}
-					repoPath := a.repoPathForSession(sessionID)
-					mgr := a.managers[repoPath]
-					if mgr == nil {
-						return a, nil
-					}
-					a.closingAgents[oldID] = true
-					return a, func() tea.Msg {
-						err := mgr.KillAgent(sessionID, oldID)
-						return killResultMsg{
-							scope:     killScopeAgent,
-							sessionID: sessionID,
-							agentID:   oldID,
-							err:       err,
-						}
-					}
-				}
-				var nextIdx int
-				if currentIdx == len(agents)-1 {
-					nextIdx = currentIdx - 1
-				} else {
-					nextIdx = currentIdx + 1
-				}
-				a.focusLaunchAgent = agents[nextIdx]
-				a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
-				a.dashboard.scrollOffset = 0
-				if a.closingAgents[oldID] {
-					return a, nil
-				}
-				repoPath := a.repoPathForSession(sessionID)
-				mgr := a.managers[repoPath]
-				if mgr == nil {
-					return a, nil
-				}
-				a.closingAgents[oldID] = true
-				return a, func() tea.Msg {
-					err := mgr.KillAgent(sessionID, oldID)
-					return killResultMsg{
-						scope:     killScopeAgent,
-						sessionID: sessionID,
-						agentID:   oldID,
-						err:       err,
-					}
-				}
-			default:
-				if msg.Text != "" {
-					a.focusLaunchAgent.SendText(msg.Text)
-				} else {
-					a.focusLaunchAgent.SendKey(xvt.KeyPressEvent(msg))
-				}
-			}
-			return a, nil
+			return a.updateFocusLaunchKeys(msg)
 		}
 
 		// When the config panel has focus, skip all app-level bindings.
@@ -2580,6 +2412,175 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return a, cmd
+}
+
+// updateFocusLaunchKeys handles all keypresses while panelFocus == focusLaunch.
+// The fullscreen agent terminal owns the keyboard while it's up: most keys are
+// forwarded to the underlying PTY, and a small set of escape hatches (esc /
+// ctrl+e to return, alt+[ / alt+] to cycle agents, ctrl+t / ctrl+n to add a
+// shell / agent, ctrl+w to close the current agent) are handled here. Lives
+// off updateDashboard so the latter reads as a router, not a god-method.
+func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	a.confirmQuit = false
+	if a.focusLaunchAgent == nil {
+		a.dashboard.panelFocus = focusList
+		a.dashboard.scrollOffset = 0
+		return a, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+e":
+		a.resizeAgentForDashboard(a.focusLaunchAgent)
+		a.focusLaunchAgent = nil
+		a.focusLaunchSession = nil
+		a.dashboard.panelFocus = focusList
+		a.dashboard.scrollOffset = 0
+	case "shift+esc":
+		a.focusLaunchAgent.SendKey(xvt.KeyPressEvent{Code: tea.KeyEscape})
+	case "pgup":
+		sbLines := len(a.focusLaunchAgent.ScrollbackLines())
+		maxScroll := sbLines
+		a.dashboard.scrollOffset += a.dashboard.height / 2
+		if a.dashboard.scrollOffset > maxScroll {
+			a.dashboard.scrollOffset = maxScroll
+		}
+	case "pgdn":
+		a.dashboard.scrollOffset -= a.dashboard.height / 2
+		if a.dashboard.scrollOffset < 0 {
+			a.dashboard.scrollOffset = 0
+		}
+	case "home":
+		a.dashboard.scrollOffset = 0
+	case "alt+]", "alt+[":
+		if a.focusLaunchSession != nil {
+			agents := a.focusLaunchSession.Agents()
+			idx := 0
+			for i, ag := range agents {
+				if ag.ID == a.focusLaunchAgent.ID {
+					idx = i
+					break
+				}
+			}
+			if msg.String() == "alt+]" {
+				idx = (idx + 1) % len(agents)
+			} else {
+				idx = (idx - 1 + len(agents)) % len(agents)
+			}
+			a.focusLaunchAgent = agents[idx]
+			a.dashboard.scrollOffset = 0
+			a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+		}
+	case "ctrl+t":
+		if a.focusLaunchSession != nil {
+			repoPath := a.repoPathForSession(a.focusLaunchSession.ID)
+			mgr := a.managers[repoPath]
+			if mgr != nil {
+				resolved := a.resolvedCache[repoPath]
+				cfg := agent.Config{
+					Rows:              a.focusLaunchTermHeight(),
+					Cols:              a.dashboard.width,
+					BypassPermissions: resolved.BypassPermissions,
+				}
+				if newAg, err := mgr.AddShell(a.focusLaunchSession.ID, cfg); err == nil {
+					a.focusLaunchAgent = newAg
+					a.dashboard.scrollOffset = 0
+				} else {
+					a.setError(err.Error())
+				}
+			}
+		}
+	case "ctrl+n":
+		if a.focusLaunchSession != nil {
+			repoPath := a.repoPathForSession(a.focusLaunchSession.ID)
+			mgr := a.managers[repoPath]
+			if mgr != nil {
+				resolved := a.resolvedCache[repoPath]
+				cfg := agent.Config{
+					Rows:              a.focusLaunchTermHeight(),
+					Cols:              a.dashboard.width,
+					BypassPermissions: resolved.BypassPermissions,
+					AgentProgram:      resolved.AgentProgram,
+					AgentModel:        resolved.AgentModel,
+					BuildSystemPrompt: resolved.BuildSystemPrompt,
+				}
+				if newAg, err := mgr.AddAgent(a.focusLaunchSession.ID, cfg); err == nil {
+					a.focusLaunchAgent = newAg
+					a.dashboard.scrollOffset = 0
+				} else {
+					a.setError(err.Error())
+				}
+			}
+		}
+	case "ctrl+w":
+		return a.closeFocusLaunchAgent()
+	default:
+		if msg.Text != "" {
+			a.focusLaunchAgent.SendText(msg.Text)
+		} else {
+			a.focusLaunchAgent.SendKey(xvt.KeyPressEvent(msg))
+		}
+	}
+	return a, nil
+}
+
+// closeFocusLaunchAgent kills the currently-focused agent inside the fullscreen
+// launch view. If it's the last agent in its session, the view collapses back
+// to the pipeline; otherwise focus moves to the neighbor and the kill runs
+// asynchronously. Split from updateFocusLaunchKeys so the ctrl+w switch case
+// reads as one line.
+func (a App) closeFocusLaunchAgent() (tea.Model, tea.Cmd) {
+	if a.focusLaunchSession == nil || a.focusLaunchAgent == nil {
+		return a, nil
+	}
+	agents := a.focusLaunchSession.Agents()
+	if len(agents) == 0 {
+		a.focusLaunchAgent = nil
+		a.focusLaunchSession = nil
+		a.dashboard.panelFocus = focusList
+		a.dashboard.scrollOffset = 0
+		return a, nil
+	}
+	oldID := a.focusLaunchAgent.ID
+	sessionID := a.focusLaunchSession.ID
+	currentIdx := 0
+	for i, ag := range agents {
+		if ag.ID == oldID {
+			currentIdx = i
+			break
+		}
+	}
+	lastAgent := len(agents) == 1
+	if lastAgent {
+		a.focusLaunchAgent = nil
+		a.focusLaunchSession = nil
+		a.dashboard.panelFocus = focusList
+		a.dashboard.scrollOffset = 0
+	} else {
+		nextIdx := currentIdx + 1
+		if currentIdx == len(agents)-1 {
+			nextIdx = currentIdx - 1
+		}
+		a.focusLaunchAgent = agents[nextIdx]
+		a.focusLaunchAgent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+		a.dashboard.scrollOffset = 0
+	}
+	if a.closingAgents[oldID] {
+		return a, nil
+	}
+	repoPath := a.repoPathForSession(sessionID)
+	mgr := a.managers[repoPath]
+	if mgr == nil {
+		return a, nil
+	}
+	a.closingAgents[oldID] = true
+	return a, func() tea.Msg {
+		err := mgr.KillAgent(sessionID, oldID)
+		return killResultMsg{
+			scope:     killScopeAgent,
+			sessionID: sessionID,
+			agentID:   oldID,
+			err:       err,
+		}
+	}
 }
 
 func (a App) updateFileBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
