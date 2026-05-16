@@ -233,3 +233,59 @@ func TestPromptModal_FocusedCursorLineHasNoBackground(t *testing.T) {
 		t.Errorf("CursorLine background = %v, want %v (no background)", bg, want)
 	}
 }
+
+func TestPromptModal_EmptyCtrlEnterIsNoop(t *testing.T) {
+	// Mirrors the empty-enter case: ctrl+enter on whitespace-only input must
+	// not submit. Pin so future refactors keep the symmetric behaviour.
+	m := newPromptModal()
+	m.SetSize(120, 40)
+	m.Open()
+	m.textarea.SetValue("\n   \t")
+
+	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl, Text: "ctrl+enter"})
+	if cmd != nil {
+		t.Errorf("empty ctrl+enter should be a no-op; got cmd %T", cmd())
+	}
+	if !m.Active() {
+		t.Error("modal should stay open on empty ctrl+enter")
+	}
+}
+
+func TestPromptModal_InactiveSwallowsAllInput(t *testing.T) {
+	m := newPromptModal()
+	m.SetSize(120, 40)
+	// Modal NOT opened.
+	for _, k := range []tea.KeyPressMsg{
+		{Code: tea.KeyEscape},
+		{Code: tea.KeyEnter},
+		{Code: tea.KeyEnter, Mod: tea.ModCtrl},
+		{Code: 'x', Text: "x"},
+	} {
+		if cmd := m.Update(k); cmd != nil {
+			t.Errorf("inactive modal returned cmd for %v: %T", k, cmd())
+		}
+	}
+	if m.Active() {
+		t.Error("modal should still be inactive")
+	}
+}
+
+func TestPromptModal_UnknownControlKey_DoesNotSubmit(t *testing.T) {
+	m := newPromptModal()
+	m.SetSize(120, 40)
+	m.Open()
+	m.textarea.SetValue("some text")
+	cmd := m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	if cmd != nil {
+		msg := cmd()
+		if _, bad := msg.(promptModalSubmitMsg); bad {
+			t.Error("ctrl+x submitted a modal — should be forwarded silently")
+		}
+		if _, bad := msg.(promptModalCancelMsg); bad {
+			t.Error("ctrl+x cancelled a modal")
+		}
+	}
+	if !m.Active() {
+		t.Error("modal should still be open after unknown control key")
+	}
+}

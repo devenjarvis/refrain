@@ -189,3 +189,116 @@ func TestConfigForm_EmptyFormUpdateNoCrash(t *testing.T) {
 		t.Errorf("empty form should return nil cmd, got %v", cmd)
 	}
 }
+
+func TestConfigForm_UnknownKey_NavMode_NoOp(t *testing.T) {
+	f := sampleForm()
+	before := struct {
+		focused int
+		toggle  bool
+		text    string
+		sel     string
+	}{f.focused, f.toggleValue("Enable focus mode"), f.textValue("Branch prefix"), f.selectValue("Theme")}
+	cmd := f.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	if cmd != nil {
+		t.Errorf("unknown key in nav mode produced cmd %T, want nil", cmd())
+	}
+	after := struct {
+		focused int
+		toggle  bool
+		text    string
+		sel     string
+	}{f.focused, f.toggleValue("Enable focus mode"), f.textValue("Branch prefix"), f.selectValue("Theme")}
+	if before != after {
+		t.Errorf("unknown key changed state: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestConfigForm_PrintableKey_EditMode_AppendsToTextInput(t *testing.T) {
+	f := sampleForm()
+	// Focus the text field and enter edit mode.
+	f.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	f.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !f.fields[1].editing {
+		t.Fatal("test prereq: text field should be in edit mode")
+	}
+	before := f.textValue("Branch prefix")
+	f.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if got := f.textValue("Branch prefix"); got == before {
+		t.Errorf("text value unchanged after typing 'x': still %q", got)
+	}
+}
+
+func TestConfigForm_LeftRightOnNonSelect_NoOp(t *testing.T) {
+	// Focused on the toggle field (index 0). Left/right should not toggle it
+	// — that's the job of space/enter.
+	f := sampleForm()
+	if !f.toggleValue("Enable focus mode") {
+		t.Fatal("test prereq: toggle should start true")
+	}
+	f.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if !f.toggleValue("Enable focus mode") {
+		t.Error("right arrow on toggle field should not change its value")
+	}
+	f.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if !f.toggleValue("Enable focus mode") {
+		t.Error("left arrow on toggle field should not change its value")
+	}
+	// And on a text field (index 1): also a no-op.
+	f.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	before := f.textValue("Branch prefix")
+	f.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if got := f.textValue("Branch prefix"); got != before {
+		t.Errorf("right arrow on text field changed value from %q to %q", before, got)
+	}
+}
+
+func TestConfigForm_CtrlS_InEditMode_NotSubmitted(t *testing.T) {
+	// In edit mode the textinput swallows everything including ctrl+s — the
+	// outer save shortcut is intentionally only active in nav mode.
+	f := sampleForm()
+	f.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	f.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !f.fields[1].editing {
+		t.Fatal("test prereq: edit mode")
+	}
+	cmd := f.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if cmd != nil {
+		if _, bad := cmd().(configFormSaveMsg); bad {
+			t.Error("ctrl+s should not save while in edit mode")
+		}
+	}
+}
+
+func TestConfigForm_EscInEditMode_DoesNotEmitCancel(t *testing.T) {
+	// Esc in edit mode only blurs the textinput; it must NOT emit
+	// configFormCancelMsg or the user would unintentionally drop their edits.
+	f := sampleForm()
+	f.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	f.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	cmd := f.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd != nil {
+		if _, bad := cmd().(configFormCancelMsg); bad {
+			t.Error("esc in edit mode should NOT emit configFormCancelMsg")
+		}
+	}
+	if f.fields[1].editing {
+		t.Error("esc should exit edit mode")
+	}
+}
+
+func TestConfigForm_KeysDeferToTextInputInEditMode(t *testing.T) {
+	// In edit mode, j/k/h/l are literal characters in the textinput, not
+	// navigation. Pin so they don't silently move focus.
+	f := sampleForm()
+	f.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	f.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	before := f.focused
+	f.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if f.focused != before {
+		t.Errorf("'j' in edit mode moved focus: before=%d after=%d", before, f.focused)
+	}
+	if got := f.textValue("Branch prefix"); got == "refrain/" {
+		// Text should have changed by 'j' insertion.
+		t.Errorf("'j' in edit mode did not modify text input: %q", got)
+	}
+}

@@ -171,6 +171,87 @@ func TestBranchPicker_EnterWithEmptyListIsNoop(t *testing.T) {
 	}
 }
 
+func TestBranchPicker_UpArrow_ClampsAtZero(t *testing.T) {
+	// The "k" mapping is tested; verify the named-key alias "up" too so a
+	// future refactor that splits the cases doesn't lose one.
+	m := fixtureBranchPickerLoaded()
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.selected != 0 {
+		t.Errorf("up at top should clamp at 0, got %d", m.selected)
+	}
+}
+
+func TestBranchPicker_UpArrow_MovesCursor(t *testing.T) {
+	m := fixtureBranchPickerLoaded()
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.selected != 2 {
+		t.Fatalf("test prereq: selected=%d, want 2", m.selected)
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.selected != 1 {
+		t.Errorf("after up, selected = %d, want 1", m.selected)
+	}
+}
+
+func TestBranchPicker_BackspaceWithEmptyFilter_NoOp(t *testing.T) {
+	m := fixtureBranchPickerLoaded()
+	before := struct {
+		filter string
+		sel    int
+		count  int
+	}{m.filter, m.selected, len(m.filtered)}
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if cmd != nil {
+		t.Errorf("backspace with empty filter produced cmd %T, want nil", cmd())
+	}
+	after := struct {
+		filter string
+		sel    int
+		count  int
+	}{m2.filter, m2.selected, len(m2.filtered)}
+	if before != after {
+		t.Errorf("backspace with empty filter changed state: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestBranchPicker_UnknownControlKey_NoOp(t *testing.T) {
+	m := fixtureBranchPickerLoaded()
+	before := struct {
+		filter string
+		sel    int
+	}{m.filter, m.selected}
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	if cmd != nil {
+		t.Errorf("ctrl+w produced cmd %T, want nil", cmd())
+	}
+	after := struct {
+		filter string
+		sel    int
+	}{m2.filter, m2.selected}
+	if before != after {
+		t.Errorf("ctrl+w changed state: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestBranchPicker_LoadingSwallowsKeys(t *testing.T) {
+	// While loading, the picker has no items. Confirm key presses other than
+	// esc don't crash and don't pre-populate state.
+	m := newBranchPickerModel()
+	m.width = 80
+	m.height = 24
+	if !m.loading {
+		t.Fatal("test prereq: should start loading")
+	}
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if cmd != nil {
+		t.Errorf("j during loading produced cmd %T, want nil", cmd())
+	}
+	if m.selected != 0 {
+		t.Errorf("selected = %d during loading, want 0", m.selected)
+	}
+}
+
 // errStub is a tiny helper so we don't pull in errors.New everywhere.
 type errStub string
 

@@ -329,6 +329,122 @@ func TestRepoPicker_ManageMode_DetailsShowsConfirmAfterFirstD(t *testing.T) {
 	}
 }
 
+func TestRepoPicker_SessionMode_SAndDAreFilterChars(t *testing.T) {
+	// In session mode, only 'a' has a special hot-key meaning (and only when
+	// the filter is empty). 's' and 'd' should always append to the filter,
+	// even with an empty filter — they have no manage-mode shortcuts here.
+	m := fixtureRepoPicker()
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if cmd != nil {
+		if _, bad := cmd().(repoPickerEditSettingsMsg); bad {
+			t.Error("session mode should NOT emit repoPickerEditSettingsMsg on 's'")
+		}
+	}
+	if m.filter != "s" {
+		t.Errorf("filter = %q, want %q after pressing 's' in session mode", m.filter, "s")
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if m.pendingRemoveIdx != -1 {
+		t.Errorf("session mode 'd' set pendingRemoveIdx=%d, want -1", m.pendingRemoveIdx)
+	}
+	if m.filter != "sd" {
+		t.Errorf("filter = %q, want %q", m.filter, "sd")
+	}
+}
+
+func TestRepoPicker_UnknownControlKey_NoOp(t *testing.T) {
+	m := fixtureRepoPicker()
+	before := struct {
+		sel    int
+		filter string
+		mode   repoPickerMode
+	}{m.selected, m.filter, m.mode}
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	if cmd != nil {
+		t.Errorf("ctrl+w produced cmd %T, want nil", cmd())
+	}
+	after := struct {
+		sel    int
+		filter string
+		mode   repoPickerMode
+	}{m2.selected, m2.filter, m2.mode}
+	if before != after {
+		t.Errorf("ctrl+w changed state: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestRepoPicker_PendingRemoveClearedByAnyOtherKey(t *testing.T) {
+	// First d in manage mode arms the pending-remove confirm. Any non-d key
+	// must clear it so the user can't accidentally double-press across an
+	// intervening action.
+	m := fixtureRepoPickerManage()
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if m.pendingRemoveIdx == -1 {
+		t.Fatal("first d should have armed pendingRemoveIdx")
+	}
+	// Press 'k' — clears pending.
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	if m.pendingRemoveIdx != -1 {
+		t.Errorf("navigation should clear pendingRemoveIdx, got %d", m.pendingRemoveIdx)
+	}
+	// Press 'd' again — should arm fresh, NOT emit remove (pending was cleared).
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if cmd != nil {
+		t.Error("d after pending was cleared should NOT emit remove")
+	}
+}
+
+func TestRepoPicker_BackspaceWithEmptyFilter_NoOp(t *testing.T) {
+	m := fixtureRepoPicker()
+	if m.filter != "" {
+		t.Fatal("test prereq: filter should be empty")
+	}
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if cmd != nil {
+		t.Errorf("backspace with empty filter produced cmd %T, want nil", cmd())
+	}
+	if m2.filter != "" {
+		t.Errorf("filter = %q, want empty", m2.filter)
+	}
+}
+
+func TestRepoPicker_ManageMode_SOnAddRepoRow_NoOp(t *testing.T) {
+	// Pressing s while cursor is on the add-repo sentinel must not emit edit
+	// settings (there's no real repo to edit).
+	m := fixtureRepoPickerManage()
+	// Move to last row (the add-repo sentinel).
+	for range 5 {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	if idx := m.filtered[m.selected]; idx != repoPickerAddRepoIdx {
+		t.Fatalf("test prereq: cursor should be on add-repo sentinel, got idx=%d", idx)
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if cmd != nil {
+		if _, bad := cmd().(repoPickerEditSettingsMsg); bad {
+			t.Error("s on add-repo sentinel should NOT emit edit settings")
+		}
+	}
+}
+
+func TestRepoPicker_ManageMode_DOnAddRepoRow_NoOp(t *testing.T) {
+	m := fixtureRepoPickerManage()
+	for range 5 {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	if idx := m.filtered[m.selected]; idx != repoPickerAddRepoIdx {
+		t.Fatalf("test prereq: cursor should be on add-repo sentinel")
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if cmd != nil {
+		if _, bad := cmd().(repoPickerRemoveMsg); bad {
+			t.Error("d on add-repo sentinel should NOT emit remove")
+		}
+	}
+	// And pending should not be armed for the sentinel.
+	// (It happens to early-return via the idx == repoPickerAddRepoIdx guard.)
+}
+
 func TestRepoPicker_NavigationClampsAtBounds(t *testing.T) {
 	m := fixtureRepoPicker()
 	// Push past the top.
