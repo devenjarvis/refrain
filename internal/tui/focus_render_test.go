@@ -33,8 +33,7 @@ func TestRenderFocusActiveCursor(t *testing.T) {
 	d := newDashboardModel()
 	d.width = 120
 	d.height = 39
-	d.focusCursorSection = focusSectionBuilding
-	d.focusBuildingIdx = 1
+	d.cursor.JumpTo(focusSectionBuilding, 1)
 	d.items = []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},

@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -179,40 +178,28 @@ type App struct {
 	audioPlayer     *audio.Player
 
 	// Wellness state.
-	appStart                time.Time // set once at init; never reset; used for total session duration in wellness log
-	sessionStart            time.Time // per-block work timer; reset on each break completion
-	lastReviewAt            time.Time
-	agentLimitModalActive   bool
-	focusSessionMinutes     int          // cached from resolved global settings
-	focusBreakMinutes       int          // cached from resolved global settings
-	focusPlanningIdx        int          // index into planningSessions()
-	focusBuildingIdx        int          // index into buildingSessions()
-	focusReviewIdx          int          // index into reviewQueueSessions()
-	focusShippingIdx        int          // index into shippingSessions()
-	focusCursorSection      focusSection // which section the pipeline cursor is on
-	focusLaunchAgent        *agent.Agent
-	focusLaunchSession      *agent.Session
-	focusBacklogWarning     bool // first n at backlog limit shows warning; second proceeds
-	focusBreakMode          bool
-	focusBreakStart         time.Time // wall-clock; monotonic stripped so suspend counts toward elapsed
-	focusBlockCount         int
-	focusBreakShortWarning  bool
-	focusBreakTimerUp       bool // break duration elapsed; waiting on user to resume
-	focusBreakAnimFrame     int
-	reviewDiffCache         map[string]*reviewDiffEntry                // keyed by session ID
-	reviewSession           *agent.Session                             // session currently open in review panel
-	reviewTaskCursor        int                                        // selected task row in the review task list
-	reviewDiffVP            viewport.Model                             // scroll state for the inline diff viewport
-	reviewDiffCacheByTask   map[int]*diffmodel.Model                   // parsed diff per task index; cleared with reviewDiffCache
-	reviewSpecOverlayActive bool                                       // true while the ? Spec overlay is open
-	reviewSpecOverlayScroll int                                        // scroll offset for the Spec overlay (line index)
-	shippingSession         *agent.Session                             // session currently open in shipping panel
-	feedbackTriage          map[string]map[string]*feedbackTriageEntry // keyed by sessionID → itemKey
-	shippingFeedbackCursor  int                                        // cursor row in the feedback list pane
-	shippingDetailScroll    int                                        // scroll offset in the feedback detail pane
-	feedbackNote            feedbackNoteModal                          // overlay for adding a guidance note to a feedback item
-	planEditor              *planEditorModel                           // non-nil while panelFocus == focusPlanEditor
-	promptModal             promptModalModel                           // overlay for plan-first new-session prompt
+	appStart               time.Time // set once at init; never reset; used for total session duration in wellness log
+	sessionStart           time.Time // per-block work timer; reset on each break completion
+	lastReviewAt           time.Time
+	agentLimitModalActive  bool
+	focusSessionMinutes    int           // cached from resolved global settings
+	focusBreakMinutes      int           // cached from resolved global settings
+	cursor                 FocusedCursor // pipeline cursor: section + per-section indices
+	focusLaunchAgent       *agent.Agent
+	focusLaunchSession     *agent.Session
+	focusBacklogWarning    bool // first n at backlog limit shows warning; second proceeds
+	focusBreakMode         bool
+	focusBreakStart        time.Time // wall-clock; monotonic stripped so suspend counts toward elapsed
+	focusBlockCount        int
+	focusBreakShortWarning bool
+	focusBreakTimerUp      bool // break duration elapsed; waiting on user to resume
+	focusBreakAnimFrame    int
+	reviewDiffCache        map[string]*reviewDiffEntry                // keyed by session ID; lifetime exceeds panel
+	reviewPanel            *reviewPanelModel                          // non-nil while panelFocus == focusReview
+	shippingPanel          *shippingPanelModel                        // non-nil while panelFocus == focusShipping
+	feedbackTriage         map[string]map[string]*feedbackTriageEntry // keyed by sessionID → itemKey
+	planEditor             *planEditorModel                           // non-nil while panelFocus == focusPlanEditor
+	promptModal            promptModalModel                           // overlay for plan-first new-session prompt
 
 	// Wellness counters (written to log on quit).
 	agentsCreatedCount   int
@@ -254,24 +241,22 @@ type App struct {
 
 func NewApp() App {
 	return App{
-		view:                  ViewDashboard,
-		dashboard:             newDashboardModel(),
-		managers:              make(map[string]*agent.Manager),
-		repoSettings:          make(map[string]*config.RepoSettings),
-		resolvedCache:         make(map[string]config.ResolvedSettings),
-		lastKnownStatus:       make(map[string]agent.Status),
-		diffStatsCache:        make(map[string]*diffStatsEntry),
-		reviewDiffCache:       make(map[string]*reviewDiffEntry),
-		reviewDiffVP:          viewport.New(),
-		reviewDiffCacheByTask: make(map[int]*diffmodel.Model),
-		prCache:               make(map[string]*prCacheEntry),
-		prPollStates:          make(map[string]*prSessionState),
-		closingAgents:         make(map[string]bool),
-		closingSessions:       make(map[string]bool),
-		feedbackTriage:        make(map[string]map[string]*feedbackTriageEntry),
-		feedbackNote:          newFeedbackNoteModal(),
-		promptModal:           newPromptModal(),
-		prComposeModal:        newPRComposeModal(),
+		view:            ViewDashboard,
+		dashboard:       newDashboardModel(),
+		cursor:          NewFocusedCursor(),
+		managers:        make(map[string]*agent.Manager),
+		repoSettings:    make(map[string]*config.RepoSettings),
+		resolvedCache:   make(map[string]config.ResolvedSettings),
+		lastKnownStatus: make(map[string]agent.Status),
+		diffStatsCache:  make(map[string]*diffStatsEntry),
+		reviewDiffCache: make(map[string]*reviewDiffEntry),
+		prCache:         make(map[string]*prCacheEntry),
+		prPollStates:    make(map[string]*prSessionState),
+		closingAgents:   make(map[string]bool),
+		closingSessions: make(map[string]bool),
+		feedbackTriage:  make(map[string]map[string]*feedbackTriageEntry),
+		promptModal:     newPromptModal(),
+		prComposeModal:  newPRComposeModal(),
 	}
 }
 
@@ -363,8 +348,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.promptModal.SetSize(msg.Width, msg.Height-1)
 			a.prComposeModal.SetSize(msg.Width, msg.Height-1)
-			a.feedbackNote.SetSize(msg.Width, msg.Height)
+			if a.shippingPanel != nil {
+				a.shippingPanel.Resize(msg.Width, msg.Height-1)
+			}
 		}
+
+	case reviewReworkRequestMsg:
+		return a.handleReviewReworkRequest(msg)
+
+	case shippingFeedbackRequestMsg:
+		return a.handleShippingFeedbackRequest(msg)
 
 	case initAppMsg:
 		if msg.err != nil {
@@ -388,7 +381,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.dashboard.sidebarWidth = resolved.SidebarWidth
 		a.focusSessionMinutes = resolved.FocusSessionMinutes
 		a.focusBreakMinutes = resolved.FocusBreakMinutes
-		a.focusCursorSection = focusSectionPlanning
+		a.cursor.SetSection(focusSectionPlanning)
 		// Default activeRepo to the first registered repo so the pipeline
 		// header shows "repo: <name>" and workflow keys ('n', 'a', 'o') target
 		// a known repo on a fresh dashboard.
@@ -883,10 +876,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if item.session != nil {
 					Sections:
 						for _, section := range focusSectionsInOrder() {
-							for idx, s := range a.focusSectionItems(section) {
+							for idx, s := range a.dashboard.sectionItems(section) {
 								if s.session == item.session {
-									*a.focusSectionIdx(section) = idx
-									a.focusCursorSection = section
+									a.cursor.JumpTo(section, idx)
 									a.syncFocusCursorToDashboard()
 									break Sections
 								}
@@ -1135,9 +1127,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.transitionShipping {
 			if sess := a.sessionByID(msg.sessionID); sess != nil {
 				sess.SetLifecyclePhase(agent.LifecycleShipping)
-				if a.reviewSession != nil && a.reviewSession.ID == msg.sessionID {
+				if a.reviewPanel != nil && a.reviewPanel.SessionID() == msg.sessionID {
 					a.dashboard.panelFocus = focusList
-					a.reviewSession = nil
+					a.reviewPanel = nil
 				}
 			}
 		}
@@ -1231,9 +1223,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch sess.LifecyclePhase() {
 				case agent.LifecycleInProgress, agent.LifecycleReadyForReview, agent.LifecycleInReview:
 					sess.SetLifecyclePhase(agent.LifecycleShipping)
-					if a.reviewSession != nil && a.reviewSession.ID == msg.sessionID {
+					if a.reviewPanel != nil && a.reviewPanel.SessionID() == msg.sessionID {
 						a.dashboard.panelFocus = focusList
-						a.reviewSession = nil
+						a.reviewPanel = nil
 					}
 				}
 			}
@@ -1250,8 +1242,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							if !a.closingSessions[sessID] {
 								sess.SetLifecyclePhase(agent.LifecycleComplete)
 								// Close the shipping panel if this session is currently open in it.
-								if a.shippingSession != nil && a.shippingSession.ID == sessID {
-									a.shippingSession = nil
+								if a.shippingPanel != nil && a.shippingPanel.SessionID() == sessID {
+									a.shippingPanel = nil
 									a.dashboard.panelFocus = focusList
 								}
 								var agentIDs []string
@@ -1305,7 +1297,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.setError("merge failed: " + msg.err.Error())
 			return a, nil
 		}
-		a.shippingSession = nil
+		a.shippingPanel = nil
 		a.dashboard.panelFocus = focusList
 		repoPath := a.repoPathForSession(msg.sessionID)
 		if repoPath == "" {
@@ -1344,8 +1336,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil && msg.entry != nil {
 			a.reviewDiffCache[msg.sessionID] = msg.entry
 			// Refresh the inline diff viewport when data arrives for the open session.
-			if a.reviewSession != nil && a.reviewSession.ID == msg.sessionID && len(msg.entry.groups) > 0 {
-				a.refreshReviewDiffViewport()
+			if a.reviewPanel != nil && a.reviewPanel.SessionID() == msg.sessionID && len(msg.entry.groups) > 0 {
+				a.reviewPanel.RefreshDiffViewport(a.panelServices())
 			}
 			// If the entry has task groups, dispatch a reviewer per group.
 			if len(msg.entry.groups) > 0 {
@@ -1746,337 +1738,41 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 
-		// Review panel key handling.
-		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
-			// Spec overlay intercepts all keys while active.
-			if a.reviewSpecOverlayActive {
-				switch msg.String() {
-				case "esc":
-					a.reviewSpecOverlayActive = false
-				case "pgdown":
-					a.reviewSpecOverlayScroll += a.height - 4
-				case "pgup":
-					a.reviewSpecOverlayScroll -= a.height - 4
-					if a.reviewSpecOverlayScroll < 0 {
-						a.reviewSpecOverlayScroll = 0
-					}
-				case "g":
-					a.reviewSpecOverlayScroll = 0
-				case "G":
-					a.reviewSpecOverlayScroll = 9999 // clamped at render time
+		// Review panel key handling: delegate to the reviewPanelModel.
+		if a.dashboard.panelFocus == focusReview && a.reviewPanel != nil {
+			snapshot := a.reviewPanel
+			updated, cmd := snapshot.Update(msg, a.panelServices())
+			// If svc.ClosePanel fired during Update, a.reviewPanel is now nil
+			// and panelFocus is focusList. Don't restore — close has won.
+			if a.reviewPanel == snapshot {
+				if rp, ok := updated.(*reviewPanelModel); ok {
+					a.reviewPanel = rp
 				}
-				return a, nil
 			}
-			switch msg.String() {
-			case "esc":
-				// Return to focus mode; session stays InReview.
-				a.dashboard.panelFocus = focusList
-				a.reviewSession = nil
-				a.reviewSpecOverlayActive = false
-				return a, nil
-			case "d":
-				// Defer: back to ReadyForReview, return to focus.
-				a.reviewSession.SetLifecyclePhase(agent.LifecycleReadyForReview)
-				a.dashboard.panelFocus = focusList
-				a.reviewSession = nil
-				return a, nil
-			case "p":
-				// Ship: if an open PR exists, open it in the browser and transition
-				// to Shipping. If no open PR, push the branch and draft a new one.
-				// TODO(stacked-PR): when entry.stack is non-empty, offer a way
-				// to cycle through stack entries instead of always opening the
-				// head PR.
-				sess := a.reviewSession
-				if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
-					if err := openURL(entry.pr.URL); err != nil {
-						a.setError(err.Error())
-						return a, nil
-					}
-					sess.SetLifecyclePhase(agent.LifecycleShipping)
-					a.dashboard.panelFocus = focusList
-					a.reviewSession = nil
-				} else {
-					if a.ghClient == nil {
-						a.setError("GitHub auth not available")
-						return a, nil
-					}
-					if a.prDraftInFlight {
-						return a, nil
-					}
-					a.prDraftInFlight = true
-					a.prDraftSessionID = sess.ID
-					repoPath := a.repoPathForSession(sess.ID)
-					return a, a.startPRDraftCmd(sess, repoPath, true)
-				}
-				return a, nil
-			case "t":
-				// Open the session's most-active agent in the fullscreen
-				// focusLaunch terminal. Useful for sessions with no PR yet
-				// (run gh pr create manually) or for inspecting individual
-				// agents within a multi-agent session via the tab bar.
-				sess := a.reviewSession
-				a.reviewSession = nil
-				if !a.openSessionInFocusLaunch(sess) {
-					a.setError("session has no agents to open")
-				}
-				return a, nil
-			case "c":
-				// Mark complete without a PR (e.g. design docs, exploratory
-				// branches). Closes the panel and cleans up the session.
-				sess := a.reviewSession
-				a.dashboard.panelFocus = focusList
-				a.reviewSession = nil
-				repoPath := a.repoPathForSession(sess.ID)
-				if repoPath == "" {
-					return a, nil
-				}
-				mgr := a.managers[repoPath]
-				if mgr == nil || mgr.GetSession(sess.ID) == nil || a.closingSessions[sess.ID] {
-					return a, nil
-				}
-				sess.SetLifecyclePhase(agent.LifecycleComplete)
-				var agentIDs []string
-				for _, ag := range sess.Agents() {
-					agentIDs = append(agentIDs, ag.ID)
-					a.closingAgents[ag.ID] = true
-				}
-				sessID := sess.ID
-				a.closingSessions[sessID] = true
-				return a, func() tea.Msg {
-					return killResultMsg{
-						scope:     killScopeSession,
-						sessionID: sessID,
-						agentIDs:  agentIDs,
-						err:       filterNotFound(mgr.KillSession(sessID)),
-					}
-				}
-			case "e":
-				// Open in editor — same pattern as the existing "i" key handler.
-				sess := a.reviewSession
-				if sess != nil && sess.Worktree != nil {
-					// Resolve the IDE command from the session's owning repo
-					// rather than a.activeRepo: pipeline cursor selection lets
-					// the user reach a session in any registered repo.
-					repoPath := a.repoPathForSession(sess.ID)
-					if repoPath == "" {
-						repoPath = a.activeRepo
-					}
-					ideCmd := strings.TrimSpace(a.resolvedCache[repoPath].IDECommand)
-					if ideCmd == "" {
-						a.setError("No IDE configured (set 'IDE Command' in settings)")
-						return a, nil
-					}
-					parts := splitIDECommand(ideCmd)
-					if len(parts) == 0 {
-						a.setError("No IDE configured (set 'IDE Command' in settings)")
-						return a, nil
-					}
-					worktreePath := sess.Worktree.Path
-					exe := parts[0]
-					args := append(parts[1:], worktreePath)
-					go func() {
-						cmd := exec.Command(exe, args...)
-						cmd.Dir = worktreePath
-						_ = cmd.Start()
-					}()
-				}
-				return a, nil
-			case "j", "down":
-				// Move cursor down in the task list.
-				if entry := a.reviewDiffCache[a.reviewSession.ID]; entry != nil {
-					maxIdx := reviewTaskCount(entry) - 1
-					if a.reviewTaskCursor < maxIdx {
-						a.reviewTaskCursor++
-						a.refreshReviewDiffViewport()
-					}
-				}
-				return a, nil
-			case "k", "up":
-				// Move cursor up in the task list.
-				if a.reviewTaskCursor > 0 {
-					a.reviewTaskCursor--
-					a.refreshReviewDiffViewport()
-				}
-				return a, nil
-			case "f":
-				// Toggle the user-flag on the cursor row. The flag survives
-				// panel close/re-open and is folded into the `b` rework prompt
-				// alongside any AI concerns/fails.
-				entry := a.reviewDiffCache[a.reviewSession.ID]
-				if entry == nil {
-					return a, nil
-				}
-				idx, ok := reviewTaskIndexAtCursor(entry, a.reviewTaskCursor)
-				if !ok {
-					// Synthetic Overview row (no-plan session): nothing to flag.
-					return a, nil
-				}
-				if entry.verdicts == nil {
-					entry.verdicts = make(map[int]*taskVerdictRecord)
-				}
-				rec := entry.verdicts[idx]
-				if rec == nil {
-					rec = &taskVerdictRecord{state: verdictPending}
-					entry.verdicts[idx] = rec
-				}
-				rec.userFlagged = !rec.userFlagged
-				return a, nil
-			case "b":
-				// Back to build: spawn a new agent in the existing worktree with
-				// a prompt built from the AI reviewer's concerns/fails plus any
-				// rows the user flagged with `f`. Session returns to InProgress.
-				return a.addressReviewFeedback(a.reviewSession)
-			case "enter", "space":
-				// Inline diff is shown in the right pane; enter/space are no-ops here.
-				return a, nil
-			case "pgdown":
-				a.reviewDiffVP.PageDown()
-				return a, nil
-			case "pgup":
-				a.reviewDiffVP.PageUp()
-				return a, nil
-			case "ctrl+d":
-				a.reviewDiffVP.HalfPageDown()
-				return a, nil
-			case "ctrl+u":
-				a.reviewDiffVP.HalfPageUp()
-				return a, nil
-			case "g":
-				a.reviewDiffVP.GotoTop()
-				return a, nil
-			case "G":
-				a.reviewDiffVP.GotoBottom()
-				return a, nil
-			case "?":
-				if a.reviewSession.HasPlan() {
-					a.reviewSpecOverlayActive = true
-					a.reviewSpecOverlayScroll = 0
-				}
-				return a, nil
-			}
-			// All other keys are no-ops in review panel.
-			return a, nil
+			return a, cmd
 		}
 
-		// Shipping panel key handling.
-		if a.dashboard.panelFocus == focusShipping && a.shippingSession != nil {
-			// Modal intercepts all keys first.
-			if a.feedbackNote.Active() {
-				cmd, submitted, note := a.feedbackNote.Update(msg)
-				if submitted {
-					a.setFeedbackNote(a.shippingSession.ID, a.feedbackNote.itemKey, note)
+		// Shipping panel key handling: delegate to the shippingPanelModel.
+		if a.dashboard.panelFocus == focusShipping && a.shippingPanel != nil {
+			snapshot := a.shippingPanel
+			updated, cmd := snapshot.Update(msg, a.panelServices())
+			if a.shippingPanel == snapshot {
+				if sp, ok := updated.(*shippingPanelModel); ok {
+					a.shippingPanel = sp
 				}
-				return a, cmd
 			}
-			entry := a.prCache[a.shippingSession.ID]
-			items := feedbackItems(entryThreads(entry))
-			halfPane := a.height / 4
-			if halfPane < 1 {
-				halfPane = 1
-			}
-			switch msg.String() {
-			case "j", "down":
-				max := len(items) - 1
-				if max < 0 {
-					max = 0
-				}
-				if a.shippingFeedbackCursor < max {
-					a.shippingFeedbackCursor++
-				}
-				a.shippingDetailScroll = 0
-			case "k", "up":
-				if a.shippingFeedbackCursor > 0 {
-					a.shippingFeedbackCursor--
-				}
-				a.shippingDetailScroll = 0
-			case "pgdown", "ctrl+d":
-				a.shippingDetailScroll += halfPane
-				if a.shippingDetailScroll < 0 { // overflow guard only; render clamps to real max
-					a.shippingDetailScroll = 0
-				}
-			case "pgup", "ctrl+u":
-				a.shippingDetailScroll -= halfPane
-				if a.shippingDetailScroll < 0 {
-					a.shippingDetailScroll = 0
-				}
-			case "a":
-				if len(items) > 0 && a.shippingFeedbackCursor < len(items) {
-					key := feedbackItemKey(items[a.shippingFeedbackCursor])
-					a.setFeedbackVerdict(a.shippingSession.ID, key, feedbackApproved)
-				}
-			case "x":
-				if len(items) > 0 && a.shippingFeedbackCursor < len(items) {
-					key := feedbackItemKey(items[a.shippingFeedbackCursor])
-					a.setFeedbackVerdict(a.shippingSession.ID, key, feedbackDisagreed)
-				}
-			case "u":
-				if len(items) > 0 && a.shippingFeedbackCursor < len(items) {
-					key := feedbackItemKey(items[a.shippingFeedbackCursor])
-					a.setFeedbackVerdict(a.shippingSession.ID, key, feedbackNeutral)
-				}
-			case "n":
-				if len(items) > 0 && a.shippingFeedbackCursor < len(items) {
-					item := items[a.shippingFeedbackCursor]
-					key := feedbackItemKey(item)
-					existing := ""
-					if m := a.feedbackTriage[a.shippingSession.ID]; m != nil {
-						if e := m[key]; e != nil {
-							existing = e.Note
-						}
-					}
-					return a, a.feedbackNote.Open(key, existing)
-				}
-			case "esc":
-				a.dashboard.panelFocus = focusList
-				a.shippingSession = nil
-			case "t":
-				sess := a.shippingSession
-				a.shippingSession = nil
-				a.dashboard.panelFocus = focusList
-				if !a.openSessionInFocusLaunch(sess) {
-					a.setError("session has no agents to open")
-				}
-			case "p":
-				if entry != nil && entry.pr != nil && entry.pr.URL != "" {
-					if err := openURL(entry.pr.URL); err != nil {
-						a.setError(err.Error())
-					}
-				} else {
-					a.setError("no PR URL available")
-				}
-			case "m":
-				// Merge: gated on isMergeReady.
-				if !isMergeReady(entry) {
-					a.setError("not ready to merge — use M to force")
-					return a, nil
-				}
-				return a, a.mergePRCmd(a.shippingSession.ID)
-			case "M":
-				// Force merge: bypasses the isMergeReady gate AND the
-				// pre-merge mergeable-state recheck. State (open/closed/
-				// merged) is still verified — you cannot force-merge a PR
-				// that no longer exists or has already merged.
-				if entry == nil || entry.pr == nil {
-					a.setError("no PR found")
-					return a, nil
-				}
-				return a, a.forceMergePRCmd(a.shippingSession.ID)
-			case "r":
-				// Address feedback: synthesize a prompt and spawn a new agent.
-				return a.addressFeedback(a.shippingSession)
-			}
-			return a, nil
+			return a, cmd
 		}
 
 		// Pipeline view key handling (the only dashboard mode).
 		if a.dashboard.panelFocus != focusReview && a.dashboard.panelFocus != focusShipping {
 			switch msg.String() {
 			case "up", "k":
-				a.moveFocusCursorUp()
+				a.cursor.MoveUp(a.dashboard.sectionCounts())
 				a.syncFocusCursorToDashboard()
 				return a, nil
 			case "down", "j":
-				a.moveFocusCursorDown()
+				a.cursor.MoveDown(a.dashboard.sectionCounts())
 				a.syncFocusCursorToDashboard()
 				return a, nil
 			case "space", "enter":
@@ -2106,16 +1802,16 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// to advance is a deliberate action, while taking a break is
 				// the catch-all everywhere else — so the cursor location is
 				// the disambiguator the user already has at hand.
-				if !a.focusBreakMode && a.focusCursorSection == focusSectionPlanning {
+				if !a.focusBreakMode && a.cursor.Section() == focusSectionPlanning {
 					planning := a.dashboard.planningSessions()
 					if len(planning) > 0 {
-						idx := a.focusPlanningIdx
+						idx := a.cursor.Index(focusSectionPlanning)
 						if idx >= len(planning) {
 							idx = len(planning) - 1
 						}
 						if sess := planning[idx].session; sess != nil {
 							sess.SetLifecyclePhase(agent.LifecycleInProgress)
-							a.clampFocusCursor()
+							a.cursor.Clamp(a.dashboard.sectionCounts())
 							a.syncFocusCursorToDashboard()
 						}
 					}
@@ -2133,16 +1829,16 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// any reviewable session regardless of phase, and pressing m
 				// shouldn't surprise the user with an error in that case.
 				var sess *agent.Session
-				switch a.focusCursorSection {
+				switch a.cursor.Section() {
 				case focusSectionPlanning:
 					planning := a.dashboard.planningSessions()
-					if a.focusPlanningIdx < len(planning) {
-						sess = planning[a.focusPlanningIdx].session
+					if pi := a.cursor.Index(focusSectionPlanning); pi < len(planning) {
+						sess = planning[pi].session
 					}
 				case focusSectionBuilding:
 					building := a.dashboard.buildingSessions()
-					if a.focusBuildingIdx < len(building) {
-						sess = building[a.focusBuildingIdx].session
+					if bi := a.cursor.Index(focusSectionBuilding); bi < len(building) {
+						sess = building[bi].session
 					}
 				default:
 					a.setError("nothing to mark — cursor isn't on a Planning or Building session")
@@ -2164,7 +1860,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 				sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
-				a.focusReviewIdx = 0
+				a.cursor.SetIndex(focusSectionReview, 0)
 				return a, a.fetchReviewDiffCmd(sess)
 			case "r":
 				reviewItems := a.dashboard.reviewQueueSessions()
@@ -2172,21 +1868,18 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.setError("review queue is empty — press m on a finished session first")
 					return a, nil
 				}
-				idx := a.focusReviewIdx
+				idx := a.cursor.Index(focusSectionReview)
 				if idx >= len(reviewItems) {
 					idx = len(reviewItems) - 1
 				}
 				sess := reviewItems[idx].session
 				sess.SetLifecyclePhase(agent.LifecycleInReview)
-				a.reviewSession = sess
-				a.reviewTaskCursor = 0
-				a.reviewDiffCacheByTask = make(map[int]*diffmodel.Model)
+				a.reviewPanel = newReviewPanel(sess, a.width, a.height)
 				a.dashboard.panelFocus = focusReview
-				// Fetch diff stats if not already cached.
 				if _, ok := a.reviewDiffCache[sess.ID]; !ok {
 					return a, a.fetchReviewDiffCmd(sess)
 				}
-				a.refreshReviewDiffViewport()
+				a.reviewPanel.RefreshDiffViewport(a.panelServices())
 				return a, nil
 			case "n":
 				if a.cfg != nil && len(a.cfg.Repos) > 1 {
@@ -2712,47 +2405,12 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// focusReview: left-pane row clicks move the review task cursor.
-		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
-			entry := a.reviewDiffCache[a.reviewSession.ID]
-			if entry != nil && a.width >= 80 {
-				headerH := len(renderReviewHeader(a.reviewSession, a.width))
-				leftW := a.width * 4 / 10
-				if leftW < 32 {
-					leftW = 32
-				}
-				paneTop := dashboardTopY + headerH
-				if rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, leftW); rowIdx >= 0 {
-					// renderTaskListPane scrolls so the cursor stays centred; reproduce
-					// its offset computation so clicking visual row N maps to data row
-					// offset+N rather than jumping the cursor back to N.
-					footerLines := 3
-					if a.prDraftInFlight {
-						footerLines++
-					}
-					bodyH := a.height - dashboardTopY - headerH - footerLines
-					if bodyH < 4 {
-						bodyH = 4
-					}
-					const listHeaderLines = 2
-					rowsH := bodyH - listHeaderLines
-					if rowsH < 1 {
-						rowsH = 1
-					}
-					nRows := reviewTaskCount(entry)
-					offset := a.reviewTaskCursor - rowsH/2
-					if offset < 0 {
-						offset = 0
-					}
-					if offset+rowsH > nRows {
-						offset = nRows - rowsH
-						if offset < 0 {
-							offset = 0
-						}
-					}
-					a.reviewTaskCursor = offset + rowIdx
-					return a, nil
-				}
+		// focusReview: delegate left-pane row clicks to the panel.
+		if a.dashboard.panelFocus == focusReview && a.reviewPanel != nil {
+			before := a.reviewPanel.TaskCursor()
+			a.reviewPanel.handleClick(msg, a.panelServices())
+			if a.reviewPanel.TaskCursor() != before {
+				return a, nil
 			}
 		}
 
@@ -2767,7 +2425,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// is right-aligned on the card; the X-column check below narrows the
 		// hit region without needing per-row Y granularity from pipelineHitTest.
 		if section == focusSectionReview || section == focusSectionShipping {
-			items := a.focusSectionItems(section)
+			items := a.dashboard.sectionItems(section)
 			if idx < len(items) {
 				sess := items[idx].session
 				if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
@@ -2797,8 +2455,7 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.lastPipelineClickSec = section
 		a.lastPipelineClickIdx = idx
 
-		a.focusCursorSection = section
-		*a.focusSectionIdx(section) = idx
+		a.cursor.JumpTo(section, idx)
 		a.syncFocusCursorToDashboard()
 
 		if isDoubleClick {
@@ -3385,6 +3042,106 @@ func (a *App) screenToTermCellFocusLaunch(screenX, screenY int) (termX, termY in
 	return termX, termY, inViewport
 }
 
+// panelServices builds a fresh PanelServices struct closing over a's current
+// state. Panels receive this on every Update so they always see live App
+// state without holding a back-pointer. Cmd factories returned here must be
+// pure: they produce tea.Cmds, never mutate App directly.
+func (a *App) panelServices() PanelServices {
+	return PanelServices{
+		Width:         a.width,
+		Height:        a.height,
+		DashboardTopY: a.dashboardTopY(),
+		ManagerFor: func(sessionID string) (*agent.Manager, string) {
+			repoPath := a.repoPathForSession(sessionID)
+			if repoPath == "" {
+				return nil, ""
+			}
+			return a.managers[repoPath], repoPath
+		},
+		Resolved: func(repoPath string) config.ResolvedSettings {
+			return a.resolvedCache[repoPath]
+		},
+		GHClient: func() *github.Client { return a.ghClient },
+		PRCache: func(sessionID string) *prCacheEntry {
+			return a.prCache[sessionID]
+		},
+		ReviewCache: func(sessionID string) *reviewDiffEntry {
+			return a.reviewDiffCache[sessionID]
+		},
+		ClosePanel: func() {
+			// Drop the active overlay panel and return focus to the pipeline.
+			// Each panel reference is mutated; only the matching one will be
+			// non-nil at any given time so the others are no-ops.
+			a.reviewPanel = nil
+			a.shippingPanel = nil
+			a.dashboard.panelFocus = focusList
+		},
+		OpenInLaunch: func(sess *agent.Session) bool {
+			return a.openSessionInFocusLaunch(sess)
+		},
+		OpenPlanEditor: func(sess *agent.Session, repoPath string) {
+			a.openPlanEditor(sess, repoPath)
+		},
+		OpenURL:  openURL,
+		SetError: a.setError,
+		MergePRCmd: func(sessionID string, force bool) tea.Cmd {
+			if force {
+				return a.forceMergePRCmd(sessionID)
+			}
+			return a.mergePRCmd(sessionID)
+		},
+		StartPRDraftCmd: func(sess *agent.Session, repoPath string, transitionShipping bool) tea.Cmd {
+			a.prDraftInFlight = true
+			a.prDraftSessionID = sess.ID
+			a.prModalTransitionShipping = transitionShipping
+			return a.startPRDraftCmd(sess, repoPath, transitionShipping)
+		},
+		KillSessionCmd: func(sess *agent.Session) tea.Cmd {
+			repoPath := a.repoPathForSession(sess.ID)
+			if repoPath == "" {
+				return nil
+			}
+			mgr := a.managers[repoPath]
+			if mgr == nil {
+				return nil
+			}
+			var agentIDs []string
+			for _, ag := range sess.Agents() {
+				agentIDs = append(agentIDs, ag.ID)
+				a.closingAgents[ag.ID] = true
+			}
+			sessID := sess.ID
+			a.closingSessions[sessID] = true
+			return func() tea.Msg {
+				return killResultMsg{
+					scope:     killScopeSession,
+					sessionID: sessID,
+					agentIDs:  agentIDs,
+					err:       filterNotFound(mgr.KillSession(sessID)),
+				}
+			}
+		},
+		FetchReviewDiff:    func(sess *agent.Session) tea.Cmd { return a.fetchReviewDiffCmd(sess) },
+		prDraftInFlightFor: func(sessionID string) bool { return a.prDraftInFlight && a.prDraftSessionID == sessionID },
+		FeedbackTriage:     func(sessionID string) map[string]*feedbackTriageEntry { return a.feedbackTriage[sessionID] },
+		SetFeedbackVerdict: a.setFeedbackVerdict,
+		SetFeedbackNote:    a.setFeedbackNote,
+	}
+}
+
+// dashboardTopY returns the screen Y offset where the dashboard content
+// begins, accounting for any error or confirm-quit rows rendered above it.
+func (a *App) dashboardTopY() int {
+	y := 0
+	if a.err != "" {
+		y++
+	}
+	if a.confirmQuit {
+		y++
+	}
+	return y
+}
+
 func (a *App) refreshAgentList() {
 	a.dashboard.closingAgents = a.closingAgents
 	a.dashboard.closingSessions = a.closingSessions
@@ -3402,11 +3159,7 @@ func (a *App) refreshAgentList() {
 	a.dashboard.focusBreakAnimFrame = a.focusBreakAnimFrame
 	a.dashboard.focusBreakShortWarning = a.focusBreakShortWarning
 	a.dashboard.focusBreakTimerUp = a.focusBreakTimerUp
-	a.dashboard.focusPlanningIdx = a.focusPlanningIdx
-	a.dashboard.focusBuildingIdx = a.focusBuildingIdx
-	a.dashboard.focusReviewIdx = a.focusReviewIdx
-	a.dashboard.focusShippingIdx = a.focusShippingIdx
-	a.dashboard.focusCursorSection = a.focusCursorSection
+	a.dashboard.cursor = a.cursor
 	a.dashboard.prDraftSessionID = a.prDraftSessionID
 	a.dashboard.activeRepoName = a.activeRepoDisplayName()
 	a.dashboard.activeRepoPath = a.activeRepo
@@ -3501,54 +3254,7 @@ func (a *App) refreshAgentList() {
 			}
 		}
 	}
-	a.clampFocusCursor()
-}
-
-// focusSectionCounts returns the number of rows in each fullscreen-focus
-// section, indexed by focusSection. Order matches focusSectionsInOrder().
-func (a *App) focusSectionCounts() [4]int {
-	return [4]int{
-		focusSectionPlanning: len(a.dashboard.planningSessions()),
-		focusSectionBuilding: len(a.dashboard.buildingSessions()),
-		focusSectionReview:   len(a.dashboard.reviewQueueSessions()),
-		focusSectionShipping: len(a.dashboard.shippingSessions()),
-	}
-}
-
-// focusSectionIdx returns a pointer to the per-section cursor index field for
-// the given section, so navigation/clamp logic can move and bound-check them
-// without a fan-out switch in every caller. Panics on an unknown section so a
-// future focusSection constant added without updating this switch surfaces as
-// a clear test failure rather than silently corrupting focusBuildingIdx.
-func (a *App) focusSectionIdx(s focusSection) *int {
-	switch s {
-	case focusSectionPlanning:
-		return &a.focusPlanningIdx
-	case focusSectionBuilding:
-		return &a.focusBuildingIdx
-	case focusSectionReview:
-		return &a.focusReviewIdx
-	case focusSectionShipping:
-		return &a.focusShippingIdx
-	}
-	panic(fmt.Sprintf("focusSectionIdx: unknown focusSection %d", s))
-}
-
-// focusSectionItems returns the listItem slice that backs the given section.
-// Panics on an unknown section, matching focusSectionIdx, so a missing case
-// fails fast in tests instead of silently rendering an empty section.
-func (a *App) focusSectionItems(s focusSection) []listItem {
-	switch s {
-	case focusSectionPlanning:
-		return a.dashboard.planningSessions()
-	case focusSectionBuilding:
-		return a.dashboard.buildingSessions()
-	case focusSectionReview:
-		return a.dashboard.reviewQueueSessions()
-	case focusSectionShipping:
-		return a.dashboard.shippingSessions()
-	}
-	panic(fmt.Sprintf("focusSectionItems: unknown focusSection %d", s))
+	a.cursor.Clamp(a.dashboard.sectionCounts())
 }
 
 // pipelineHitTest maps a mouse-click Y coordinate (relative to the dashboard
@@ -3586,26 +3292,26 @@ func (a *App) pipelineHitTest(dashboardContentY int) (focusSection, int, bool) {
 		}
 	}
 
-	cursor := headerRows + sepRows + pipelineRows + blankRows
+	rowCursor := headerRows + sepRows + pipelineRows + blankRows
 	for _, section := range focusSectionsInOrder() {
-		items := a.focusSectionItems(section)
+		items := a.dashboard.sectionItems(section)
 		if len(items) == 0 {
 			continue
 		}
-		cursor += labelRows
+		rowCursor += labelRows
 		for i := range items {
 			rowH := rowsPerItem(section)
-			start := cursor
+			start := rowCursor
 			end := start + rowH
 			if dashboardContentY >= start && dashboardContentY < end {
 				return section, i, true
 			}
-			cursor = end
+			rowCursor = end
 			if i < len(items)-1 {
-				cursor += blankRows
+				rowCursor += blankRows
 			}
 		}
-		cursor += blankRows
+		rowCursor += blankRows
 	}
 	return focusSectionPlanning, 0, false
 }
@@ -3615,11 +3321,12 @@ func (a *App) pipelineHitTest(dashboardContentY int) (focusSection, int, bool) {
 // this rather than dashboard.selectedSession() because the pipeline addresses
 // sessions by section + index, not by a `selected` row in the items list.
 func (a *App) cursorSelectedSession() *agent.Session {
-	items := a.focusSectionItems(a.focusCursorSection)
+	section := a.cursor.Section()
+	items := a.dashboard.sectionItems(section)
 	if len(items) == 0 {
 		return nil
 	}
-	idx := *a.focusSectionIdx(a.focusCursorSection)
+	idx := a.cursor.Index(section)
 	if idx < 0 || idx >= len(items) {
 		idx = 0
 	}
@@ -3644,107 +3351,11 @@ func (a *App) cursorSelectedRepoPath() string {
 	return a.activeRepo
 }
 
-// clampFocusCursor keeps the per-section indices and the cursor section in
-// valid ranges as the underlying lists change (sessions transition phases, etc.).
-// When the cursor's current section becomes empty, it falls through to the next
-// non-empty section in render order so the cursor stays on a visible row.
-func (a *App) clampFocusCursor() {
-	counts := a.focusSectionCounts()
-
-	clamp := func(idx, n int) int {
-		if n <= 0 {
-			return 0
-		}
-		if idx >= n {
-			return n - 1
-		}
-		if idx < 0 {
-			return 0
-		}
-		return idx
-	}
-	a.focusPlanningIdx = clamp(a.focusPlanningIdx, counts[focusSectionPlanning])
-	a.focusBuildingIdx = clamp(a.focusBuildingIdx, counts[focusSectionBuilding])
-	a.focusReviewIdx = clamp(a.focusReviewIdx, counts[focusSectionReview])
-	a.focusShippingIdx = clamp(a.focusShippingIdx, counts[focusSectionShipping])
-
-	if counts[a.focusCursorSection] > 0 {
-		return
-	}
-	for _, s := range focusSectionsInOrder() {
-		if counts[s] > 0 {
-			a.focusCursorSection = s
-			return
-		}
-	}
-	a.focusCursorSection = focusSectionPlanning
-}
-
-// moveFocusCursorUp moves the fullscreen-focus cursor up one row. When at the
-// top of the current section, it transitions to the previous non-empty section.
-func (a *App) moveFocusCursorUp() {
-	idx := a.focusSectionIdx(a.focusCursorSection)
-	if *idx > 0 {
-		*idx--
-		return
-	}
-	// Walk render-order sections backwards from the current one; jump to the
-	// last row of the first non-empty earlier section.
-	order := focusSectionsInOrder()
-	cur := -1
-	for i, s := range order {
-		if s == a.focusCursorSection {
-			cur = i
-			break
-		}
-	}
-	counts := a.focusSectionCounts()
-	for i := cur - 1; i >= 0; i-- {
-		s := order[i]
-		if counts[s] > 0 {
-			a.focusCursorSection = s
-			*a.focusSectionIdx(s) = counts[s] - 1
-			return
-		}
-	}
-}
-
-// moveFocusCursorDown moves the fullscreen-focus cursor down one row. When at
-// the bottom of the current section, it transitions to the next non-empty section.
-func (a *App) moveFocusCursorDown() {
-	counts := a.focusSectionCounts()
-	idx := a.focusSectionIdx(a.focusCursorSection)
-	if *idx < counts[a.focusCursorSection]-1 {
-		*idx++
-		return
-	}
-	order := focusSectionsInOrder()
-	cur := -1
-	for i, s := range order {
-		if s == a.focusCursorSection {
-			cur = i
-			break
-		}
-	}
-	for i := cur + 1; i < len(order); i++ {
-		s := order[i]
-		if counts[s] > 0 {
-			a.focusCursorSection = s
-			*a.focusSectionIdx(s) = 0
-			return
-		}
-	}
-}
-
 // syncFocusCursorToDashboard mirrors the cursor-related App fields onto the
 // dashboard model so the next render reflects navigation immediately, without
 // waiting for the 100ms tick that drives refreshAgentList.
 func (a *App) syncFocusCursorToDashboard() {
-	a.dashboard.focusPlanningIdx = a.focusPlanningIdx
-	a.dashboard.focusBuildingIdx = a.focusBuildingIdx
-	a.dashboard.focusReviewIdx = a.focusReviewIdx
-	a.dashboard.focusShippingIdx = a.focusShippingIdx
-	a.dashboard.focusCursorSection = a.focusCursorSection
+	a.dashboard.cursor = a.cursor
 	a.dashboard.prDraftSessionID = a.prDraftSessionID
 }
 
@@ -3755,17 +3366,18 @@ func (a *App) syncFocusCursorToDashboard() {
 // terminal so the user can run gh manually. Returns ok=false when the cursor's
 // section has no actionable row.
 func (a *App) activateFocusCursor() (tea.Cmd, bool) {
-	items := a.focusSectionItems(a.focusCursorSection)
+	section := a.cursor.Section()
+	items := a.dashboard.sectionItems(section)
 	if len(items) == 0 {
 		return nil, false
 	}
-	idx := *a.focusSectionIdx(a.focusCursorSection)
+	idx := a.cursor.Index(section)
 	if idx >= len(items) {
 		idx = len(items) - 1
 	}
 	sess := items[idx].session
 
-	switch a.focusCursorSection {
+	switch section {
 	case focusSectionPlanning:
 		// Planning rows open the plan editor — there is no agent yet to drop
 		// into a focusLaunch terminal. Drafting sessions also live in the
@@ -3777,19 +3389,15 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		return nil, a.openSessionInFocusLaunch(sess)
 	case focusSectionReview:
 		sess.SetLifecyclePhase(agent.LifecycleInReview)
-		a.reviewSession = sess
-		a.reviewTaskCursor = 0
-		a.reviewDiffCacheByTask = make(map[int]*diffmodel.Model)
+		a.reviewPanel = newReviewPanel(sess, a.width, a.height)
 		a.dashboard.panelFocus = focusReview
 		if _, ok := a.reviewDiffCache[sess.ID]; !ok {
 			return a.fetchReviewDiffCmd(sess), true
 		}
-		a.refreshReviewDiffViewport()
+		a.reviewPanel.RefreshDiffViewport(a.panelServices())
 		return nil, true
 	case focusSectionShipping:
-		a.shippingSession = sess
-		a.shippingFeedbackCursor = 0
-		a.shippingDetailScroll = 0
+		a.shippingPanel = newShippingPanel(sess, a.width, a.height-1)
 		a.dashboard.panelFocus = focusShipping
 		return nil, true
 	}
@@ -3919,8 +3527,7 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	// auto-opens if the planner raises a clarifying question.
 	for idx, item := range a.dashboard.planningSessions() {
 		if item.session != nil && item.session.ID == sess.ID {
-			a.focusPlanningIdx = idx
-			a.focusCursorSection = focusSectionPlanning
+			a.cursor.JumpTo(focusSectionPlanning, idx)
 			a.syncFocusCursorToDashboard()
 			break
 		}
@@ -4030,27 +3637,21 @@ func (a App) View() tea.View {
 
 	switch a.view {
 	case ViewDashboard:
-		if a.dashboard.panelFocus == focusReview && a.reviewSession != nil {
-			entry := a.reviewDiffCache[a.reviewSession.ID]
+		if a.dashboard.panelFocus == focusReview && a.reviewPanel != nil {
 			var panelStr string
-			if a.reviewSpecOverlayActive {
-				plan, _ := a.reviewSession.CachedPlan()
-				panelStr = renderReviewSpecOverlay(a.reviewSession, plan, a.reviewSpecOverlayScroll, a.width, a.height)
-			} else if a.prComposeModal.Active() {
+			if a.prComposeModal.Active() {
 				panelStr = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
 			} else {
-				panelStr = renderReviewPanel(a.reviewSession, entry, a.width, a.height, a.reviewTaskCursor, a.prDraftInFlight && a.prDraftSessionID == a.reviewSession.ID, a.reviewDiffVP.View())
+				panelStr = a.reviewPanel.View(a.panelServices())
 			}
 			v := tea.NewView(panelStr)
 			v.AltScreen = true
 			return v
 		}
-		if a.dashboard.panelFocus == focusShipping && a.shippingSession != nil {
-			entry := a.prCache[a.shippingSession.ID]
-			sessID := a.shippingSession.ID
-			panel := renderShippingPanel(a.shippingSession, entry, a.width, a.height, a.shippingFeedbackCursor, a.shippingDetailScroll, a.feedbackTriage[sessID])
-			if a.feedbackNote.Active() {
-				panel = lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, a.feedbackNote.View())
+		if a.dashboard.panelFocus == focusShipping && a.shippingPanel != nil {
+			panel := a.shippingPanel.View(a.panelServices())
+			if a.shippingPanel.NoteActive() {
+				panel = lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, a.shippingPanel.NoteView())
 			}
 			v := tea.NewView(panel)
 			v.AltScreen = true
@@ -4082,7 +3683,7 @@ func (a App) View() tea.View {
 				} else {
 					hints = []keyHint{{key: "b", desc: "exit early"}}
 				}
-			} else if a.focusCursorSection != focusSectionPlanning && a.focusSessionMinutes > 0 {
+			} else if a.cursor.Section() != focusSectionPlanning && a.focusSessionMinutes > 0 {
 				// Copy first — `hints := dashboardHints` aliases the package
 				// var's backing array, and we'd otherwise mutate it globally.
 				hints = append([]keyHint(nil), hints...)
@@ -4720,10 +4321,12 @@ func (a *App) setFeedbackNote(sessID, itemKey, note string) {
 	}
 }
 
-// addressFeedback synthesizes a prompt from failing CI checks and unresolved
-// review comments, spawns a new agent in the session's existing worktree, and
-// transitions the session back to LifecycleInProgress. The PR stays open.
-func (a *App) addressFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
+// handleShippingFeedbackRequest spawns a new agent in the session's existing
+// worktree, synthesised from failing CI checks and unresolved review
+// comments, and transitions the session back to LifecycleInProgress. The
+// PR stays open.
+func (a App) handleShippingFeedbackRequest(req shippingFeedbackRequestMsg) (tea.Model, tea.Cmd) {
+	sess := a.sessionByID(req.sessionID)
 	if sess == nil {
 		return a, nil
 	}
@@ -4739,10 +4342,6 @@ func (a *App) addressFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
 	}
 
 	entry := a.prCache[sess.ID]
-	// Cache may be a few seconds stale, but a merged/closed PR doesn't flip
-	// back to open — so any non-"open" state is grounds to refuse a respawn.
-	// Without this gate, pressing `r` after the PR was merged externally
-	// spawns a feedback-fixing agent on work that's already shipped.
 	if entry != nil && entry.pr != nil && entry.pr.State != "" && entry.pr.State != "open" {
 		a.setError(fmt.Sprintf("PR is %s; cannot address feedback on a closed/merged PR", entry.pr.State))
 		return a, nil
@@ -4770,7 +4369,7 @@ func (a *App) addressFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
 	}
 
 	sessID := sess.ID
-	a.shippingSession = nil
+	a.shippingPanel = nil
 	a.dashboard.panelFocus = focusList
 	delete(a.feedbackTriage, sessID)
 	return a, func() tea.Msg {
@@ -4938,20 +4537,14 @@ func fenceAsData(s string) string {
 	return fence + "\n" + body + "\n" + fence + "\n"
 }
 
-// addressReviewFeedback spawns a new agent in the session's existing worktree
-// with a prompt synthesized from the review panel's AI verdicts and user flags,
-// then transitions the session back to LifecycleInProgress. The reviewDiffCache
-// entry is cleared so the next entry into review re-runs the AI reviewer on the
-// new commit history. Mirrors addressFeedback (the shipping→build path) but
-// draws from in-panel verdicts rather than PR state.
-func (a *App) addressReviewFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
+// handleReviewReworkRequest spawns a new agent in the session's existing
+// worktree using a prompt synthesised by the review panel from AI verdicts
+// and user flags, then transitions the session back to LifecycleInProgress.
+// The reviewDiffCache entry is cleared so the next entry into review re-runs
+// the AI reviewer on the new commit history.
+func (a App) handleReviewReworkRequest(req reviewReworkRequestMsg) (tea.Model, tea.Cmd) {
+	sess := a.sessionByID(req.sessionID)
 	if sess == nil {
-		return a, nil
-	}
-	entry := a.reviewDiffCache[sess.ID]
-	prompt := buildReviewReworkPrompt(entry)
-	if prompt == "" {
-		a.setError("no tasks flagged or marked concerns/fail")
 		return a, nil
 	}
 	repoPath := a.repoPathForSession(sess.ID)
@@ -4978,16 +4571,11 @@ func (a *App) addressReviewFeedback(sess *agent.Session) (tea.Model, tea.Cmd) {
 		AgentProgram:      resolved.AgentProgram,
 		AgentModel:        resolved.AgentModel,
 		BuildSystemPrompt: resolved.BuildSystemPrompt,
-		Task:              prompt,
+		Task:              req.prompt,
 	}
 	sessID := sess.ID
-	// Drop the panel and the cached diff/verdicts: when the user returns to
-	// review after the rework round, fetchReviewDiffCmd will re-parse the plan
-	// and re-run verdicts over the augmented commit history.
-	a.reviewSession = nil
-	a.reviewTaskCursor = 0
+	a.reviewPanel = nil
 	delete(a.reviewDiffCache, sessID)
-	a.reviewDiffCacheByTask = make(map[int]*diffmodel.Model)
 	a.dashboard.panelFocus = focusList
 	return a, func() tea.Msg {
 		ag, err := mgr.AddAgent(sessID, cfg)
@@ -5404,63 +4992,6 @@ func (a App) fetchReviewDiffCmd(sess *agent.Session) tea.Cmd {
 
 		return reviewDiffMsg{sessionID: sessID, entry: entry}
 	}
-}
-
-// refreshReviewDiffViewport updates the inline diff viewport content for the
-// currently selected task. This ensures scroll clamping (PageDown/PageUp) works
-// correctly. Call this whenever the task cursor changes or when the review panel
-// is first entered. Also resets the scroll to the top.
-func (a *App) refreshReviewDiffViewport() {
-	// Compute layout dimensions mirroring renderReviewPanel's wide-mode formula so
-	// that SetHeight/SetWidth are correct and View()/PageDown/PageUp clamp properly.
-	headerLines := len(renderReviewHeader(a.reviewSession, a.width))
-	footerH := 3
-	bodyH := a.height - headerLines - footerH
-	if bodyH < 4 {
-		bodyH = 4
-	}
-	maxSummaryH := bodyH / 3
-	if maxSummaryH < 4 {
-		maxSummaryH = 4
-	}
-	diffH := bodyH - maxSummaryH - 1
-	if diffH < 1 {
-		diffH = 1
-	}
-	rightW := a.width*6/10 - 5
-	if rightW < 20 {
-		rightW = 20
-	}
-	a.reviewDiffVP.SetHeight(diffH)
-	a.reviewDiffVP.SetWidth(rightW)
-	a.reviewDiffVP.GotoTop()
-	if a.reviewSession == nil {
-		a.reviewDiffVP.SetContent("")
-		return
-	}
-	entry := a.reviewDiffCache[a.reviewSession.ID]
-	if entry == nil {
-		a.reviewDiffVP.SetContent("")
-		return
-	}
-	group := reviewTaskGroupAtCursor(entry, a.reviewTaskCursor)
-	if group == nil || group.rawDiff == "" {
-		a.reviewDiffVP.SetContent("(no diff for this task)")
-		return
-	}
-	// Use cache to avoid re-parsing on each keystroke.
-	idx := a.reviewTaskCursor
-	m, ok := a.reviewDiffCacheByTask[idx]
-	if !ok {
-		var err error
-		m, err = diffmodel.Parse(group.rawDiff)
-		if err != nil || m == nil {
-			a.reviewDiffVP.SetContent("(no diff for this task)")
-			return
-		}
-		a.reviewDiffCacheByTask[idx] = m
-	}
-	a.reviewDiffVP.SetContent(renderAllFilesUnified(m, rightW))
 }
 
 // populateNoDiffVerdicts stamps verdictNoDiff on every plan task in entry that

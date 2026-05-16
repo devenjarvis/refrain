@@ -114,11 +114,7 @@ type dashboardModel struct {
 	focusBreakAnimFrame    int
 	focusBreakShortWarning bool
 	focusBreakTimerUp      bool
-	focusPlanningIdx       int            // index into planningSessions()
-	focusBuildingIdx       int            // index into buildingSessions() (was the in-progress list)
-	focusReviewIdx         int            // index into reviewQueueSessions()
-	focusShippingIdx       int            // index into shippingSessions()
-	focusCursorSection     focusSection   // which fullscreen-focus section the cursor is on
+	cursor                 FocusedCursor  // pipeline cursor mirror; synced from App on every refresh
 	prDraftSessionID       string         // session ID whose PR draft is in flight; "" when idle
 	activeRepoName         string         // display name of the active repo
 	activeRepoPath         string         // canonical path of the active repo (for pipeline filtering)
@@ -401,6 +397,35 @@ func (d dashboardModel) buildingSessions() []listItem {
 		return result[i].session.CreatedAt.Before(result[j].session.CreatedAt)
 	})
 	return result
+}
+
+// sectionItems returns the listItem slice that backs the given fullscreen-focus
+// section. The panic case enforces the focusSection enum invariant: a new
+// section added without updating this switch fails loudly at the first call
+// rather than silently rendering empty.
+func (d dashboardModel) sectionItems(s focusSection) []listItem {
+	switch s {
+	case focusSectionPlanning:
+		return d.planningSessions()
+	case focusSectionBuilding:
+		return d.buildingSessions()
+	case focusSectionReview:
+		return d.reviewQueueSessions()
+	case focusSectionShipping:
+		return d.shippingSessions()
+	}
+	panic(fmt.Sprintf("dashboardModel.sectionItems: unknown focusSection %d", s))
+}
+
+// sectionCounts returns the number of rows in each fullscreen-focus section,
+// indexed by focusSection. Used by FocusedCursor navigation methods.
+func (d dashboardModel) sectionCounts() [4]int {
+	return [4]int{
+		focusSectionPlanning: len(d.planningSessions()),
+		focusSectionBuilding: len(d.buildingSessions()),
+		focusSectionReview:   len(d.reviewQueueSessions()),
+		focusSectionShipping: len(d.shippingSessions()),
+	}
 }
 
 // renderCardProgressBar returns a progress bar + muted "done/total" suffix
@@ -1582,7 +1607,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 	if len(planningItems) > 0 {
 		lines = append(lines, StyleSubtle.Render("PLANNING"))
 		for i, item := range planningItems {
-			selected := d.focusCursorSection == focusSectionPlanning && i == d.focusPlanningIdx
+			selected := d.cursor.Section() == focusSectionPlanning && i == d.cursor.Index(focusSectionPlanning)
 			card := d.renderFocusSessionCard(item.session, item.repoName, selected, width)
 			lines = append(lines, card...)
 			if i < len(planningItems)-1 {
@@ -1596,7 +1621,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 	if len(buildingItems) > 0 {
 		lines = append(lines, StyleSubtle.Render("BUILDING"))
 		for i, item := range buildingItems {
-			selected := d.focusCursorSection == focusSectionBuilding && i == d.focusBuildingIdx
+			selected := d.cursor.Section() == focusSectionBuilding && i == d.cursor.Index(focusSectionBuilding)
 			card := d.renderFocusSessionCard(item.session, item.repoName, selected, width)
 			lines = append(lines, card...)
 			if i < len(buildingItems)-1 {
@@ -1610,7 +1635,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 	if len(reviewSessions) > 0 {
 		lines = append(lines, StyleSubtle.Render("REVIEWING"))
 		for i, item := range reviewSessions {
-			selected := d.focusCursorSection == focusSectionReview && i == d.focusReviewIdx
+			selected := d.cursor.Section() == focusSectionReview && i == d.cursor.Index(focusSectionReview)
 			row := d.renderQueueRow(item.session, item.repoName, selected, ColorWarning, width)
 			lines = append(lines, row...)
 			if i < len(reviewSessions)-1 {
@@ -1624,7 +1649,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 	if len(shippingItems) > 0 {
 		lines = append(lines, StyleSubtle.Render("SHIPPING"))
 		for i, item := range shippingItems {
-			selected := d.focusCursorSection == focusSectionShipping && i == d.focusShippingIdx
+			selected := d.cursor.Section() == focusSectionShipping && i == d.cursor.Index(focusSectionShipping)
 			row := d.renderQueueRow(item.session, item.repoName, selected, lipgloss.Color("#5ab58a"), width)
 			lines = append(lines, row...)
 			if i < len(shippingItems)-1 {
