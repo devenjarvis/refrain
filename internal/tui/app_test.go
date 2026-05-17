@@ -2754,6 +2754,101 @@ func TestSessionByIDInRepo_DisambiguatesAcrossRepos(t *testing.T) {
 	}
 }
 
+// capturePromptReviewer is a ReviewerAgent stub that records the last
+// OriginalPrompt passed to Review.
+type capturePromptReviewer struct {
+	capturedPrompt string
+}
+
+func (r *capturePromptReviewer) Review(_ context.Context, req agent.ReviewRequest) (agent.ReviewVerdict, error) {
+	r.capturedPrompt = req.OriginalPrompt
+	return agent.ReviewVerdict{}, nil
+}
+
+// TestHandleReviewDiff_UsesRepoPathFromMsg_NotFirstMatch verifies that
+// handleReviewDiff resolves the session via msg.repoPath so that when two
+// managers both hold session-1, the reviewer receives the original prompt from
+// the correct session (repoB's), not the first-match one (repoA's).
+func TestHandleReviewDiff_UsesRepoPathFromMsg_NotFirstMatch(t *testing.T) {
+	makeRepo := func() string {
+		dir, err := os.MkdirTemp("", "refrain-rvdiff-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		run := func(args ...string) {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("cmd %v: %v\n%s", args, err, out)
+			}
+		}
+		run("git", "init")
+		run("git", "config", "commit.gpgsign", "false")
+		run("git", "commit", "--allow-empty", "-m", "init")
+		return dir
+	}
+
+	repoA, repoB := makeRepo(), makeRepo()
+
+	mgrA := agent.NewManager(repoA, config.Resolve(nil, nil))
+	t.Cleanup(mgrA.Shutdown)
+	mgrB := agent.NewManager(repoB, config.Resolve(nil, nil))
+	t.Cleanup(mgrB.Shutdown)
+
+	sessA, _, err := mgrA.CreateSessionWithCommand(agent.Config{
+		Name: "work", Task: "test-a", RepoPath: repoA, Rows: 24, Cols: 80,
+	}, func(_ string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 30") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessA.SetOriginalPrompt("prompt-for-repo-A")
+
+	sessB, _, err := mgrB.CreateSessionWithCommand(agent.Config{
+		Name: "work", Task: "test-b", RepoPath: repoB, Rows: 24, Cols: 80,
+	}, func(_ string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 30") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessB.SetOriginalPrompt("prompt-for-repo-B")
+
+	// Both managers independently mint session-1.
+	if sessA.ID != "session-1" || sessB.ID != "session-1" {
+		t.Fatalf("expected both sessions to be session-1, got %q and %q", sessA.ID, sessB.ID)
+	}
+
+	reviewerA := &capturePromptReviewer{}
+	reviewerB := &capturePromptReviewer{}
+	mgrA.SetReviewerAgent(reviewerA)
+	mgrB.SetReviewerAgent(reviewerB)
+
+	app := NewApp()
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: repoA}, {Path: repoB}}}
+	app.managers[repoA] = mgrA
+	app.managers[repoB] = mgrB
+
+	// A reviewDiffEntry with one group so handleReviewDiff dispatches a reviewer.
+	entry := &reviewDiffEntry{
+		groups:   []taskReviewGroup{{taskIndex: 1}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+	msg := reviewDiffMsg{sessionID: "session-1", repoPath: repoB, entry: entry}
+
+	_, cmd := app.handleReviewDiff(msg)
+	if cmd == nil {
+		t.Fatal("handleReviewDiff returned nil cmd — expected a review task cmd for repoB's session")
+	}
+	// Execute the cmd so the reviewer is invoked.
+	_ = cmd()
+
+	if reviewerB.capturedPrompt != "prompt-for-repo-B" {
+		t.Errorf("repoB reviewer captured prompt=%q, want %q", reviewerB.capturedPrompt, "prompt-for-repo-B")
+	}
+	if reviewerA.capturedPrompt != "" {
+		t.Errorf("repoA reviewer should not have been called, but got prompt=%q", reviewerA.capturedPrompt)
+	}
+}
+
 // makeFourPhaseApp wires up an app with one session in each of the four
 // pipeline phases so tests can exercise navigation across all sections without
 // requiring a real manager / process. Sessions are constructed via

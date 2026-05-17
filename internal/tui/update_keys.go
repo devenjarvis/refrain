@@ -1104,16 +1104,19 @@ func (a App) handlePipelineKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 // session regardless of phase.
 func (a App) handlePipelineMarkReady() (App, tea.Cmd, bool) {
 	var sess *agent.Session
+	var repoPath string
 	switch a.cursor.Section() {
 	case focusSectionPlanning:
 		planning := a.dashboard.planningSessions()
 		if pi := a.cursor.Index(focusSectionPlanning); pi < len(planning) {
 			sess = planning[pi].session
+			repoPath = planning[pi].repoPath
 		}
 	case focusSectionBuilding:
 		building := a.dashboard.buildingSessions()
 		if bi := a.cursor.Index(focusSectionBuilding); bi < len(building) {
 			sess = building[bi].session
+			repoPath = building[bi].repoPath
 		}
 	default:
 		a.setError("nothing to mark — cursor isn't on a Planning or Building session")
@@ -1136,7 +1139,7 @@ func (a App) handlePipelineMarkReady() (App, tea.Cmd, bool) {
 	}
 	sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
 	a.cursor.SetIndex(focusSectionReview, 0)
-	return a, a.fetchReviewDiffCmd(sess), true
+	return a, a.fetchReviewDiffCmd(sess, repoPath), true
 }
 
 // handlePipelineOpenReview opens the review panel on the cursor-selected
@@ -1151,11 +1154,12 @@ func (a App) handlePipelineOpenReview() (App, tea.Cmd, bool) {
 	if idx >= len(reviewItems) {
 		idx = len(reviewItems) - 1
 	}
-	sess := reviewItems[idx].session
+	item := reviewItems[idx]
+	sess := item.session
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	a.openReview(newReviewPanel(sess, reviewItems[idx].repoPath, a.width, a.height))
+	a.openReview(newReviewPanel(sess, item.repoPath, a.width, a.height))
 	if _, ok := a.reviewDiffCache[sess.ID]; !ok {
-		return a, a.fetchReviewDiffCmd(sess), true
+		return a, a.fetchReviewDiffCmd(sess, item.repoPath), true
 	}
 	a.modals.Review().RefreshDiffViewport(a.panelServices())
 	return a, nil, true

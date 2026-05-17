@@ -379,7 +379,7 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 					// phase gate makes it idempotent on subsequent events).
 					if sess.LifecyclePhase() == agent.LifecycleInProgress && sess.IsReviewable() {
 						sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
-						autoPromoteCmd = a.fetchReviewDiffCmd(sess)
+						autoPromoteCmd = a.fetchReviewDiffCmd(sess, msg.repoPath)
 					}
 					// Mark session done when all non-shell agents have exited.
 					if msg.event.Status == agent.StatusDone || msg.event.Status == agent.StatusError {

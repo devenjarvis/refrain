@@ -656,7 +656,7 @@ func (a *App) panelServices() PanelServices {
 				}
 			}
 		},
-		FetchReviewDiff:    func(sess *agent.Session) tea.Cmd { return a.fetchReviewDiffCmd(sess) },
+		FetchReviewDiff:    func(sess *agent.Session, repoPath string) tea.Cmd { return a.fetchReviewDiffCmd(sess, repoPath) },
 		prDraftInFlightFor: func(sessionID string) bool { return a.prDraftInFlight && a.prDraftSessionID == sessionID },
 		FeedbackTriage:     func(sessionID string) map[string]*feedbackTriageEntry { return a.feedbackTriage[sessionID] },
 		SetFeedbackVerdict: a.setFeedbackVerdict,
@@ -923,9 +923,10 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		return nil, a.openSessionInFocusLaunch(sess)
 	case focusSectionReview:
 		sess.SetLifecyclePhase(agent.LifecycleInReview)
-		a.openReview(newReviewPanel(sess, items[idx].repoPath, a.width, a.height))
+		rp := items[idx].repoPath
+		a.openReview(newReviewPanel(sess, rp, a.width, a.height))
 		if _, ok := a.reviewDiffCache[sess.ID]; !ok {
-			return a.fetchReviewDiffCmd(sess), true
+			return a.fetchReviewDiffCmd(sess, rp), true
 		}
 		a.modals.Review().RefreshDiffViewport(a.panelServices())
 		return nil, true
@@ -1435,6 +1436,7 @@ type reviewDiffEntry struct {
 // reviewDiffMsg carries the result of an async review diff fetch.
 type reviewDiffMsg struct {
 	sessionID string
+	repoPath  string
 	entry     *reviewDiffEntry
 	err       error
 }

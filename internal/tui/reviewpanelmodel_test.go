@@ -48,7 +48,7 @@ func newTestSvc() (PanelServices, *testServiceState) {
 			state.killSessionCalled = true
 			return func() tea.Msg { return nil }
 		},
-		FetchReviewDiff: func(*agent.Session) tea.Cmd { return nil },
+		FetchReviewDiff: func(*agent.Session, string) tea.Cmd { return nil },
 		FeedbackTriage: func(string) map[string]*feedbackTriageEntry {
 			return nil
 		},
