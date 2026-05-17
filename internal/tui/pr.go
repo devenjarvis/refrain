@@ -45,6 +45,7 @@ func rowStatePhrase(entry *prCacheEntry) string {
 //   - err == nil, pr != nil: update cache.
 type prPollMsg struct {
 	sessionID string
+	repoPath  string
 	pr        *github.PRState
 	checks    *github.CheckStatus
 	reviews   *github.ReviewStatus

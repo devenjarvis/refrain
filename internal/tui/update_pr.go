@@ -122,7 +122,17 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 	}
 	// Auto-promote to Shipping when an open PR is discovered externally.
 	if msg.pr != nil && msg.pr.State == "open" {
-		if sess := a.sessionByID(msg.sessionID); sess != nil {
+		repoPath := msg.repoPath
+		if repoPath == "" {
+			repoPath = a.repoPathForSession(msg.sessionID)
+		}
+		var sess *agent.Session
+		if repoPath != "" {
+			sess = a.sessionByIDInRepo(repoPath, msg.sessionID)
+		} else {
+			sess = a.sessionByID(msg.sessionID)
+		}
+		if sess != nil {
 			switch sess.LifecyclePhase() {
 			case agent.LifecycleInProgress, agent.LifecycleReadyForReview, agent.LifecycleInReview:
 				sess.SetLifecyclePhase(agent.LifecycleShipping)
@@ -135,7 +145,10 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 	// Detect PR merge/close and trigger async session cleanup.
 	var cmds []tea.Cmd
 	if msg.pr != nil && (msg.pr.State == "merged" || msg.pr.State == "closed") {
-		repoPath := a.repoPathForSession(msg.sessionID)
+		repoPath := msg.repoPath
+		if repoPath == "" {
+			repoPath = a.repoPathForSession(msg.sessionID)
+		}
 		if repoPath != "" {
 			if mgr := a.managers[repoPath]; mgr != nil {
 				if sess := mgr.GetSession(msg.sessionID); sess != nil {
@@ -182,7 +195,10 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 			// Play audio notification, gated by the session's repo AudioEnabled setting
 			// (same gate as the idle-transition notification above).
 			if a.audioPlayer != nil {
-				repoPath := a.repoPathForSession(msg.sessionID)
+				repoPath := msg.repoPath
+				if repoPath == "" {
+					repoPath = a.repoPathForSession(msg.sessionID)
+				}
 				if repoPath != "" && a.resolvedCache[repoPath].AudioEnabled {
 					a.audioPlayer.Play()
 				}
@@ -394,7 +410,7 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 	// session that belongs to a different repo) before the poll fires.
 	if owning := a.repoPathForSession(sessionID); owning != "" && owning != repoPath {
 		mismatchErr := fmt.Errorf("internal: refreshPRStatus: repoPath %q does not own session %s (owner=%q)", repoPath, sessionID, owning)
-		return func() tea.Msg { return prPollMsg{sessionID: sessionID, err: mismatchErr} }
+		return func() tea.Msg { return prPollMsg{sessionID: sessionID, repoPath: repoPath, err: mismatchErr} }
 	}
 	ghClient := a.ghClient
 	return func() tea.Msg {
@@ -403,11 +419,11 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 
 		rawURL, err := git.GetRemoteURL(repoPath)
 		if err != nil {
-			return prPollMsg{sessionID: sessionID, err: err}
+			return prPollMsg{sessionID: sessionID, repoPath: repoPath, err: err}
 		}
 		owner, repo, err := github.ParseRemoteURL(rawURL)
 		if err != nil {
-			return prPollMsg{sessionID: sessionID, err: err}
+			return prPollMsg{sessionID: sessionID, repoPath: repoPath, err: err}
 		}
 
 		// Prefer SHA-based lookup: invariant to branch renames, so a PR opened
@@ -431,7 +447,7 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 			var err error
 			pr, err = ghClient.GetPR(ctx, owner, repo, branch)
 			if err != nil {
-				return prPollMsg{sessionID: sessionID, err: err}
+				return prPollMsg{sessionID: sessionID, repoPath: repoPath, err: err}
 			}
 		}
 		// Shipping sessions: if the open-only lookups all returned nil, check
@@ -452,11 +468,11 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 			}
 			checks, err = ghClient.GetChecks(ctx, owner, repo, checkRef)
 			if err != nil {
-				return prPollMsg{sessionID: sessionID, err: err}
+				return prPollMsg{sessionID: sessionID, repoPath: repoPath, err: err}
 			}
 			reviews, err = ghClient.GetReviews(ctx, owner, repo, pr.Number)
 			if err != nil {
-				return prPollMsg{sessionID: sessionID, err: err}
+				return prPollMsg{sessionID: sessionID, repoPath: repoPath, err: err}
 			}
 			// Threads are only needed for the shipping panel — skip the fetch for
 			// building/reviewing sessions to avoid doubling review API calls.
@@ -495,6 +511,7 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 
 		return prPollMsg{
 			sessionID: sessionID,
+			repoPath:  repoPath,
 			pr:        pr,
 			checks:    checks,
 			reviews:   reviews,

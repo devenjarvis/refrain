@@ -3476,6 +3476,91 @@ func TestPRPollMsg_CompleteNotPromoted(t *testing.T) {
 	}
 }
 
+// TestHandlePRPoll_MultiRepo_DoesNotPromoteWrongSession verifies that when two
+// managers both have a session with the same ID, a prPollMsg carrying repoPath
+// for repo B only transitions repo B's session — not repo A's.
+func TestHandlePRPoll_MultiRepo_DoesNotPromoteWrongSession(t *testing.T) {
+	repoA := t.TempDir()
+	repoB := t.TempDir()
+
+	sessA := agent.NewSessionForTest("session-1", "branch-a")
+	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
+	sessB := agent.NewSessionForTest("session-1", "branch-b")
+	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
+
+	mgrA := agent.NewManager(repoA, config.Resolve(nil, nil))
+	defer mgrA.Shutdown()
+	mgrA.AddSessionForTest(sessA)
+
+	mgrB := agent.NewManager(repoB, config.Resolve(nil, nil))
+	defer mgrB.Shutdown()
+	mgrB.AddSessionForTest(sessB)
+
+	app := NewApp()
+	// repoA listed first so sessionByID (first-match) would return repoA's session.
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: repoA}, {Path: repoB}}}
+	app.managers[repoA] = mgrA
+	app.managers[repoB] = mgrB
+
+	// Poll message carries repoB's path — only repoB's session should transition.
+	msg := prPollMsg{
+		sessionID: "session-1",
+		repoPath:  repoB,
+		pr:        &github.PRState{State: "open", Number: 42},
+	}
+	app.Update(msg)
+
+	if sessB.LifecyclePhase() != agent.LifecycleShipping {
+		t.Errorf("repoB session-1 phase = %v, want LifecycleShipping", sessB.LifecyclePhase())
+	}
+	if sessA.LifecyclePhase() != agent.LifecycleInProgress {
+		t.Errorf("repoA session-1 phase = %v, want LifecycleInProgress (should be unchanged)", sessA.LifecyclePhase())
+	}
+}
+
+// TestHandlePRPoll_MultiRepo_MergeKillsCorrectSession verifies that a
+// merged prPollMsg with a repoPath only triggers cleanup on the named repo's
+// manager, leaving the other repo's identically-named session untouched.
+func TestHandlePRPoll_MultiRepo_MergeKillsCorrectSession(t *testing.T) {
+	repoA := t.TempDir()
+	repoB := t.TempDir()
+
+	sessA := agent.NewSessionForTest("session-1", "branch-a")
+	sessA.SetLifecyclePhase(agent.LifecycleShipping)
+	sessB := agent.NewSessionForTest("session-1", "branch-b")
+	sessB.SetLifecyclePhase(agent.LifecycleShipping)
+
+	mgrA := agent.NewManager(repoA, config.Resolve(nil, nil))
+	defer mgrA.Shutdown()
+	mgrA.AddSessionForTest(sessA)
+
+	mgrB := agent.NewManager(repoB, config.Resolve(nil, nil))
+	defer mgrB.Shutdown()
+	mgrB.AddSessionForTest(sessB)
+
+	app := NewApp()
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: repoA}, {Path: repoB}}}
+	app.managers[repoA] = mgrA
+	app.managers[repoB] = mgrB
+
+	msg := prPollMsg{
+		sessionID: "session-1",
+		repoPath:  repoB,
+		pr:        &github.PRState{State: "merged"},
+	}
+	_, cmd := app.Update(msg)
+
+	if cmd == nil {
+		t.Fatal("expected a kill cmd for repoB's session")
+	}
+	if sessB.LifecyclePhase() != agent.LifecycleComplete {
+		t.Errorf("repoB session-1 phase = %v, want LifecycleComplete", sessB.LifecyclePhase())
+	}
+	if sessA.LifecyclePhase() != agent.LifecycleShipping {
+		t.Errorf("repoA session-1 phase = %v, want LifecycleShipping (should be unchanged)", sessA.LifecyclePhase())
+	}
+}
+
 // TestMergePRMsg_ErrorSetsError verifies that a mergePRMsg error is surfaced.
 func TestMergePRMsg_ErrorSetsError(t *testing.T) {
 	app := NewApp()
