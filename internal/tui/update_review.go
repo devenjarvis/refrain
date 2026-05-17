@@ -409,11 +409,14 @@ func fenceAsData(s string) string {
 // The reviewDiffCache entry is cleared so the next entry into review re-runs
 // the AI reviewer on the new commit history.
 func (a App) handleReviewReworkRequest(req reviewReworkRequestMsg) (tea.Model, tea.Cmd) {
-	sess := a.sessionByID(req.sessionID)
+	repoPath := req.repoPath
+	if repoPath == "" {
+		repoPath = a.activeRepo
+	}
+	sess := a.sessionByIDInRepo(repoPath, req.sessionID)
 	if sess == nil {
 		return a, nil
 	}
-	repoPath := a.repoPathForSession(sess.ID)
 	if repoPath == "" {
 		a.setError("no repo found for session")
 		return a, nil

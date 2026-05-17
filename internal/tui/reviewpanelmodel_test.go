@@ -264,7 +264,7 @@ func TestReviewPanelModel_BKey_NoFlags_SetsError(t *testing.T) {
 func TestReviewPanelModel_BKey_WithFlag_EmitsReworkMsg(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
+	panel := newReviewPanel(sess, "/repoB", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1, Text: "task one"}},
 		verdicts: map[int]*taskVerdictRecord{
@@ -286,6 +286,9 @@ func TestReviewPanelModel_BKey_WithFlag_EmitsReworkMsg(t *testing.T) {
 	}
 	if msg.prompt == "" {
 		t.Error("prompt should be non-empty when tasks are flagged")
+	}
+	if msg.repoPath != "/repoB" {
+		t.Errorf("repoPath = %q, want /repoB (pinned from panel)", msg.repoPath)
 	}
 }
 

@@ -147,6 +147,7 @@ func closeReviewPanel(svc PanelServices) tea.Cmd {
 // panel only signals intent.
 type reviewReworkRequestMsg struct {
 	sessionID string
+	repoPath  string
 	prompt    string
 }
 
@@ -310,8 +311,9 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 			return m, nil
 		}
 		sessID := m.session.ID
+		repoPath := m.repoPath
 		return m, func() tea.Msg {
-			return reviewReworkRequestMsg{sessionID: sessID, prompt: prompt}
+			return reviewReworkRequestMsg{sessionID: sessID, repoPath: repoPath, prompt: prompt}
 		}
 	case "enter", "space":
 		return m, nil
