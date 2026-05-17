@@ -17,6 +17,7 @@ import (
 // App because its lifetime exceeds a single panel session.
 type reviewPanelModel struct {
 	session           *agent.Session
+	repoPath          string
 	taskCursor        int
 	diffVP            viewport.Model
 	diffCacheByTask   map[int]*diffmodel.Model
@@ -27,11 +28,14 @@ type reviewPanelModel struct {
 }
 
 // newReviewPanel constructs a review panel for sess at the given size.
+// repoPath pins which repo's manager is used for all key handlers — it must
+// match the repo the session belongs to so multi-repo ID collisions are safe.
 // The diff viewport is fresh; the caller should invoke RefreshDiffViewport
 // after the reviewDiffCache entry lands.
-func newReviewPanel(sess *agent.Session, width, height int) *reviewPanelModel {
+func newReviewPanel(sess *agent.Session, repoPath string, width, height int) *reviewPanelModel {
 	return &reviewPanelModel{
 		session:         sess,
+		repoPath:        repoPath,
 		diffVP:          viewport.New(),
 		diffCacheByTask: make(map[int]*diffmodel.Model),
 		width:           width,
@@ -149,12 +153,10 @@ type reviewReworkRequestMsg struct {
 // reviewOpenIDECmd opens the configured IDE on the session's worktree.
 // Mirrors the inline 'i' / 'e' key handler shape: silent if the worktree is
 // missing, errors via svc.SetError when the IDE command isn't set.
-func reviewOpenIDECmd(sess *agent.Session, svc PanelServices) {
+func reviewOpenIDECmd(sess *agent.Session, repoPath string, svc PanelServices) {
 	if sess == nil || sess.Worktree == nil {
 		return
 	}
-	mgr, repoPath := svc.ManagerFor(sess.ID)
-	_ = mgr
 	if repoPath == "" {
 		return
 	}
@@ -244,8 +246,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 			svc.SetError("GitHub auth not available")
 			return m, nil
 		}
-		_, repoPath := svc.ManagerFor(sess.ID)
-		return m, svc.StartPRDraftCmd(sess, repoPath, true)
+		return m, svc.StartPRDraftCmd(sess, m.repoPath, true)
 	case "t":
 		sess := m.session
 		// Close first regardless of outcome: pressing 't' is an exit-the-panel
@@ -259,13 +260,13 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 	case "c":
 		sess := m.session
 		sess.SetLifecyclePhase(agent.LifecycleComplete)
-		mgr, _ := svc.ManagerFor(sess.ID)
+		mgr := svc.Manager(m.repoPath)
 		if mgr == nil {
 			return m, closeReviewPanel(svc)
 		}
 		return m, tea.Batch(closeReviewPanel(svc), svc.KillSessionCmd(sess))
 	case "e":
-		reviewOpenIDECmd(m.session, svc)
+		reviewOpenIDECmd(m.session, m.repoPath, svc)
 		return m, nil
 	case "j", "down":
 		if entry := svc.ReviewCache(m.session.ID); entry != nil {

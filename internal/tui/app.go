@@ -593,12 +593,8 @@ func (a *App) panelServices() PanelServices {
 		Width:         a.width,
 		Height:        a.height,
 		DashboardTopY: a.dashboardTopY(),
-		ManagerFor: func(sessionID string) (SessionManager, string) {
-			repoPath := a.repoPathForSession(sessionID)
-			if repoPath == "" {
-				return nil, ""
-			}
-			return a.managers[repoPath], repoPath
+		Manager: func(repoPath string) SessionManager {
+			return a.managers[repoPath]
 		},
 		Resolved: func(repoPath string) config.ResolvedSettings {
 			return a.resolvedCache[repoPath]
@@ -927,7 +923,7 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		return nil, a.openSessionInFocusLaunch(sess)
 	case focusSectionReview:
 		sess.SetLifecyclePhase(agent.LifecycleInReview)
-		a.openReview(newReviewPanel(sess, a.width, a.height))
+		a.openReview(newReviewPanel(sess, items[idx].repoPath, a.width, a.height))
 		if _, ok := a.reviewDiffCache[sess.ID]; !ok {
 			return a.fetchReviewDiffCmd(sess), true
 		}

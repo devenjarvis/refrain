@@ -1968,7 +1968,7 @@ func TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel(t *testing.T) {
 func TestReviewPanel_CKey_MarksComplete(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	app.openReview(newReviewPanel(sessR, app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	app = model.(App)
@@ -1994,7 +1994,7 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openReview(newReviewPanel(sess, app.width, app.height))
+	app.openReview(newReviewPanel(sess, dir, app.width, app.height))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -2032,7 +2032,7 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 func TestReviewPanel_TKey_NoAgents_ShowsError(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	app.openReview(newReviewPanel(sessR, app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
 	app = model.(App)
@@ -2064,7 +2064,7 @@ func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.openReview(newReviewPanel(sessR, app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
 	app.prComposeModal.SetSize(120, 39)
 	_ = app.prComposeModal.Open("My PR Title", "My PR Body", false)
 
@@ -2084,7 +2084,7 @@ func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
 func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	app.openReview(newReviewPanel(sessR, app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
 	// ghClient must be non-nil to pass the auth guard before startPRDraftCmd.
 	app.ghClient = &github.Client{}
 
@@ -3254,7 +3254,7 @@ func TestPRPollMsg_ExternalOpenPRPromotesInReviewToShipping_ClosesReviewPanel(t 
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openReview(newReviewPanel(sess, app.width, app.height))
+	app.openReview(newReviewPanel(sess, dir, app.width, app.height))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -4632,7 +4632,7 @@ func TestReviewPanel_EnterDoesNotChangeView(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.openReview(newReviewPanel(sessR, app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
 	app.reviewDiffCache[sessR.ID] = entry
 
 	for _, key := range []string{"enter", "space"} {
@@ -4685,7 +4685,7 @@ func TestReviewPanel_ScrollBindingsAdvanceViewport(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.openReview(newReviewPanel(sessR, app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
 	app.reviewDiffCache[sessR.ID] = entry
 	// Load diff content and set viewport dimensions before sending scroll keys.
 	app.modals.Review().RefreshDiffViewport(app.panelServices())

@@ -21,8 +21,8 @@ func newTestSvc() (PanelServices, *testServiceState) {
 	svc := PanelServices{
 		Width:  120,
 		Height: 40,
-		ManagerFor: func(string) (SessionManager, string) {
-			return nil, ""
+		Manager: func(string) SessionManager {
+			return nil
 		},
 		Resolved:    func(string) config.ResolvedSettings { return config.ResolvedSettings{} },
 		GHClient:    func() *github.Client { return nil },
@@ -72,7 +72,7 @@ type testServiceState struct {
 func TestReviewPanelModel_EscCloses(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 
 	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyEscape}, svc)
@@ -90,7 +90,7 @@ func TestReviewPanelModel_EscCloses(t *testing.T) {
 func TestReviewPanelModel_DKeyDefers(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 
 	_, _ = panel.Update(tea.KeyPressMsg{Code: 'd', Text: "d"}, svc)
@@ -110,7 +110,7 @@ func TestReviewPanelModel_DKeyDefers(t *testing.T) {
 func TestReviewPanelModel_TKeyClosesEvenOnFailure(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 	state.openInLaunchResult = false
 
@@ -129,13 +129,13 @@ func TestReviewPanelModel_TKeyClosesEvenOnFailure(t *testing.T) {
 func TestReviewPanelModel_CKeyMarksComplete(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
-	// Wire ManagerFor to a non-nil-looking entry so the panel reaches the
+	// Wire Manager to return a non-nil SessionManager so the panel reaches the
 	// kill path. The actual manager pointer is not exercised here because
 	// KillSessionCmd is stubbed.
-	svc.ManagerFor = func(string) (SessionManager, string) {
-		return &agent.Manager{}, "/repo"
+	svc.Manager = func(string) SessionManager {
+		return &agent.Manager{}
 	}
 
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'c', Text: "c"}, svc)
@@ -159,7 +159,7 @@ func TestReviewPanelModel_CKeyMarksComplete(t *testing.T) {
 func TestReviewPanelModel_TaskCursorMovesWithJK(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{
 			{Index: 1, Text: "task one"},
@@ -190,7 +190,7 @@ func TestReviewPanelModel_TaskCursorMovesWithJK(t *testing.T) {
 func TestReviewPanelModel_TaskCursorClampsAtTopAndBottom(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1}, {Index: 2}},
 	}
@@ -214,7 +214,7 @@ func TestReviewPanelModel_TaskCursorClampsAtTopAndBottom(t *testing.T) {
 func TestReviewPanelModel_FKey_TogglesUserFlag(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 7, Text: "task one"}},
 	}
@@ -235,7 +235,7 @@ func TestReviewPanelModel_FKey_TogglesUserFlag(t *testing.T) {
 
 func TestReviewPanelModel_FKey_NoCache_NoOp(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, _ := newTestSvc() // ReviewCache returns nil
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'f', Text: "f"}, svc)
 	if cmd != nil {
@@ -246,7 +246,7 @@ func TestReviewPanelModel_FKey_NoCache_NoOp(t *testing.T) {
 func TestReviewPanelModel_BKey_NoFlags_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1}},
 	}
@@ -264,7 +264,7 @@ func TestReviewPanelModel_BKey_NoFlags_SetsError(t *testing.T) {
 func TestReviewPanelModel_BKey_WithFlag_EmitsReworkMsg(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1, Text: "task one"}},
 		verdicts: map[int]*taskVerdictRecord{
@@ -295,7 +295,7 @@ func TestReviewPanelModel_EnterAndSpace_AreNoOp(t *testing.T) {
 	// noticed.
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 
 	for _, k := range []tea.KeyPressMsg{
@@ -320,7 +320,7 @@ func TestReviewPanelModel_DiffScrollKeys_DoNotChangeCursorOrClose(t *testing.T) 
 	// The taskCursor must stay put and the panel must stay open.
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 
 	keys := []tea.KeyPressMsg{
@@ -351,7 +351,7 @@ func TestReviewPanelModel_QKey_NoPlan_DoesNotOpenSpec(t *testing.T) {
 	if sess.HasPlan() {
 		t.Skip("test prereq: session should not have a plan")
 	}
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, _ := newTestSvc()
 	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"}, svc)
 	if panel.specOverlay {
@@ -370,7 +370,7 @@ func TestReviewPanelModel_QKey_WithPlan_OpensSpec(t *testing.T) {
 	if !sess.HasPlan() {
 		t.Fatal("test prereq: HasPlan should be true after writing plan.md")
 	}
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, _ := newTestSvc()
 	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"}, svc)
 	if !panel.specOverlay {
@@ -385,7 +385,7 @@ func TestReviewPanelModel_SpecOverlay_Keys(t *testing.T) {
 	if err := writePlanForTest(planDir, sess, "# Goal\n"); err != nil {
 		t.Fatalf("write plan: %v", err)
 	}
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, _ := newTestSvc()
 	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"}, svc)
 	if !panel.specOverlay {
@@ -429,7 +429,7 @@ func TestReviewPanelModel_SpecOverlay_OtherKeys_AreSwallowed(t *testing.T) {
 		t.Fatalf("write plan: %v", err)
 	}
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"}, svc)
 
@@ -450,7 +450,7 @@ func TestReviewPanelModel_SpecOverlay_OtherKeys_AreSwallowed(t *testing.T) {
 func TestReviewPanelModel_PKey_WithCachedPR_OpensURL(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 	var openedURL string
 	svc.PRCache = func(string) *prCacheEntry {
@@ -474,7 +474,7 @@ func TestReviewPanelModel_PKey_WithCachedPR_OpensURL(t *testing.T) {
 
 func TestReviewPanelModel_PKey_NoPR_NoGHClient_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 	svc.GHClient = func() *github.Client { return nil }
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"}, svc)
@@ -488,9 +488,8 @@ func TestReviewPanelModel_PKey_NoPR_NoGHClient_SetsError(t *testing.T) {
 
 func TestReviewPanelModel_EKey_NoIDECommand_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTestWithPath("s1", "fix-auth", t.TempDir())
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "/repo", 120, 40)
 	svc, state := newTestSvc()
-	svc.ManagerFor = func(string) (SessionManager, string) { return nil, "/repo" }
 	svc.Resolved = func(string) config.ResolvedSettings {
 		return config.ResolvedSettings{IDECommand: ""}
 	}
@@ -503,7 +502,7 @@ func TestReviewPanelModel_EKey_NoIDECommand_SetsError(t *testing.T) {
 func TestReviewPanelModel_UnknownKey_NoOp(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, 120, 40)
+	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 
 	before := struct {
@@ -535,6 +534,56 @@ func TestReviewPanelModel_UnknownKey_NoOp(t *testing.T) {
 
 	if before != after {
 		t.Errorf("unknown keys changed state: before=%+v after=%+v", before, after)
+	}
+}
+
+// TestReviewPanel_PKey_UsesPinnedRepoPath_NotFirstMatch verifies that pressing
+// 'p' (draft PR) passes the panel's pinned repoPath to StartPRDraftCmd, not
+// the first-match repoPath from ManagerFor — the multi-repo collision fix.
+func TestReviewPanel_PKey_UsesPinnedRepoPath_NotFirstMatch(t *testing.T) {
+	sess := agent.NewSessionForTest("session-1", "my-task")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+	panel := newReviewPanel(sess, "/repoB", 120, 40)
+	svc, _ := newTestSvc()
+
+	var recordedRepoPath string
+	svc.StartPRDraftCmd = func(_ *agent.Session, repoPath string, _ bool) tea.Cmd {
+		recordedRepoPath = repoPath
+		return func() tea.Msg { return nil }
+	}
+	// non-nil GHClient so the code passes the auth check and reaches StartPRDraftCmd
+	svc.GHClient = func() *github.Client { return new(github.Client) }
+	svc.PRCache = func(string) *prCacheEntry { return nil }
+
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"}, svc)
+
+	if recordedRepoPath != "/repoB" {
+		t.Errorf("StartPRDraftCmd received repoPath=%q, want /repoB (pinned)", recordedRepoPath)
+	}
+}
+
+// TestReviewPanel_CKey_UsesPinnedManager verifies that pressing 'c' (mark
+// complete) resolves the manager via the panel's pinned repoPath, not the
+// first-match lookup.
+func TestReviewPanel_CKey_UsesPinnedManager(t *testing.T) {
+	sess := agent.NewSessionForTest("session-1", "my-task")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+	panel := newReviewPanel(sess, "/repoB", 120, 40)
+	svc, state := newTestSvc()
+
+	var managerCalledWith string
+	svc.Manager = func(repoPath string) SessionManager {
+		managerCalledWith = repoPath
+		return &agent.Manager{} // non-nil so kill path is taken
+	}
+
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'c', Text: "c"}, svc)
+
+	if managerCalledWith != "/repoB" {
+		t.Errorf("Manager called with %q, want /repoB (pinned)", managerCalledWith)
+	}
+	if !state.killSessionCalled {
+		t.Error("expected KillSessionCmd to be invoked on non-nil manager")
 	}
 }
 

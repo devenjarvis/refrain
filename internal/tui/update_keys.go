@@ -1153,7 +1153,7 @@ func (a App) handlePipelineOpenReview() (App, tea.Cmd, bool) {
 	}
 	sess := reviewItems[idx].session
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	a.openReview(newReviewPanel(sess, a.width, a.height))
+	a.openReview(newReviewPanel(sess, reviewItems[idx].repoPath, a.width, a.height))
 	if _, ok := a.reviewDiffCache[sess.ID]; !ok {
 		return a, a.fetchReviewDiffCmd(sess), true
 	}
