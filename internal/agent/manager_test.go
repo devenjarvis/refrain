@@ -991,3 +991,83 @@ func TestManager_EmitDuringShutdownDoesNotPanic(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+// setupTestRepoWithRemote creates a working repo backed by a bare "origin"
+// remote whose default branch is "main". Returns the working repo path.
+func setupTestRepoWithRemote(t *testing.T) string {
+	t.Helper()
+
+	bare := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init", "--bare"},
+		{"git", "symbolic-ref", "HEAD", "refs/heads/main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = bare
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup bare %v: %v\n%s", args, err, out)
+		}
+	}
+
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "clone", bare, "."},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "checkout", "-b", "main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = work
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup work %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(work, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "initial"},
+		{"git", "push", "-u", "origin", "main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = work
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup work %v: %v\n%s", args, err, out)
+		}
+	}
+
+	return work
+}
+
+// TestCreateSession_BranchesOffRemoteDefault verifies that a new session's
+// worktree is created from the remote default branch (origin/main) even when
+// the user has a different branch checked out locally in the main worktree.
+// This is a regression test for the bug where Refrain branched off whatever
+// HEAD pointed at locally.
+func TestCreateSession_BranchesOffRemoteDefault(t *testing.T) {
+	repo := setupTestRepoWithRemote(t)
+
+	// Check out a different local branch so HEAD != main.
+	cmd := exec.Command("git", "checkout", "-b", "feature-x")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout feature-x: %v\n%s", err, out)
+	}
+
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	sess, _, err := mgr.CreateSessionWithCommand(
+		Config{Task: "test", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := sess.Worktree.BaseBranch; got != "main" {
+		t.Errorf("Worktree.BaseBranch = %q, want %q (must use remote default, not local HEAD)", got, "main")
+	}
+}

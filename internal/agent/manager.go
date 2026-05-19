@@ -1205,10 +1205,16 @@ func (m *Manager) createSessionWorktree(cfg Config) (*Session, error) {
 		cfg.AgentProgram = settings.AgentProgram
 	}
 
-	// Determine base branch: use configured default, or auto-detect.
+	// Determine base branch: use configured default, otherwise the remote's
+	// default branch (origin/HEAD). The local HEAD is only used as a final
+	// fallback for repos without an origin remote — new worktrees should
+	// branch off the canonical trunk, not whatever happens to be checked
+	// out in the main working tree.
 	baseBranch := settings.DefaultBranch
 	if baseBranch == "" {
-		if detected, err := git.BaseBranch(m.repoPath); err == nil {
+		if detected, err := git.RemoteDefaultBranch(m.repoPath); err == nil {
+			baseBranch = detected
+		} else if detected, err := git.BaseBranch(m.repoPath); err == nil {
 			baseBranch = detected
 		}
 	}

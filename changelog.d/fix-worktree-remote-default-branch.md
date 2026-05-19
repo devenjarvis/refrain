@@ -1,0 +1,3 @@
+### Fixed
+
+- New session worktrees are now always created off the remote default branch (`origin/HEAD`) rather than whatever the user happens to have checked out locally in the main worktree. Previously, if you ran `refrain` while sitting on `feature/unrelated`, the new worktree was cut from `origin/feature/unrelated`; it now correctly branches from `origin/main` (or your configured `DefaultBranch`). A new `git.RemoteDefaultBranch` helper reads `refs/remotes/origin/HEAD`, repopulating it via `git remote set-head origin -a` if absent; the local HEAD is only used as a last resort for repos with no `origin` remote.

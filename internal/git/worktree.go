@@ -61,6 +61,25 @@ func BaseBranch(repoPath string) (string, error) {
 	return runGit(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
 }
 
+// RemoteDefaultBranch returns the default branch of the "origin" remote
+// (e.g. "main"). It reads refs/remotes/origin/HEAD; if that symref isn't set
+// locally, it runs `git remote set-head origin -a` to populate it from the
+// remote, then re-reads. Returns an error if no origin remote exists or the
+// remote has no HEAD.
+func RemoteDefaultBranch(repoPath string) (string, error) {
+	if out, err := runGit(repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil && out != "" {
+		return strings.TrimPrefix(out, "origin/"), nil
+	}
+	if _, err := runGit(repoPath, "remote", "set-head", "origin", "-a"); err != nil {
+		return "", fmt.Errorf("resolving origin default branch: %w", err)
+	}
+	out, err := runGit(repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", fmt.Errorf("reading origin/HEAD: %w", err)
+	}
+	return strings.TrimPrefix(out, "origin/"), nil
+}
+
 // UpdateBaseBranch fetches the given branch from origin and attempts to
 // fast-forward the local ref to match. This is best-effort: if the fetch
 // fails (e.g. offline), an error is returned. If the fast-forward fails

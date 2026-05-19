@@ -75,6 +75,55 @@ func TestBaseBranch(t *testing.T) {
 	}
 }
 
+func TestRemoteDefaultBranch(t *testing.T) {
+	work, _ := initTestRepoWithRemote(t)
+
+	// Check out a different local branch so HEAD is not the remote default.
+	cmd := exec.Command("git", "checkout", "-b", "feature-x")
+	cmd.Dir = work
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout feature-x: %v\n%s", err, out)
+	}
+
+	got, err := git.RemoteDefaultBranch(work)
+	if err != nil {
+		t.Fatalf("RemoteDefaultBranch: %v", err)
+	}
+	if got != "main" {
+		t.Errorf("expected 'main', got %q", got)
+	}
+}
+
+func TestRemoteDefaultBranch_RepopulatesWhenSymrefMissing(t *testing.T) {
+	work, _ := initTestRepoWithRemote(t)
+
+	// Drop any cached origin/HEAD so RemoteDefaultBranch must run
+	// `git remote set-head origin -a` to repopulate it. Use `remote set-head
+	// --delete` because origin/HEAD may be either a symbolic ref or a regular
+	// ref depending on how the clone was set up.
+	cmd := exec.Command("git", "remote", "set-head", "origin", "--delete")
+	cmd.Dir = work
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("delete origin/HEAD: %v\n%s", err, out)
+	}
+
+	got, err := git.RemoteDefaultBranch(work)
+	if err != nil {
+		t.Fatalf("RemoteDefaultBranch: %v", err)
+	}
+	if got != "main" {
+		t.Errorf("expected 'main', got %q", got)
+	}
+}
+
+func TestRemoteDefaultBranch_NoOriginRemote(t *testing.T) {
+	repo := initTestRepo(t)
+
+	if _, err := git.RemoteDefaultBranch(repo); err == nil {
+		t.Error("expected error for repo with no origin remote, got nil")
+	}
+}
+
 func TestCreateWorktree(t *testing.T) {
 	repo := initTestRepo(t)
 
