@@ -375,7 +375,7 @@ func TestRenderQueueRow_RepoPrefix(t *testing.T) {
 		{kind: listItemSession, repoPath: "/a", repoName: "repoA", session: sess},
 	}
 
-	row := d.renderQueueRow(sess, "repoA", false, ColorWarning, 120)
+	row := d.renderQueueRow(sess, "repoA", "", false, ColorWarning, 120)
 	if len(row) == 0 {
 		t.Fatalf("expected at least one rendered line")
 	}
@@ -393,7 +393,7 @@ func TestRenderQueueRow_RepoPrefix(t *testing.T) {
 		}
 	}
 
-	bare := d.renderQueueRow(sess, "", false, ColorWarning, 120)
+	bare := d.renderQueueRow(sess, "", "", false, ColorWarning, 120)
 	if strings.Contains(ansi.Strip(bare[0]), "›") {
 		t.Errorf("empty repoName should not emit › separator, got %q", ansi.Strip(bare[0]))
 	}

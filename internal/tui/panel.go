@@ -41,16 +41,19 @@ type PanelServices struct {
 	Height        int
 	DashboardTopY int
 
-	// Lookups.
+	// Lookups. PRCache, ReviewCache, and FeedbackTriage take (repoPath,
+	// sessionID) because the App-level caches are keyed by the composite —
+	// see cacheKey in app.go. Session IDs collide across managers, so a
+	// bare-ID lookup would return the wrong repo's data.
 	Manager     func(repoPath string) SessionManager
 	Resolved    func(repoPath string) config.ResolvedSettings
 	GHClient    func() *github.Client
-	PRCache     func(sessionID string) *prCacheEntry
-	ReviewCache func(sessionID string) *reviewDiffEntry
+	PRCache     func(repoPath, sessionID string) *prCacheEntry
+	ReviewCache func(repoPath, sessionID string) *reviewDiffEntry
 
 	// Navigation / cross-panel actions.
 	ClosePanel     func()
-	OpenInLaunch   func(sess *agent.Session) bool
+	OpenInLaunch   func(sess *agent.Session, repoPath string) bool
 	OpenPlanEditor func(sess *agent.Session, repoPath string)
 	OpenURL        func(url string) error
 	SetError       func(msg string)
@@ -59,7 +62,7 @@ type PanelServices struct {
 	// mutate App state; the resulting tea.Msg flows back through App.Update.
 	MergePRCmd      func(sessionID, repoPath string, force bool) tea.Cmd
 	StartPRDraftCmd func(sess *agent.Session, repoPath string, transitionShipping bool) tea.Cmd
-	KillSessionCmd  func(sess *agent.Session) tea.Cmd
+	KillSessionCmd  func(sess *agent.Session, repoPath string) tea.Cmd
 	FetchReviewDiff func(sess *agent.Session, repoPath string) tea.Cmd
 
 	// prDraftInFlightFor reports whether a PR draft request is currently in
@@ -69,8 +72,9 @@ type PanelServices struct {
 
 	// Shipping-panel feedback triage state. Reads return the live map (or
 	// nil); the setters lazily allocate and apply the same cleanup rules as
-	// the original App methods (neutral+empty -> delete entry).
-	FeedbackTriage     func(sessionID string) map[string]*feedbackTriageEntry
-	SetFeedbackVerdict func(sessionID, itemKey string, v feedbackVerdict)
-	SetFeedbackNote    func(sessionID, itemKey, note string)
+	// the original App methods (neutral+empty -> delete entry). Keyed by
+	// (repoPath, sessionID); see PRCache notes.
+	FeedbackTriage     func(repoPath, sessionID string) map[string]*feedbackTriageEntry
+	SetFeedbackVerdict func(repoPath, sessionID, itemKey string, v feedbackVerdict)
+	SetFeedbackNote    func(repoPath, sessionID, itemKey, note string)
 }

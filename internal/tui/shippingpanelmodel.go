@@ -116,12 +116,12 @@ func (m *shippingPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (
 	if m.feedbackNote.Active() {
 		cmd, submitted, note := m.feedbackNote.Update(msg)
 		if submitted && svc.SetFeedbackNote != nil {
-			svc.SetFeedbackNote(m.session.ID, m.feedbackNote.itemKey, note)
+			svc.SetFeedbackNote(m.repoPath, m.session.ID, m.feedbackNote.itemKey, note)
 		}
 		return m, cmd
 	}
 
-	entry := svc.PRCache(m.session.ID)
+	entry := svc.PRCache(m.repoPath, m.session.ID)
 	items := feedbackItems(entryThreads(entry))
 	halfPane := m.height / 4
 	if halfPane < 1 {
@@ -156,24 +156,24 @@ func (m *shippingPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (
 	case "a":
 		if len(items) > 0 && m.feedbackCursor < len(items) && svc.SetFeedbackVerdict != nil {
 			key := feedbackItemKey(items[m.feedbackCursor])
-			svc.SetFeedbackVerdict(m.session.ID, key, feedbackApproved)
+			svc.SetFeedbackVerdict(m.repoPath, m.session.ID, key, feedbackApproved)
 		}
 	case "x":
 		if len(items) > 0 && m.feedbackCursor < len(items) && svc.SetFeedbackVerdict != nil {
 			key := feedbackItemKey(items[m.feedbackCursor])
-			svc.SetFeedbackVerdict(m.session.ID, key, feedbackDisagreed)
+			svc.SetFeedbackVerdict(m.repoPath, m.session.ID, key, feedbackDisagreed)
 		}
 	case "u":
 		if len(items) > 0 && m.feedbackCursor < len(items) && svc.SetFeedbackVerdict != nil {
 			key := feedbackItemKey(items[m.feedbackCursor])
-			svc.SetFeedbackVerdict(m.session.ID, key, feedbackNeutral)
+			svc.SetFeedbackVerdict(m.repoPath, m.session.ID, key, feedbackNeutral)
 		}
 	case "n":
 		if len(items) > 0 && m.feedbackCursor < len(items) {
 			item := items[m.feedbackCursor]
 			key := feedbackItemKey(item)
 			existing := ""
-			if triage := svc.FeedbackTriage(m.session.ID); triage != nil {
+			if triage := svc.FeedbackTriage(m.repoPath, m.session.ID); triage != nil {
 				if e := triage[key]; e != nil {
 					existing = e.Note
 				}
@@ -184,8 +184,9 @@ func (m *shippingPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (
 		return m, closeShippingPanel(svc)
 	case "t":
 		sess := m.session
+		repoPath := m.repoPath
 		closeShippingPanel(svc)
-		if !svc.OpenInLaunch(sess) {
+		if !svc.OpenInLaunch(sess, repoPath) {
 			svc.SetError("session has no agents to open")
 		}
 		return m, nil
@@ -225,8 +226,8 @@ func (m *shippingPanelModel) View(svc PanelServices) string {
 	if m == nil || m.session == nil {
 		return ""
 	}
-	entry := svc.PRCache(m.session.ID)
-	triage := svc.FeedbackTriage(m.session.ID)
+	entry := svc.PRCache(m.repoPath, m.session.ID)
+	triage := svc.FeedbackTriage(m.repoPath, m.session.ID)
 	return renderShippingPanel(m.session, entry, m.width, m.height, m.feedbackCursor, m.detailScroll, triage)
 }
 

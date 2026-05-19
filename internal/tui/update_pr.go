@@ -40,18 +40,18 @@ func (a App) handlePRCreated(msg prCreatedMsg) (tea.Model, tea.Cmd) {
 		a.setError("create PR failed: " + msg.err.Error())
 		return a, nil
 	}
-	a.prCache[msg.sessionID] = &prCacheEntry{pr: msg.pr}
+	repoPath := msg.repoPath
+	if repoPath == "" {
+		repoPath = a.repoPathForSession(msg.sessionID)
+	}
+	if repoPath == "" {
+		a.setError("create PR succeeded but session repo unknown; refresh to see it")
+		return a, nil
+	}
+	key := cacheKey(repoPath, msg.sessionID)
+	a.prCache[key] = &prCacheEntry{pr: msg.pr}
 	if msg.transitionShipping {
-		repoPath := msg.repoPath
-		if repoPath == "" {
-			repoPath = a.repoPathForSession(msg.sessionID)
-		}
-		var sess *agent.Session
-		if repoPath != "" {
-			sess = a.sessionByIDInRepo(repoPath, msg.sessionID)
-		} else {
-			sess = a.sessionByID(msg.sessionID)
-		}
+		sess := a.sessionByIDInRepo(repoPath, msg.sessionID)
 		if sess != nil {
 			sess.SetLifecyclePhase(agent.LifecycleShipping)
 			if rp := a.modals.Review(); rp != nil && rp.SessionID() == msg.sessionID {
@@ -61,14 +61,10 @@ func (a App) handlePRCreated(msg prCreatedMsg) (tea.Model, tea.Cmd) {
 	}
 	a.updateDashboardPRCache()
 	// Re-arm a burst poll so the new PR is discovered quickly.
-	if ps := a.prPollStates[msg.sessionID]; ps != nil {
+	if ps := a.prPollStates[key]; ps != nil {
 		ps.burstUntil = time.Now().Add(PRPollBurstAfterCreate)
 	}
 	// Auto-open in browser if configured.
-	repoPath := msg.repoPath
-	if repoPath == "" {
-		repoPath = a.repoPathForSession(msg.sessionID)
-	}
 	resolved := a.resolvedCache[repoPath]
 	if resolved.AutoOpenPRInBrowser && msg.pr != nil && msg.pr.URL != "" {
 		if err := openURL(msg.pr.URL); err != nil {
@@ -83,7 +79,17 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 	if a.prPollsInFlight < 0 {
 		a.prPollsInFlight = 0
 	}
-	ps := a.prPollStates[msg.sessionID]
+	repoPath := msg.repoPath
+	if repoPath == "" {
+		repoPath = a.repoPathForSession(msg.sessionID)
+	}
+	// Without a repoPath we can't safely key the cache or look up the session
+	// — drop the result rather than risk a cross-repo clobber.
+	if repoPath == "" {
+		return a, nil
+	}
+	key := cacheKey(repoPath, msg.sessionID)
+	ps := a.prPollStates[key]
 	if ps != nil {
 		ps.inFlight = false
 	}
@@ -96,7 +102,7 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 	// gap (branch pushed under old name, remote SHA not yet updated) or a
 	// rapid force-push window. Two in a row means the PR is genuinely gone.
 	if msg.pr == nil {
-		if _, had := a.prCache[msg.sessionID]; had {
+		if _, had := a.prCache[key]; had {
 			// ps is always non-nil here: pollAllSessions initialises it before
 			// dispatching a poll, and prPollMsg can only arrive after dispatch.
 			// The nil guard is defensive; if ps were nil we skip the grace period
@@ -107,7 +113,7 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 			}
-			delete(a.prCache, msg.sessionID)
+			delete(a.prCache, key)
 			if ps != nil {
 				ps.lastCheckState = ""
 				ps.consecutiveNilPolls = 0
@@ -120,7 +126,7 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 	if ps != nil {
 		ps.consecutiveNilPolls = 0
 	}
-	a.prCache[msg.sessionID] = &prCacheEntry{
+	a.prCache[key] = &prCacheEntry{
 		pr:      msg.pr,
 		checks:  msg.checks,
 		reviews: msg.reviews,
@@ -135,17 +141,8 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	// Auto-promote to Shipping when an open PR is discovered externally.
-	if msg.pr != nil && msg.pr.State == "open" {
-		repoPath := msg.repoPath
-		if repoPath == "" {
-			repoPath = a.repoPathForSession(msg.sessionID)
-		}
-		var sess *agent.Session
-		if repoPath != "" {
-			sess = a.sessionByIDInRepo(repoPath, msg.sessionID)
-		} else {
-			sess = a.sessionByID(msg.sessionID)
-		}
+	if msg.pr.State == "open" {
+		sess := a.sessionByIDInRepo(repoPath, msg.sessionID)
 		if sess != nil {
 			switch sess.LifecyclePhase() {
 			case agent.LifecycleInProgress, agent.LifecycleReadyForReview, agent.LifecycleInReview:
@@ -158,37 +155,32 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 	}
 	// Detect PR merge/close and trigger async session cleanup.
 	var cmds []tea.Cmd
-	if msg.pr != nil && (msg.pr.State == "merged" || msg.pr.State == "closed") {
-		repoPath := msg.repoPath
-		if repoPath == "" {
-			repoPath = a.repoPathForSession(msg.sessionID)
-		}
-		if repoPath != "" {
-			if mgr := a.managers[repoPath]; mgr != nil {
-				if sess := mgr.GetSession(msg.sessionID); sess != nil {
-					if sess.LifecyclePhase() == agent.LifecycleShipping {
-						sessID := msg.sessionID
-						if !a.closingSessions[sessID] {
-							sess.SetLifecyclePhase(agent.LifecycleComplete)
-							// Close the shipping panel if this session is currently open in it.
-							if sp := a.modals.Shipping(); sp != nil && sp.SessionID() == sessID {
-								a.closeModal()
-							}
-							var agentIDs []string
-							for _, ag := range sess.Agents() {
-								agentIDs = append(agentIDs, ag.ID)
-								a.closingAgents[ag.ID] = true
-							}
-							a.closingSessions[sessID] = true
-							cmds = append(cmds, func() tea.Msg {
-								return killResultMsg{
-									scope:     killScopeSession,
-									sessionID: sessID,
-									agentIDs:  agentIDs,
-									err:       filterNotFound(mgr.KillSession(sessID)),
-								}
-							})
+	if msg.pr.State == "merged" || msg.pr.State == "closed" {
+		if mgr := a.managers[repoPath]; mgr != nil {
+			if sess := mgr.GetSession(msg.sessionID); sess != nil {
+				if sess.LifecyclePhase() == agent.LifecycleShipping {
+					sessID := msg.sessionID
+					if !a.closingSessions[key] {
+						sess.SetLifecyclePhase(agent.LifecycleComplete)
+						// Close the shipping panel if this session is currently open in it.
+						if sp := a.modals.Shipping(); sp != nil && sp.SessionID() == sessID {
+							a.closeModal()
 						}
+						var agentIDs []string
+						for _, ag := range sess.Agents() {
+							agentIDs = append(agentIDs, ag.ID)
+							a.closingAgents[agentCacheKey(repoPath, ag.ID)] = true
+						}
+						a.closingSessions[key] = true
+						cmds = append(cmds, func() tea.Msg {
+							return killResultMsg{
+								scope:     killScopeSession,
+								repoPath:  repoPath,
+								sessionID: sessID,
+								agentIDs:  agentIDs,
+								err:       filterNotFound(mgr.KillSession(sessID)),
+							}
+						})
 					}
 				}
 			}
@@ -208,14 +200,8 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 			}
 			// Play audio notification, gated by the session's repo AudioEnabled setting
 			// (same gate as the idle-transition notification above).
-			if a.audioPlayer != nil {
-				repoPath := msg.repoPath
-				if repoPath == "" {
-					repoPath = a.repoPathForSession(msg.sessionID)
-				}
-				if repoPath != "" && a.resolvedCache[repoPath].AudioEnabled {
-					a.audioPlayer.Play()
-				}
+			if a.audioPlayer != nil && a.resolvedCache[repoPath].AudioEnabled {
+				a.audioPlayer.Play()
 			}
 		}
 		ps.lastCheckState = newState
@@ -239,7 +225,8 @@ func (a App) handleMergePR(msg mergePRMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	sess := mgr.GetSession(msg.sessionID)
-	if sess == nil || a.closingSessions[msg.sessionID] {
+	sessKey := cacheKey(repoPath, msg.sessionID)
+	if sess == nil || a.closingSessions[sessKey] {
 		return a, nil
 	}
 	sess.SetLifecyclePhase(agent.LifecycleComplete)
@@ -247,13 +234,14 @@ func (a App) handleMergePR(msg mergePRMsg) (tea.Model, tea.Cmd) {
 	agentIDs := make([]string, 0, len(agents))
 	for _, ag := range agents {
 		agentIDs = append(agentIDs, ag.ID)
-		a.closingAgents[ag.ID] = true
+		a.closingAgents[agentCacheKey(repoPath, ag.ID)] = true
 	}
 	sessID := msg.sessionID
-	a.closingSessions[sessID] = true
+	a.closingSessions[sessKey] = true
 	return a, func() tea.Msg {
 		return killResultMsg{
 			scope:     killScopeSession,
+			repoPath:  repoPath,
 			sessionID: sessID,
 			agentIDs:  agentIDs,
 			err:       filterNotFound(mgr.KillSession(sessID)),
@@ -281,17 +269,18 @@ outer:
 				break outer
 			}
 
-			ps := a.prPollStates[sess.ID]
+			key := cacheKey(repo.Path, sess.ID)
+			ps := a.prPollStates[key]
 			if ps == nil {
 				ps = &prSessionState{}
-				a.prPollStates[sess.ID] = ps
+				a.prPollStates[key] = ps
 			}
 			if ps.inFlight {
 				continue
 			}
 
 			// Determine adaptive polling interval.
-			interval := a.prPollInterval(sess.ID, ps)
+			interval := a.prPollInterval(repo.Path, sess.ID, ps)
 			if now.Sub(ps.lastPoll) < interval {
 				// Push detection runs for every session — including those with a
 				// cached PR — so new commits, force-pushes, and rewrites get
@@ -328,7 +317,7 @@ outer:
 			ps.inFlight = true
 			a.prPollsInFlight++
 			fetchThreads := sess.LifecyclePhase() == agent.LifecycleShipping
-			cachedPRNumber := a.cachedPRNumberForFallback(sess)
+			cachedPRNumber := a.cachedPRNumberForFallback(repo.Path, sess)
 			cmds = append(cmds, a.refreshPRStatusForSession(sess.ID, sess.Branch(), repo.Path, sess.Worktree.Path, fetchThreads, cachedPRNumber))
 		}
 	}
@@ -339,11 +328,11 @@ outer:
 // so the poll cmd can call resolveMergedFallback when the open-only lookup
 // returns nil. Returns 0 for non-Shipping sessions, preserving today's
 // 2-consecutive-nil eviction behaviour for Building/Reviewing sessions.
-func (a *App) cachedPRNumberForFallback(sess *agent.Session) int {
+func (a *App) cachedPRNumberForFallback(repoPath string, sess *agent.Session) int {
 	if sess.LifecyclePhase() != agent.LifecycleShipping {
 		return 0
 	}
-	entry := a.prCache[sess.ID]
+	entry := a.prCache[cacheKey(repoPath, sess.ID)]
 	if entry == nil || entry.pr == nil {
 		return 0
 	}
@@ -351,13 +340,13 @@ func (a *App) cachedPRNumberForFallback(sess *agent.Session) int {
 }
 
 // prPollInterval returns the adaptive polling interval for a session.
-func (a *App) prPollInterval(sessionID string, ps *prSessionState) time.Duration {
+func (a *App) prPollInterval(repoPath, sessionID string, ps *prSessionState) time.Duration {
 	// Event-driven burst (branch rename, new push): poll aggressively for a
 	// short window so state transitions become visible within ~2s.
 	if ps != nil && time.Now().Before(ps.burstUntil) {
 		return PRPollDuringBurst
 	}
-	entry := a.prCache[sessionID]
+	entry := a.prCache[cacheKey(repoPath, sessionID)]
 	// No PR found yet but branch may have been pushed.
 	if entry == nil || entry.pr == nil {
 		if ps.lastRemoteSHA != "" {
@@ -421,9 +410,12 @@ func getLocalHeadSHA(worktreePath string) string {
 func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePath string, fetchThreads bool, cachedPRNumber int) tea.Cmd {
 	// Guard: ensure the caller passed the repo that actually owns this session.
 	// This catches programming errors (e.g. passing cfg.Repos[0].Path for a
-	// session that belongs to a different repo) before the poll fires.
-	if owning := a.repoPathForSession(sessionID); owning != "" && owning != repoPath {
-		mismatchErr := fmt.Errorf("internal: refreshPRStatus: repoPath %q does not own session %s (owner=%q)", repoPath, sessionID, owning)
+	// session that belongs to a different repo) before the poll fires. With
+	// composite-keyed caches, an internal mismatch here would route a poll
+	// result to the wrong (repoPath, sessionID) bucket — fail loud rather
+	// than silently corrupt a repo's PR cache.
+	if a.sessionByIDInRepo(repoPath, sessionID) == nil {
+		mismatchErr := fmt.Errorf("internal: refreshPRStatus: repoPath %q does not own session %s", repoPath, sessionID)
 		return func() tea.Msg { return prPollMsg{sessionID: sessionID, repoPath: repoPath, err: mismatchErr} }
 	}
 	ghClient := a.ghClient
@@ -564,7 +556,7 @@ func (a *App) mergePRCmdWithMode(sessionID, repoPath string, force bool) tea.Cmd
 			return mergePRMsg{sessionID: sessionID, repoPath: repoPath, err: fmt.Errorf("GitHub client not available")}
 		}
 	}
-	entry := a.prCache[sessionID]
+	entry := a.prCache[cacheKey(repoPath, sessionID)]
 	if entry == nil || entry.pr == nil {
 		return func() tea.Msg {
 			return mergePRMsg{sessionID: sessionID, repoPath: repoPath, err: fmt.Errorf("no PR cached")}

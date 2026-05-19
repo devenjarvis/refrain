@@ -129,11 +129,12 @@ func (a App) handlePlanEditorAbandon(msg planEditorAbandonMsg) (tea.Model, tea.C
 		return a, nil
 	}
 	sessID := msg.sessionID
-	a.closingSessions[sessID] = true
+	a.closingSessions[cacheKey(repoPath, sessID)] = true
 	return a, func() tea.Msg {
 		err := mgr.KillSession(sessID)
 		return killResultMsg{
 			scope:     killScopeSession,
+			repoPath:  repoPath,
 			sessionID: sessID,
 			err:       err,
 		}

@@ -16,17 +16,17 @@ import (
 
 func (a App) handleReviewDiff(msg reviewDiffMsg) (tea.Model, tea.Cmd) {
 	if msg.err == nil && msg.entry != nil {
-		a.reviewDiffCache[msg.sessionID] = msg.entry
+		repoPath := msg.repoPath
+		if repoPath == "" {
+			repoPath = a.activeRepo
+		}
+		a.reviewDiffCache[cacheKey(repoPath, msg.sessionID)] = msg.entry
 		// Refresh the inline diff viewport when data arrives for the open session.
 		if rp := a.modals.Review(); rp != nil && rp.SessionID() == msg.sessionID && len(msg.entry.groups) > 0 {
 			rp.RefreshDiffViewport(a.panelServices())
 		}
 		// If the entry has task groups, dispatch a reviewer per group.
 		if len(msg.entry.groups) > 0 {
-			repoPath := msg.repoPath
-			if repoPath == "" {
-				repoPath = a.activeRepo
-			}
 			var cmds []tea.Cmd
 			mgr := a.managers[repoPath]
 			var reviewer agent.ReviewerAgent
@@ -41,7 +41,7 @@ func (a App) handleReviewDiff(msg reviewDiffMsg) (tea.Model, tea.Cmd) {
 						if v, ok := msg.entry.verdicts[g.taskIndex]; ok {
 							v.state = verdictRunning
 						}
-						cmds = append(cmds, a.reviewTaskCmd(sess, g, reviewer))
+						cmds = append(cmds, a.reviewTaskCmd(sess, repoPath, g, reviewer))
 					}
 				}
 			}
@@ -62,7 +62,7 @@ func (a App) handleReviewDiff(msg reviewDiffMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) handleReviewVerdict(msg reviewVerdictMsg) (tea.Model, tea.Cmd) {
-	entry := a.reviewDiffCache[msg.sessionID]
+	entry := a.reviewDiffCache[cacheKey(msg.repoPath, msg.sessionID)]
 	if entry != nil && entry.verdicts != nil {
 		rec := entry.verdicts[msg.taskIndex]
 		if rec != nil {
@@ -148,13 +148,15 @@ func reviewTaskCount(entry *reviewDiffEntry) int {
 	return n
 }
 
-// sessionByID returns the Session with the given ID across all managed repos,
-// or nil if not found.
-func (a *App) setFeedbackVerdict(sessID, itemKey string, v feedbackVerdict) {
-	if a.feedbackTriage[sessID] == nil {
-		a.feedbackTriage[sessID] = make(map[string]*feedbackTriageEntry)
+// setFeedbackVerdict records a triage verdict for one feedback item, scoped by
+// (repoPath, sessID) so two repos with overlapping session counters don't share
+// the same triage map.
+func (a *App) setFeedbackVerdict(repoPath, sessID, itemKey string, v feedbackVerdict) {
+	key := cacheKey(repoPath, sessID)
+	if a.feedbackTriage[key] == nil {
+		a.feedbackTriage[key] = make(map[string]*feedbackTriageEntry)
 	}
-	m := a.feedbackTriage[sessID]
+	m := a.feedbackTriage[key]
 	if v == feedbackNeutral {
 		if e := m[itemKey]; e == nil || strings.TrimSpace(e.Note) == "" {
 			delete(m, itemKey)
@@ -169,12 +171,14 @@ func (a *App) setFeedbackVerdict(sessID, itemKey string, v feedbackVerdict) {
 
 // setFeedbackNote lazily allocates the per-session triage map and sets the
 // note on the item. If the resulting entry is neutral with an empty note, it
-// is deleted.
-func (a *App) setFeedbackNote(sessID, itemKey, note string) {
-	if a.feedbackTriage[sessID] == nil {
-		a.feedbackTriage[sessID] = make(map[string]*feedbackTriageEntry)
+// is deleted. Keyed by (repoPath, sessID) for the same reason as
+// setFeedbackVerdict.
+func (a *App) setFeedbackNote(repoPath, sessID, itemKey, note string) {
+	key := cacheKey(repoPath, sessID)
+	if a.feedbackTriage[key] == nil {
+		a.feedbackTriage[key] = make(map[string]*feedbackTriageEntry)
 	}
-	m := a.feedbackTriage[sessID]
+	m := a.feedbackTriage[key]
 	if m[itemKey] == nil {
 		if note == "" {
 			return
@@ -211,12 +215,13 @@ func (a App) handleShippingFeedbackRequest(req shippingFeedbackRequestMsg) (tea.
 		return a, nil
 	}
 
-	entry := a.prCache[sess.ID]
+	sessKey := cacheKey(repoPath, sess.ID)
+	entry := a.prCache[sessKey]
 	if entry != nil && entry.pr != nil && entry.pr.State != "" && entry.pr.State != "open" {
 		a.setError(fmt.Sprintf("PR is %s; cannot address feedback on a closed/merged PR", entry.pr.State))
 		return a, nil
 	}
-	prompt := buildFeedbackPrompt(entry, a.feedbackTriage[sess.ID])
+	prompt := buildFeedbackPrompt(entry, a.feedbackTriage[sessKey])
 	if prompt == "" {
 		prompt = "Address the CI failures and review feedback on this PR."
 	}
@@ -240,7 +245,7 @@ func (a App) handleShippingFeedbackRequest(req shippingFeedbackRequestMsg) (tea.
 
 	sessID := sess.ID
 	a.closeModal()
-	delete(a.feedbackTriage, sessID)
+	delete(a.feedbackTriage, sessKey)
 	return a, func() tea.Msg {
 		ag, err := mgr.AddAgent(sessID, cfg)
 		if err != nil {
@@ -447,7 +452,7 @@ func (a App) handleReviewReworkRequest(req reviewReworkRequestMsg) (tea.Model, t
 	}
 	sessID := sess.ID
 	a.closeModal()
-	delete(a.reviewDiffCache, sessID)
+	delete(a.reviewDiffCache, cacheKey(repoPath, sessID))
 	return a, func() tea.Msg {
 		ag, err := mgr.AddAgent(sessID, cfg)
 		if err != nil {
@@ -631,8 +636,9 @@ func populateNoDiffVerdicts(entry *reviewDiffEntry) {
 }
 
 // reviewTaskCmd returns a Cmd that runs a reviewer subprocess for one task
-// group and returns a reviewVerdictMsg when done.
-func (a App) reviewTaskCmd(sess *agent.Session, group taskReviewGroup, reviewer agent.ReviewerAgent) tea.Cmd {
+// group and returns a reviewVerdictMsg when done. repoPath pins the repo so
+// the verdict handler can key the cache lookup by (repoPath, sessionID).
+func (a App) reviewTaskCmd(sess *agent.Session, repoPath string, group taskReviewGroup, reviewer agent.ReviewerAgent) tea.Cmd {
 	sessID := sess.ID
 	originalPrompt := sess.OriginalPrompt()
 	taskIndex := group.taskIndex
@@ -642,7 +648,7 @@ func (a App) reviewTaskCmd(sess *agent.Session, group taskReviewGroup, reviewer 
 	taskText := fmt.Sprintf("Task %d", taskIndex)
 	if taskIndex == 0 {
 		taskText = "Other changes"
-	} else if entry := a.reviewDiffCache[sessID]; entry != nil {
+	} else if entry := a.reviewDiffCache[cacheKey(repoPath, sessID)]; entry != nil {
 		for _, t := range entry.tasks {
 			if t.Index == taskIndex {
 				taskText = t.Text
@@ -660,7 +666,7 @@ func (a App) reviewTaskCmd(sess *agent.Session, group taskReviewGroup, reviewer 
 			TaskDiff:       rawDiff,
 			OriginalPrompt: originalPrompt,
 		})
-		return reviewVerdictMsg{sessionID: sessID, taskIndex: taskIndex, verdict: verdict, err: err}
+		return reviewVerdictMsg{sessionID: sessID, repoPath: repoPath, taskIndex: taskIndex, verdict: verdict, err: err}
 	}
 }
 

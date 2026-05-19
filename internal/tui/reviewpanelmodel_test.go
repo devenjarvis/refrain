@@ -26,12 +26,12 @@ func newTestSvc() (PanelServices, *testServiceState) {
 		},
 		Resolved:    func(string) config.ResolvedSettings { return config.ResolvedSettings{} },
 		GHClient:    func() *github.Client { return nil },
-		PRCache:     func(string) *prCacheEntry { return nil },
-		ReviewCache: func(string) *reviewDiffEntry { return nil },
+		PRCache:     func(string, string) *prCacheEntry { return nil },
+		ReviewCache: func(string, string) *reviewDiffEntry { return nil },
 		ClosePanel: func() {
 			state.closed = true
 		},
-		OpenInLaunch: func(*agent.Session) bool {
+		OpenInLaunch: func(*agent.Session, string) bool {
 			state.openInLaunchCalled = true
 			return state.openInLaunchResult
 		},
@@ -44,16 +44,16 @@ func newTestSvc() (PanelServices, *testServiceState) {
 		StartPRDraftCmd: func(*agent.Session, string, bool) tea.Cmd {
 			return func() tea.Msg { return nil }
 		},
-		KillSessionCmd: func(*agent.Session) tea.Cmd {
+		KillSessionCmd: func(*agent.Session, string) tea.Cmd {
 			state.killSessionCalled = true
 			return func() tea.Msg { return nil }
 		},
 		FetchReviewDiff: func(*agent.Session, string) tea.Cmd { return nil },
-		FeedbackTriage: func(string) map[string]*feedbackTriageEntry {
+		FeedbackTriage: func(string, string) map[string]*feedbackTriageEntry {
 			return nil
 		},
-		SetFeedbackVerdict: func(string, string, feedbackVerdict) {},
-		SetFeedbackNote:    func(string, string, string) {},
+		SetFeedbackVerdict: func(string, string, string, feedbackVerdict) {},
+		SetFeedbackNote:    func(string, string, string, string) {},
 		prDraftInFlightFor: func(string) bool { return false },
 	}
 	return svc, state
@@ -168,7 +168,7 @@ func TestReviewPanelModel_TaskCursorMovesWithJK(t *testing.T) {
 		},
 	}
 	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string) *reviewDiffEntry { return entry }
+	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
 
 	if got := panel.TaskCursor(); got != 0 {
 		t.Fatalf("cursor starts at 0, got %d", got)
@@ -195,7 +195,7 @@ func TestReviewPanelModel_TaskCursorClampsAtTopAndBottom(t *testing.T) {
 		tasks: []agent.PlanTask{{Index: 1}, {Index: 2}},
 	}
 	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string) *reviewDiffEntry { return entry }
+	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
 
 	// k at top is a no-op.
 	_, _ = panel.Update(tea.KeyPressMsg{Code: 'k', Text: "k"}, svc)
@@ -219,7 +219,7 @@ func TestReviewPanelModel_FKey_TogglesUserFlag(t *testing.T) {
 		tasks: []agent.PlanTask{{Index: 7, Text: "task one"}},
 	}
 	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string) *reviewDiffEntry { return entry }
+	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
 
 	_, _ = panel.Update(tea.KeyPressMsg{Code: 'f', Text: "f"}, svc)
 	rec := entry.verdicts[7]
@@ -251,7 +251,7 @@ func TestReviewPanelModel_BKey_NoFlags_SetsError(t *testing.T) {
 		tasks: []agent.PlanTask{{Index: 1}},
 	}
 	svc, state := newTestSvc()
-	svc.ReviewCache = func(string) *reviewDiffEntry { return entry }
+	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'b', Text: "b"}, svc)
 	if cmd != nil {
 		t.Errorf("b without flagged tasks should return nil cmd, got %T", cmd())
@@ -272,7 +272,7 @@ func TestReviewPanelModel_BKey_WithFlag_EmitsReworkMsg(t *testing.T) {
 		},
 	}
 	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string) *reviewDiffEntry { return entry }
+	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'b', Text: "b"}, svc)
 	if cmd == nil {
 		t.Fatal("expected rework cmd")
@@ -456,7 +456,7 @@ func TestReviewPanelModel_PKey_WithCachedPR_OpensURL(t *testing.T) {
 	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 	var openedURL string
-	svc.PRCache = func(string) *prCacheEntry {
+	svc.PRCache = func(string, string) *prCacheEntry {
 		return &prCacheEntry{pr: &github.PRState{URL: "https://example.com/pr/1"}}
 	}
 	svc.OpenURL = func(u string) error {
@@ -556,7 +556,7 @@ func TestReviewPanel_PKey_UsesPinnedRepoPath_NotFirstMatch(t *testing.T) {
 	}
 	// non-nil GHClient so the code passes the auth check and reaches StartPRDraftCmd
 	svc.GHClient = func() *github.Client { return new(github.Client) }
-	svc.PRCache = func(string) *prCacheEntry { return nil }
+	svc.PRCache = func(string, string) *prCacheEntry { return nil }
 
 	_, _ = panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"}, svc)
 

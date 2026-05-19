@@ -21,6 +21,11 @@ type Modals struct {
 	configRepo  string
 	launchAgent *agent.Agent
 	launchSess  *agent.Session
+	// launchRepoPath is the repo that owns launchSess. Stored so the
+	// focusLaunch key handlers (ctrl+t shell, ctrl+n agent, ctrl+w kill)
+	// route to the right manager without a first-match session lookup, which
+	// is wrong when session IDs collide across repos.
+	launchRepoPath string
 }
 
 // Current returns the active panel focus.
@@ -43,6 +48,7 @@ func (m *Modals) Close() {
 	m.configRepo = ""
 	m.launchAgent = nil
 	m.launchSess = nil
+	m.launchRepoPath = ""
 }
 
 // OpenReview opens the review panel. Closes any prior modal first.
@@ -74,12 +80,16 @@ func (m *Modals) OpenConfig(form *configForm, repoPath string) {
 	m.configRepo = repoPath
 }
 
-// OpenLaunch opens the fullscreen agent terminal focused on ag (owned by sess).
-func (m *Modals) OpenLaunch(sess *agent.Session, ag *agent.Agent) {
+// OpenLaunch opens the fullscreen agent terminal focused on ag (owned by sess
+// in the repo at repoPath). repoPath is required so the focusLaunch key
+// handlers (ctrl+t / ctrl+n / ctrl+w) can route to the right manager when
+// session IDs collide across repos.
+func (m *Modals) OpenLaunch(sess *agent.Session, ag *agent.Agent, repoPath string) {
 	m.Close()
 	m.current = focusLaunch
 	m.launchSess = sess
 	m.launchAgent = ag
+	m.launchRepoPath = repoPath
 }
 
 // Review returns the review panel model if focusReview is current; otherwise nil.
@@ -137,6 +147,17 @@ func (m *Modals) LaunchSession() *agent.Session {
 		return m.launchSess
 	}
 	return nil
+}
+
+// LaunchRepoPath returns the repo path owning the focused session, or "" when
+// focusLaunch is not current. Use this instead of repoPathForSession in
+// focusLaunch handlers — repoPathForSession is ambiguous when two repos share
+// a session ID, and falls back to "".
+func (m *Modals) LaunchRepoPath() string {
+	if m.current == focusLaunch {
+		return m.launchRepoPath
+	}
+	return ""
 }
 
 // SetLaunchAgent updates the launch agent without changing focus or the

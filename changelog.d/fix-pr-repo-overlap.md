@@ -1,0 +1,3 @@
+### Fixed
+
+- Multi-repo PR/review/shipping data no longer overlaps across repos. Session IDs are minted per-manager (each repo's manager starts at `session-1`), so the App-level caches keyed on bare session ID were clobbering across repos — the shipping panel could show another repo's PR, review comments could appear under the wrong session, and `m`/`X` could act on the wrong row. All session-scoped caches (`prCache`, `prPollStates`, `diffStatsCache`, `reviewDiffCache`, `feedbackTriage`, `closingSessions`) and agent-scoped caches (`closingAgents`, `lastKnownStatus`) are now keyed by `cacheKey(repoPath, sessionID)` / `agentCacheKey(repoPath, agentID)`. `repoPathForSession` fails closed when a session ID is ambiguous so callers can't silently route to the wrong repo.

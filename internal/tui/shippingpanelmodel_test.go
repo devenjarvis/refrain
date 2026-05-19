@@ -21,11 +21,11 @@ func newTestShippingSvc() (PanelServices, *testShippingSvcState) {
 		Manager: func(string) SessionManager {
 			return nil
 		},
-		PRCache: func(string) *prCacheEntry { return state.pr },
+		PRCache: func(string, string) *prCacheEntry { return state.pr },
 		ClosePanel: func() {
 			state.closed = true
 		},
-		OpenInLaunch: func(*agent.Session) bool {
+		OpenInLaunch: func(*agent.Session, string) bool {
 			return state.openInLaunchResult
 		},
 		SetError: func(msg string) {
@@ -40,16 +40,16 @@ func newTestShippingSvc() (PanelServices, *testShippingSvcState) {
 			state.mergeForce = force
 			return func() tea.Msg { return nil }
 		},
-		FeedbackTriage: func(string) map[string]*feedbackTriageEntry {
+		FeedbackTriage: func(string, string) map[string]*feedbackTriageEntry {
 			return state.triage
 		},
-		SetFeedbackVerdict: func(_, key string, v feedbackVerdict) {
+		SetFeedbackVerdict: func(_, _, key string, v feedbackVerdict) {
 			if state.triage[key] == nil {
 				state.triage[key] = &feedbackTriageEntry{}
 			}
 			state.triage[key].Verdict = v
 		},
-		SetFeedbackNote: func(_, key, note string) {
+		SetFeedbackNote: func(_, _, key, note string) {
 			if state.triage[key] == nil {
 				state.triage[key] = &feedbackTriageEntry{}
 			}

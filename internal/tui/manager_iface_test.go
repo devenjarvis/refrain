@@ -42,7 +42,7 @@ func TestSessionManager_FakeDrivesKillSession(t *testing.T) {
 	if svc.KillSessionCmd == nil {
 		t.Fatal("KillSessionCmd should be wired by panelServices")
 	}
-	cmd := svc.KillSessionCmd(sess)
+	cmd := svc.KillSessionCmd(sess, repo)
 	if cmd == nil {
 		t.Fatal("KillSessionCmd returned nil for a known session")
 	}

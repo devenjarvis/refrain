@@ -261,12 +261,13 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 		}
 		ag := item.agent
 		currentStatus := ag.Status()
-		if prev, ok := a.lastKnownStatus[ag.ID]; ok {
+		key := agentCacheKey(item.repoPath, ag.ID)
+		if prev, ok := a.lastKnownStatus[key]; ok {
 			if prev == agent.StatusActive && currentStatus == agent.StatusIdle && !ag.IsShell {
 				idleTransition = true
 			}
 		}
-		a.lastKnownStatus[ag.ID] = currentStatus
+		a.lastKnownStatus[key] = currentStatus
 	}
 	// Detect alt-screen transitions and trigger a resize so Claude's TUI
 	// redraws cleanly (replaces the old splashResizeMsg delayed timer).
@@ -308,7 +309,11 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 	// Refresh diff stats periodically or on idle transition.
 	var diffCmd tea.Cmd
 	if sess := a.dashboard.selectedSession(); sess != nil {
-		entry := a.diffStatsCache[sess.ID]
+		repoPath := a.dashboard.selectedRepoPath()
+		var entry *diffStatsEntry
+		if repoPath != "" {
+			entry = a.diffStatsCache[cacheKey(repoPath, sess.ID)]
+		}
 		stale := entry == nil || time.Since(entry.lastRefresh) > DiffStatsCacheTTL
 		if (stale || idleTransition) && !a.diffRefreshInFlight {
 			diffCmd = a.refreshDiffStatsCmd()
@@ -328,8 +333,11 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 	var autoPromoteCmd tea.Cmd
 	// Clean up stale lastKnownStatus entries when a session auto-closes.
+	// lastKnownStatus is keyed by agentCacheKey(repoPath, agentID), so the
+	// stale prefix has to include the repoPath to avoid wiping a colliding
+	// agent ID in a different repo.
 	if msg.event.Type == agent.EventSessionClosed && msg.event.SessionID != "" {
-		prefix := msg.event.SessionID + "-agent-"
+		prefix := msg.repoPath + "\x00" + msg.event.SessionID + "-agent-"
 		for id := range a.lastKnownStatus {
 			if strings.HasPrefix(id, prefix) {
 				delete(a.lastKnownStatus, id)
@@ -366,7 +374,7 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		a.lastKnownStatus[msg.event.AgentID] = msg.event.Status
+		a.lastKnownStatus[agentCacheKey(msg.repoPath, msg.event.AgentID)] = msg.event.Status
 		// Auto-promote and MarkDone share a single FindAgentAndSession
 		// call, gated on the statuses that can trigger either transition.
 		if msg.event.Status == agent.StatusIdle ||
@@ -403,10 +411,11 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 	// quickly — do NOT clear the cache here; that happens only when the
 	// next poll confirms the PR is gone (handled in prPollMsg).
 	if msg.event.Type == agent.EventBranchRenamed && msg.event.SessionID != "" {
-		ps := a.prPollStates[msg.event.SessionID]
+		key := cacheKey(msg.repoPath, msg.event.SessionID)
+		ps := a.prPollStates[key]
 		if ps == nil {
 			ps = &prSessionState{}
-			a.prPollStates[msg.event.SessionID] = ps
+			a.prPollStates[key] = ps
 		}
 		ps.burstUntil = time.Now().Add(PRPollBurstAfterCreate)
 		ps.lastPoll = time.Time{}
@@ -473,7 +482,7 @@ func (a App) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 			if item.kind == listItemAgent && item.agent != nil && item.agent.ID == msg.agentID {
 				a.dashboard.selected = i
 				if !msg.skipFocusLaunch {
-					a.openLaunchPanel(item.session, item.agent)
+					a.openLaunchPanel(item.session, item.agent, item.repoPath)
 					a.dashboard.scrollOffset = 0
 					item.agent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 				}
@@ -504,26 +513,37 @@ func (a App) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 func (a App) handleKillResult(msg killResultMsg) (tea.Model, tea.Cmd) {
 	// Clean up closing-set entries regardless of error so the UI never
 	// gets stuck rendering "closing…" on a row whose kill failed.
+	if msg.repoPath == "" {
+		// Defensive: every producer of killResultMsg should populate
+		// repoPath. If one ever doesn't, drop with a visible error so the
+		// missing field is fixed at the source rather than corrupting
+		// closing-set cleanup across repos.
+		a.setError("internal: killResultMsg missing repoPath; closing-set may be stale")
+		return a, nil
+	}
 	switch msg.scope {
 	case killScopeAgent:
-		delete(a.closingAgents, msg.agentID)
-		delete(a.lastKnownStatus, msg.agentID)
+		agentKey := agentCacheKey(msg.repoPath, msg.agentID)
+		delete(a.closingAgents, agentKey)
+		delete(a.lastKnownStatus, agentKey)
 		// Exit focusLaunch if the killed agent is the one being viewed.
 		if ag := a.modals.LaunchAgent(); ag != nil && ag.ID == msg.agentID {
 			a.closeModal()
 			a.dashboard.scrollOffset = 0
 		}
 	case killScopeSession:
-		delete(a.closingSessions, msg.sessionID)
+		sessKey := cacheKey(msg.repoPath, msg.sessionID)
+		delete(a.closingSessions, sessKey)
 		for _, id := range msg.agentIDs {
-			delete(a.closingAgents, id)
-			delete(a.lastKnownStatus, id)
+			agentKey := agentCacheKey(msg.repoPath, id)
+			delete(a.closingAgents, agentKey)
+			delete(a.lastKnownStatus, agentKey)
 			if ag := a.modals.LaunchAgent(); ag != nil && ag.ID == id {
 				a.closeModal()
 				a.dashboard.scrollOffset = 0
 			}
 		}
-		delete(a.diffStatsCache, msg.sessionID)
+		delete(a.diffStatsCache, sessKey)
 	}
 	if msg.err != nil {
 		a.setError(msg.err.Error())
@@ -535,8 +555,13 @@ func (a App) handleKillResult(msg killResultMsg) (tea.Model, tea.Cmd) {
 
 func (a App) handleDiffStats(msg diffStatsMsg) (tea.Model, tea.Cmd) {
 	a.diffRefreshInFlight = false
+	if msg.repoPath == "" {
+		// Without a repoPath we can't key the cache safely; drop the result.
+		// All callers populate repoPath; this guard catches future regressions.
+		return a, nil
+	}
 	// Always update cache timestamp to prevent tight retry loops on persistent errors.
-	a.diffStatsCache[msg.sessionID] = &diffStatsEntry{
+	a.diffStatsCache[cacheKey(msg.repoPath, msg.sessionID)] = &diffStatsEntry{
 		stats:       msg.stats,
 		lastRefresh: time.Now(),
 	}

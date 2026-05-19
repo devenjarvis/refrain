@@ -61,8 +61,14 @@ const (
 // killResultMsg carries the result of an async KillAgent/KillSession call.
 // agentID is empty for session-scoped kills; the closing-set cleanup iterates
 // the manager to find stale IDs instead.
+//
+// repoPath identifies which repo owns the killed session — required because
+// session IDs collide across managers (each manager mints session-1, session-2,
+// …). Without it the closing-set cleanup would key on bare sessionID and clear
+// the wrong repo's badge.
 type killResultMsg struct {
 	scope     killScope
+	repoPath  string
 	sessionID string
 	agentID   string
 	agentIDs  []string // for session scope: all agent IDs that were in the session
@@ -79,9 +85,13 @@ func filterNotFound(err error) error {
 	return err
 }
 
-// diffStatsMsg carries the result of an async diff stats refresh.
+// diffStatsMsg carries the result of an async diff stats refresh. repoPath
+// identifies the repo that owns sessionID so the handler keys the cache by
+// (repoPath, sessionID) rather than colliding across repos with the same
+// session counter (session-1, session-2, …).
 type diffStatsMsg struct {
 	sessionID string
+	repoPath  string
 	stats     *diffSummaryData
 }
 
@@ -171,7 +181,7 @@ type App struct {
 	errTicks    int // ticks remaining to show error
 	confirmQuit bool
 
-	lastKnownStatus map[string]agent.Status
+	lastKnownStatus map[string]agent.Status // keyed by agentCacheKey(repoPath, agentID)
 	audioPlayer     *audio.Player
 
 	// wellness owns the focus-block timer, break overlay, and counters
@@ -188,13 +198,17 @@ type App struct {
 	// openConfig / openLaunch / closeModal helpers (which keep the dashboard
 	// mirror fields in sync).
 	modals          Modals
-	reviewDiffCache map[string]*reviewDiffEntry                // keyed by session ID; lifetime exceeds panel
-	feedbackTriage  map[string]map[string]*feedbackTriageEntry // keyed by sessionID → itemKey
+	reviewDiffCache map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
+	feedbackTriage  map[string]map[string]*feedbackTriageEntry // keyed by cacheKey(repoPath, sessionID) → itemKey
 	promptModal     promptModalModel                           // overlay for plan-first new-session prompt
 
 	// closingAgents and closingSessions track in-flight kill requests so the
 	// dashboard can render a "closing…" indicator while the async teardown runs.
-	// Lives in the TUI because it's purely a UI concern.
+	// Lives in the TUI because it's purely a UI concern. closingAgents is
+	// keyed by agentCacheKey(repoPath, agentID) and closingSessions by
+	// cacheKey(repoPath, sessionID); without the repo prefix, two repos
+	// with overlapping session counters (session-1 in both) would clobber
+	// each other's closing badge.
 	closingAgents   map[string]bool
 	closingSessions map[string]bool
 
@@ -203,12 +217,12 @@ type App struct {
 	lastPipelineClickSec focusSection
 	lastPipelineClickIdx int
 
-	diffStatsCache      map[string]*diffStatsEntry // keyed by session ID
+	diffStatsCache      map[string]*diffStatsEntry // keyed by cacheKey(repoPath, sessionID)
 	diffRefreshInFlight bool
 
 	ghClient         *github.Client
-	prCache          map[string]*prCacheEntry   // keyed by session ID
-	prPollStates     map[string]*prSessionState // keyed by session ID
+	prCache          map[string]*prCacheEntry   // keyed by cacheKey(repoPath, sessionID)
+	prPollStates     map[string]*prSessionState // keyed by cacheKey(repoPath, sessionID)
 	prPollsInFlight  int                        // count of concurrent in-flight polls
 	prDraftInFlight  bool                       // true while startPRDraftCmd is running; prevents double-trigger
 	prDraftSessionID string                     // ID of the session whose PR draft is in flight; "" when idle
@@ -271,8 +285,10 @@ func (a *App) openConfigForm(form *configForm, repoPath string) {
 }
 
 // openLaunchPanel sets the fullscreen agent terminal target and syncs.
-func (a *App) openLaunchPanel(sess *agent.Session, ag *agent.Agent) {
-	a.modals.OpenLaunch(sess, ag)
+// repoPath pins which repo owns sess so ctrl+t/ctrl+n/ctrl+w inside the
+// launch view route to the right manager without re-searching by ID.
+func (a *App) openLaunchPanel(sess *agent.Session, ag *agent.Agent, repoPath string) {
+	a.modals.OpenLaunch(sess, ag, repoPath)
 	a.syncModalsToDashboard()
 }
 
@@ -603,19 +619,19 @@ func (a *App) panelServices() PanelServices {
 			return a.resolvedCache[repoPath]
 		},
 		GHClient: func() *github.Client { return a.ghClient },
-		PRCache: func(sessionID string) *prCacheEntry {
-			return a.prCache[sessionID]
+		PRCache: func(repoPath, sessionID string) *prCacheEntry {
+			return a.prCache[cacheKey(repoPath, sessionID)]
 		},
-		ReviewCache: func(sessionID string) *reviewDiffEntry {
-			return a.reviewDiffCache[sessionID]
+		ReviewCache: func(repoPath, sessionID string) *reviewDiffEntry {
+			return a.reviewDiffCache[cacheKey(repoPath, sessionID)]
 		},
 		ClosePanel: func() {
 			// Drop the active overlay panel and return focus to the pipeline.
 			// Modals.Close enforces the invariant by nilling every owned model.
 			a.closeModal()
 		},
-		OpenInLaunch: func(sess *agent.Session) bool {
-			return a.openSessionInFocusLaunch(sess)
+		OpenInLaunch: func(sess *agent.Session, repoPath string) bool {
+			return a.openSessionInFocusLaunch(sess, repoPath)
 		},
 		OpenPlanEditor: func(sess *agent.Session, repoPath string) {
 			a.openPlanEditor(sess, repoPath)
@@ -634,8 +650,7 @@ func (a *App) panelServices() PanelServices {
 			a.prModalTransitionShipping = transitionShipping
 			return a.startPRDraftCmd(sess, repoPath, transitionShipping)
 		},
-		KillSessionCmd: func(sess *agent.Session) tea.Cmd {
-			repoPath := a.repoPathForSession(sess.ID)
+		KillSessionCmd: func(sess *agent.Session, repoPath string) tea.Cmd {
 			if repoPath == "" {
 				return nil
 			}
@@ -646,13 +661,14 @@ func (a *App) panelServices() PanelServices {
 			var agentIDs []string
 			for _, ag := range sess.Agents() {
 				agentIDs = append(agentIDs, ag.ID)
-				a.closingAgents[ag.ID] = true
+				a.closingAgents[agentCacheKey(repoPath, ag.ID)] = true
 			}
 			sessID := sess.ID
-			a.closingSessions[sessID] = true
+			a.closingSessions[cacheKey(repoPath, sessID)] = true
 			return func() tea.Msg {
 				return killResultMsg{
 					scope:     killScopeSession,
+					repoPath:  repoPath,
 					sessionID: sessID,
 					agentIDs:  agentIDs,
 					err:       filterNotFound(mgr.KillSession(sessID)),
@@ -661,7 +677,9 @@ func (a *App) panelServices() PanelServices {
 		},
 		FetchReviewDiff:    func(sess *agent.Session, repoPath string) tea.Cmd { return a.fetchReviewDiffCmd(sess, repoPath) },
 		prDraftInFlightFor: func(sessionID string) bool { return a.prDraftInFlight && a.prDraftSessionID == sessionID },
-		FeedbackTriage:     func(sessionID string) map[string]*feedbackTriageEntry { return a.feedbackTriage[sessionID] },
+		FeedbackTriage: func(repoPath, sessionID string) map[string]*feedbackTriageEntry {
+			return a.feedbackTriage[cacheKey(repoPath, sessionID)]
+		},
 		SetFeedbackVerdict: a.setFeedbackVerdict,
 		SetFeedbackNote:    a.setFeedbackNote,
 	}
@@ -923,12 +941,12 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		a.openPlanEditor(sess, items[idx].repoPath)
 		return nil, true
 	case focusSectionBuilding:
-		return nil, a.openSessionInFocusLaunch(sess)
+		return nil, a.openSessionInFocusLaunch(sess, items[idx].repoPath)
 	case focusSectionReview:
 		sess.SetLifecyclePhase(agent.LifecycleInReview)
 		rp := items[idx].repoPath
 		a.openReview(newReviewPanel(sess, rp, a.width, a.height))
-		if _, ok := a.reviewDiffCache[sess.ID]; !ok {
+		if _, ok := a.reviewDiffCache[cacheKey(rp, sess.ID)]; !ok {
 			return a.fetchReviewDiffCmd(sess, rp), true
 		}
 		a.modals.Review().RefreshDiffViewport(a.panelServices())
@@ -941,10 +959,12 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 }
 
 // openSessionInFocusLaunch picks the most-active agent in sess and opens it
-// fullscreen in focusLaunch. Priority is shared with Session.PrimaryAgent via
-// agent.AgentStatusPriority. Falls back to agents[0] when all have equal
-// priority.
-func (a *App) openSessionInFocusLaunch(sess *agent.Session) bool {
+// fullscreen in focusLaunch. repoPath is required so ctrl+t / ctrl+n / ctrl+w
+// inside the launch view can route to the correct repo without falling back
+// to an ambiguous sessionID lookup. Priority is shared with
+// Session.PrimaryAgent via agent.AgentStatusPriority. Falls back to agents[0]
+// when all have equal priority.
+func (a *App) openSessionInFocusLaunch(sess *agent.Session, repoPath string) bool {
 	if sess == nil {
 		return false
 	}
@@ -960,7 +980,7 @@ func (a *App) openSessionInFocusLaunch(sess *agent.Session) bool {
 			target = ag
 		}
 	}
-	a.openLaunchPanel(sess, target)
+	a.openLaunchPanel(sess, target, repoPath)
 	a.dashboard.scrollOffset = 0
 	target.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 	return true
@@ -1150,7 +1170,7 @@ func (a *App) refreshDiffStatsCmd() tea.Cmd {
 	return func() tea.Msg {
 		fileStats, agg, err := git.GetPerFileDiffStats(repoPath, wt)
 		if err != nil {
-			return diffStatsMsg{sessionID: sessionID, stats: nil}
+			return diffStatsMsg{sessionID: sessionID, repoPath: repoPath, stats: nil}
 		}
 		// Convert git.FileStat to diffFileStat.
 		var files []diffFileStat
@@ -1164,6 +1184,7 @@ func (a *App) refreshDiffStatsCmd() tea.Cmd {
 		}
 		return diffStatsMsg{
 			sessionID: sessionID,
+			repoPath:  repoPath,
 			stats: &diffSummaryData{
 				Files: files,
 				Aggregate: diffAggregateStats{
@@ -1183,7 +1204,12 @@ func (a *App) updateDashboardDiffStats() {
 		a.dashboard.diffStats = nil
 		return
 	}
-	if entry, ok := a.diffStatsCache[sess.ID]; ok {
+	repoPath := a.dashboard.selectedRepoPath()
+	if repoPath == "" {
+		a.dashboard.diffStats = nil
+		return
+	}
+	if entry, ok := a.diffStatsCache[cacheKey(repoPath, sess.ID)]; ok {
 		a.dashboard.diffStats = entry.stats
 	} else {
 		a.dashboard.diffStats = nil
@@ -1196,11 +1222,38 @@ func (a *App) updateDashboardPRCache() {
 	a.dashboard.prPollStates = a.prPollStates
 }
 
-// repoPathForSession returns the repo path containing the given session, or "" if not found.
+// cacheKey composes a repo-scoped key for App-level per-session caches.
+// Always use this — never key a session cache by sessionID alone. Session
+// IDs are minted by a per-manager counter (session-1, session-2, …), so with
+// multiple repos configured the same ID exists in two managers and a bare-ID
+// key clobbers across repos.
+//
+// The "\x00" separator is safe because POSIX paths and session IDs never
+// contain NUL.
+func cacheKey(repoPath, sessionID string) string {
+	return repoPath + "\x00" + sessionID
+}
+
+// agentCacheKey is the per-agent equivalent of cacheKey. Agent IDs are
+// generated as {sessionID}-agent-N (see internal/agent/session.go), so they
+// inherit the same per-manager collision and need the same scoping.
+func agentCacheKey(repoPath, agentID string) string {
+	return repoPath + "\x00" + agentID
+}
+
+// repoPathForSession returns the repo path containing the given session, or
+// "" if not found. Fails closed (returns "") when more than one repo claims
+// the same session ID, so callers don't silently route to the wrong repo.
+//
+// Prefer passing repoPath explicitly through messages and panel state. This
+// helper exists as a fallback for the few message paths (notably the plan
+// editor) where the editor model already holds repoPath but a fallback is
+// useful when that model has been torn down mid-flight.
 func (a *App) repoPathForSession(sessionID string) string {
 	if a.cfg == nil {
 		return ""
 	}
+	var found string
 	for _, repo := range a.cfg.Repos {
 		mgr := a.managers[repo.Path]
 		if mgr == nil {
@@ -1208,43 +1261,22 @@ func (a *App) repoPathForSession(sessionID string) string {
 		}
 		for _, sess := range mgr.ListSessions() {
 			if sess.ID == sessionID {
-				return repo.Path
+				if found != "" {
+					// Ambiguous: same session ID exists in multiple repos.
+					// Fail closed rather than guess.
+					return ""
+				}
+				found = repo.Path
 			}
 		}
 	}
-	return ""
-}
-
-// reviewTaskGroupAtCursor returns the taskReviewGroup at position cursor in the
-// review task list, following the same row ordering as renderTaskListPane: plan
-// tasks in index order, then the "Other changes" group (taskIndex == 0) last.
-// Returns nil if cursor is out of range or no groups exist.
-//
-// sessionByID returns the first session with the given ID across all repos.
-// It is ambiguous when the same session ID exists in multiple repos — use
-// sessionByIDInRepo instead when the repo is known.
-func (a *App) sessionByID(sessionID string) *agent.Session {
-	if a.cfg == nil {
-		return nil
-	}
-	for _, repo := range a.cfg.Repos {
-		mgr := a.managers[repo.Path]
-		if mgr == nil {
-			continue
-		}
-		for _, sess := range mgr.ListSessions() {
-			if sess.ID == sessionID {
-				return sess
-			}
-		}
-	}
-	return nil
+	return found
 }
 
 // sessionByIDInRepo returns the session with the given ID from the manager at
 // repoPath. Returns nil when the manager is not found or the session does not
-// exist. Unlike sessionByID, this is unambiguous when session IDs collide
-// across repos.
+// exist. This is the unambiguous lookup; callers must thread repoPath through
+// from a message, panel, or dashboard listItem rather than searching by ID.
 func (a *App) sessionByIDInRepo(repoPath, sessionID string) *agent.Session {
 	mgr := a.managers[repoPath]
 	if mgr == nil {
@@ -1258,27 +1290,49 @@ func (a *App) sessionByIDInRepo(repoPath, sessionID string) *agent.Session {
 	return nil
 }
 
-// cleanStaleCaches removes diff stats and PR cache entries for sessions that no longer exist.
+// cleanStaleCaches removes diff stats and PR cache entries for sessions that no
+// longer exist. Keys are composed via cacheKey(repoPath, sessionID), so the
+// active set must be built the same way — iterating the managers map gives both
+// repoPath and the session list together.
 func (a *App) cleanStaleCaches() {
 	activeSessions := make(map[string]bool)
-	for _, mgr := range a.managers {
+	activeAgents := make(map[string]bool)
+	for repoPath, mgr := range a.managers {
 		for _, sess := range mgr.ListSessions() {
-			activeSessions[sess.ID] = true
+			activeSessions[cacheKey(repoPath, sess.ID)] = true
+			for _, ag := range sess.Agents() {
+				activeAgents[agentCacheKey(repoPath, ag.ID)] = true
+			}
 		}
 	}
-	for id := range a.diffStatsCache {
-		if !activeSessions[id] {
-			delete(a.diffStatsCache, id)
+	for k := range a.diffStatsCache {
+		if !activeSessions[k] {
+			delete(a.diffStatsCache, k)
 		}
 	}
-	for id := range a.prCache {
-		if !activeSessions[id] {
-			delete(a.prCache, id)
+	for k := range a.prCache {
+		if !activeSessions[k] {
+			delete(a.prCache, k)
 		}
 	}
-	for id := range a.prPollStates {
-		if !activeSessions[id] {
-			delete(a.prPollStates, id)
+	for k := range a.prPollStates {
+		if !activeSessions[k] {
+			delete(a.prPollStates, k)
+		}
+	}
+	for k := range a.reviewDiffCache {
+		if !activeSessions[k] {
+			delete(a.reviewDiffCache, k)
+		}
+	}
+	for k := range a.feedbackTriage {
+		if !activeSessions[k] {
+			delete(a.feedbackTriage, k)
+		}
+	}
+	for k := range a.lastKnownStatus {
+		if !activeAgents[k] {
+			delete(a.lastKnownStatus, k)
 		}
 	}
 }
@@ -1445,8 +1499,11 @@ type reviewDiffMsg struct {
 }
 
 // reviewVerdictMsg carries the result of a single per-task reviewer subprocess.
+// repoPath identifies the repo that owns sessionID so the handler keys the
+// cache by (repoPath, sessionID) and never reads a colliding repo's entry.
 type reviewVerdictMsg struct {
 	sessionID string
+	repoPath  string
 	taskIndex int
 	verdict   agent.ReviewVerdict
 	err       error

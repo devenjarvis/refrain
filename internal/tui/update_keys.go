@@ -137,7 +137,11 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.dashboard.selected != prevSelected {
 		a.updateDashboardDiffStats()
 		if sess := a.dashboard.selectedSession(); sess != nil {
-			entry := a.diffStatsCache[sess.ID]
+			repoPath := a.dashboard.selectedRepoPath()
+			var entry *diffStatsEntry
+			if repoPath != "" {
+				entry = a.diffStatsCache[cacheKey(repoPath, sess.ID)]
+			}
 			if (entry == nil || time.Since(entry.lastRefresh) > DiffStatsCacheTTL) && !a.diffRefreshInFlight {
 				diffCmd := a.refreshDiffStatsCmd()
 				return a, tea.Batch(cmd, diffCmd)
@@ -214,7 +218,7 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "ctrl+t":
 		if sess != nil {
-			repoPath := a.repoPathForSession(sess.ID)
+			repoPath := a.modals.LaunchRepoPath()
 			mgr := a.managers[repoPath]
 			if mgr != nil {
 				resolved := a.resolvedCache[repoPath]
@@ -234,7 +238,7 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "ctrl+n":
 		if sess != nil {
-			repoPath := a.repoPathForSession(sess.ID)
+			repoPath := a.modals.LaunchRepoPath()
 			mgr := a.managers[repoPath]
 			if mgr != nil {
 				resolved := a.resolvedCache[repoPath]
@@ -307,19 +311,21 @@ func (a App) closeFocusLaunchAgent() (tea.Model, tea.Cmd) {
 		agents[nextIdx].Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 		a.dashboard.scrollOffset = 0
 	}
-	if a.closingAgents[oldID] {
+	repoPath := a.modals.LaunchRepoPath()
+	agentKey := agentCacheKey(repoPath, oldID)
+	if a.closingAgents[agentKey] {
 		return a, nil
 	}
-	repoPath := a.repoPathForSession(sessionID)
 	mgr := a.managers[repoPath]
 	if mgr == nil {
 		return a, nil
 	}
-	a.closingAgents[oldID] = true
+	a.closingAgents[agentKey] = true
 	return a, func() tea.Msg {
 		err := mgr.KillAgent(sessionID, oldID)
 		return killResultMsg{
 			scope:     killScopeAgent,
+			repoPath:  repoPath,
 			sessionID: sessionID,
 			agentID:   oldID,
 			err:       err,
@@ -606,9 +612,10 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		}
 		if sess.HasShell() {
 			// Shell exists — open it in focusLaunch directly.
+			repoPath := a.cursorSelectedRepoPath()
 			for _, ag := range sess.Agents() {
 				if ag.IsShell {
-					a.openLaunchPanel(sess, ag)
+					a.openLaunchPanel(sess, ag, repoPath)
 					a.dashboard.scrollOffset = 0
 					ag.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 					break
@@ -645,7 +652,8 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		// and draft a new one if no open PR exists yet.
 		sess := a.cursorSelectedSession()
 		if sess != nil {
-			if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
+			repoPath := a.cursorSelectedRepoPath()
+			if entry := a.prCache[cacheKey(repoPath, sess.ID)]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
 				if err := openURL(entry.pr.URL); err != nil {
 					a.setError(err.Error())
 				}
@@ -663,7 +671,6 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 				}
 				a.prDraftInFlight = true
 				a.prDraftSessionID = sess.ID
-				repoPath := a.cursorSelectedRepoPath()
 				return a, a.startPRDraftCmd(sess, repoPath, false), true
 			}
 		}
@@ -731,16 +738,18 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		}
 		agentID := ag.ID
 		sessionID := sess.ID
+		agentKey := agentCacheKey(repoPath, agentID)
 		// Already dispatched — no-op to avoid double-kills.
-		if a.closingAgents[agentID] {
+		if a.closingAgents[agentKey] {
 			return a, nil, true
 		}
-		a.closingAgents[agentID] = true
+		a.closingAgents[agentKey] = true
 		a.refreshAgentList()
 		return a, func() tea.Msg {
 			err := mgr.KillAgent(sessionID, agentID)
 			return killResultMsg{
 				scope:     killScopeAgent,
+				repoPath:  repoPath,
 				sessionID: sessionID,
 				agentID:   agentID,
 				err:       err,
@@ -759,21 +768,23 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			return a, nil, true
 		}
 		sessID := sess.ID
+		sessKey := cacheKey(repoPath, sessID)
 		// Already dispatched — no-op.
-		if a.closingSessions[sessID] {
+		if a.closingSessions[sessKey] {
 			return a, nil, true
 		}
 		var agentIDs []string
 		for _, ag := range sess.Agents() {
 			agentIDs = append(agentIDs, ag.ID)
-			a.closingAgents[ag.ID] = true
+			a.closingAgents[agentCacheKey(repoPath, ag.ID)] = true
 		}
-		a.closingSessions[sessID] = true
+		a.closingSessions[sessKey] = true
 		a.refreshAgentList()
 		return a, func() tea.Msg {
 			err := mgr.KillSession(sessID)
 			return killResultMsg{
 				scope:     killScopeSession,
+				repoPath:  repoPath,
 				sessionID: sessID,
 				agentIDs:  agentIDs,
 				err:       err,
@@ -857,7 +868,7 @@ func (a App) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		items := a.dashboard.sectionItems(section)
 		if idx < len(items) {
 			sess := items[idx].session
-			if entry := a.prCache[sess.ID]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
+			if entry := a.prCache[cacheKey(items[idx].repoPath, sess.ID)]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
 				indicatorWidth := prIndicatorWidth(entry)
 				if indicatorWidth > 0 && msg.X >= a.width-indicatorWidth-2 {
 					if err := openURL(entry.pr.URL); err != nil {
@@ -1158,7 +1169,7 @@ func (a App) handlePipelineOpenReview() (App, tea.Cmd, bool) {
 	sess := item.session
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	a.openReview(newReviewPanel(sess, item.repoPath, a.width, a.height))
-	if _, ok := a.reviewDiffCache[sess.ID]; !ok {
+	if _, ok := a.reviewDiffCache[cacheKey(item.repoPath, sess.ID)]; !ok {
 		return a, a.fetchReviewDiffCmd(sess, item.repoPath), true
 	}
 	a.modals.Review().RefreshDiffViewport(a.panelServices())

@@ -107,7 +107,7 @@ func (m *reviewPanelModel) RefreshDiffViewport(svc PanelServices) {
 	m.diffVP.SetHeight(diffH)
 	m.diffVP.SetWidth(rightW)
 	m.diffVP.GotoTop()
-	entry := svc.ReviewCache(m.session.ID)
+	entry := svc.ReviewCache(m.repoPath, m.session.ID)
 	if entry == nil {
 		m.diffVP.SetContent("")
 		return
@@ -233,7 +233,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		return m, closeReviewPanel(svc)
 	case "p":
 		sess := m.session
-		entry := svc.PRCache(sess.ID)
+		entry := svc.PRCache(m.repoPath, sess.ID)
 		if entry != nil && entry.pr != nil && entry.pr.URL != "" {
 			if err := svc.OpenURL(entry.pr.URL); err != nil {
 				svc.SetError(err.Error())
@@ -250,11 +250,12 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		return m, svc.StartPRDraftCmd(sess, m.repoPath, true)
 	case "t":
 		sess := m.session
+		repoPath := m.repoPath
 		// Close first regardless of outcome: pressing 't' is an exit-the-panel
 		// intent. If the open fails, the error surfaces with the panel already
 		// closed, matching the pre-refactor behaviour.
 		closeReviewPanel(svc)
-		if !svc.OpenInLaunch(sess) {
+		if !svc.OpenInLaunch(sess, repoPath) {
 			svc.SetError("session has no agents to open")
 		}
 		return m, nil
@@ -265,12 +266,12 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		if mgr == nil {
 			return m, closeReviewPanel(svc)
 		}
-		return m, tea.Batch(closeReviewPanel(svc), svc.KillSessionCmd(sess))
+		return m, tea.Batch(closeReviewPanel(svc), svc.KillSessionCmd(sess, m.repoPath))
 	case "e":
 		reviewOpenIDECmd(m.session, m.repoPath, svc)
 		return m, nil
 	case "j", "down":
-		if entry := svc.ReviewCache(m.session.ID); entry != nil {
+		if entry := svc.ReviewCache(m.repoPath, m.session.ID); entry != nil {
 			maxIdx := reviewTaskCount(entry) - 1
 			if m.taskCursor < maxIdx {
 				m.taskCursor++
@@ -285,7 +286,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		}
 		return m, nil
 	case "f":
-		entry := svc.ReviewCache(m.session.ID)
+		entry := svc.ReviewCache(m.repoPath, m.session.ID)
 		if entry == nil {
 			return m, nil
 		}
@@ -304,7 +305,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		rec.userFlagged = !rec.userFlagged
 		return m, nil
 	case "b":
-		entry := svc.ReviewCache(m.session.ID)
+		entry := svc.ReviewCache(m.repoPath, m.session.ID)
 		prompt := buildReviewReworkPrompt(entry)
 		if prompt == "" {
 			svc.SetError("no tasks flagged or marked concerns/fail")
@@ -345,7 +346,7 @@ func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg, svc PanelServices)
 	if m == nil || m.session == nil {
 		return
 	}
-	entry := svc.ReviewCache(m.session.ID)
+	entry := svc.ReviewCache(m.repoPath, m.session.ID)
 	if entry == nil || m.width < 80 {
 		return
 	}
@@ -393,7 +394,7 @@ func (m *reviewPanelModel) View(svc PanelServices) string {
 		plan, _ := m.session.CachedPlan()
 		return renderReviewSpecOverlay(m.session, plan, m.specOverlayScroll, m.width, m.height)
 	}
-	entry := svc.ReviewCache(m.session.ID)
+	entry := svc.ReviewCache(m.repoPath, m.session.ID)
 	prDraftInFlight := svc.prDraftInFlightFor(m.session.ID)
 	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.diffVP.View())
 }

@@ -98,10 +98,10 @@ type dashboardModel struct {
 	panelFocus      panelFocus
 	scrollOffset    int
 	diffStats       *diffSummaryData           // nil when no session selected or no data
-	prCache         map[string]*prCacheEntry   // keyed by session ID, passed from App
-	prPollStates    map[string]*prSessionState // keyed by session ID, passed from App
-	closingAgents   map[string]bool            // keyed by agent ID, passed from App
-	closingSessions map[string]bool            // keyed by session ID, passed from App
+	prCache         map[string]*prCacheEntry   // keyed by cacheKey(repoPath, sessionID), passed from App
+	prPollStates    map[string]*prSessionState // keyed by cacheKey(repoPath, sessionID), passed from App
+	closingAgents   map[string]bool            // keyed by agentCacheKey(repoPath, agentID), passed from App
+	closingSessions map[string]bool            // keyed by cacheKey(repoPath, sessionID), passed from App
 
 	// Pipeline / wellness state, synced from App on every refresh.
 	sessionElapsed         time.Duration
@@ -159,10 +159,11 @@ func (d *dashboardModel) advanceTickers(now time.Time) {
 		sess := item.session
 		displayName := sess.GetDisplayName()
 
-		closing := d.closingSessions != nil && d.closingSessions[sess.ID]
+		sessKey := cacheKey(item.repoPath, sess.ID)
+		closing := d.closingSessions != nil && d.closingSessions[sessKey]
 		prSuffixLen := 0
 		if !closing {
-			if entry := d.prCache[sess.ID]; entry != nil && entry.pr != nil {
+			if entry := d.prCache[sessKey]; entry != nil && entry.pr != nil {
 				prSuffixLen = 1 + prIndicatorWidth(entry) // 1 for leading space
 			}
 		}
@@ -1636,7 +1637,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		lines = append(lines, StyleSubtle.Render("REVIEWING"))
 		for i, item := range reviewSessions {
 			selected := d.cursor.Section() == focusSectionReview && i == d.cursor.Index(focusSectionReview)
-			row := d.renderQueueRow(item.session, item.repoName, selected, ColorWarning, width)
+			row := d.renderQueueRow(item.session, item.repoName, item.repoPath, selected, ColorWarning, width)
 			lines = append(lines, row...)
 			if i < len(reviewSessions)-1 {
 				lines = append(lines, "")
@@ -1650,7 +1651,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		lines = append(lines, StyleSubtle.Render("SHIPPING"))
 		for i, item := range shippingItems {
 			selected := d.cursor.Section() == focusSectionShipping && i == d.cursor.Index(focusSectionShipping)
-			row := d.renderQueueRow(item.session, item.repoName, selected, lipgloss.Color("#5ab58a"), width)
+			row := d.renderQueueRow(item.session, item.repoName, item.repoPath, selected, lipgloss.Color("#5ab58a"), width)
 			lines = append(lines, row...)
 			if i < len(shippingItems)-1 {
 				lines = append(lines, "")
@@ -1666,7 +1667,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 // accent for the cursor stripe and prefix when selected (warning for review,
 // success for shipping). Used by both the REVIEWING and SHIPPING sections so
 // they share layout/age/prIndicator handling.
-func (d dashboardModel) renderQueueRow(sess *agent.Session, repoName string, selected bool, selectedColor lipgloss.Color, width int) []string {
+func (d dashboardModel) renderQueueRow(sess *agent.Session, repoName, repoPath string, selected bool, selectedColor lipgloss.Color, width int) []string {
 	name := sess.GetDisplayName()
 	age := ""
 	if !sess.DoneAt().IsZero() {
@@ -1696,7 +1697,7 @@ func (d dashboardModel) renderQueueRow(sess *agent.Session, repoName string, sel
 	}
 	line1 := prefix + nameRendered
 	prIndSet := false
-	if prEntry := d.prCache[sess.ID]; prEntry != nil {
+	if prEntry := d.prCache[cacheKey(repoPath, sess.ID)]; prEntry != nil {
 		if prInd := prIndicator(prEntry); prInd != "" {
 			line1 = rightAlign(prefix+nameRendered, prInd, width)
 			prIndSet = true

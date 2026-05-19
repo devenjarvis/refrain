@@ -713,7 +713,7 @@ func TestRenderQueueRow_PRDraftBadge(t *testing.T) {
 
 	// With prDraftSessionID matching the session: badge should appear.
 	d := dashboardModel{prDraftSessionID: sess.ID}
-	rows := d.renderQueueRow(sess, "", false, ColorWarning, 80)
+	rows := d.renderQueueRow(sess, "", "", false, ColorWarning, 80)
 	if len(rows) < 2 {
 		t.Fatalf("renderQueueRow returned %d lines, want 2", len(rows))
 	}
@@ -723,7 +723,7 @@ func TestRenderQueueRow_PRDraftBadge(t *testing.T) {
 
 	// With prDraftSessionID cleared: normal prompt should appear.
 	d.prDraftSessionID = ""
-	rows = d.renderQueueRow(sess, "", false, ColorWarning, 80)
+	rows = d.renderQueueRow(sess, "", "", false, ColorWarning, 80)
 	if strings.Contains(ansi.Strip(rows[1]), "drafting PR") {
 		t.Error("cleared state must not show badge; got 'drafting PR' on line 2")
 	}

@@ -18,7 +18,7 @@ func TestPrPollInterval_BurstOverridesBaseline(t *testing.T) {
 	a := NewApp()
 	ps := &prSessionState{burstUntil: time.Now().Add(30 * time.Second)}
 	a.prPollStates["s1"] = ps
-	if got := a.prPollInterval("s1", ps); got != 2*time.Second {
+	if got := a.prPollInterval("/repo", "s1", ps); got != 2*time.Second {
 		t.Fatalf("burst interval = %v, want 2s", got)
 	}
 }
@@ -27,7 +27,7 @@ func TestPrPollInterval_ExpiredBurstFallsBackToBaseline(t *testing.T) {
 	a := NewApp()
 	ps := &prSessionState{burstUntil: time.Now().Add(-5 * time.Second)}
 	a.prPollStates["s1"] = ps
-	if got := a.prPollInterval("s1", ps); got != 30*time.Second {
+	if got := a.prPollInterval("/repo", "s1", ps); got != 30*time.Second {
 		t.Fatalf("expired burst should use 30s baseline, got %v", got)
 	}
 }
@@ -37,21 +37,24 @@ func TestPrPollInterval_ExpiredBurstFallsBackToBaseline(t *testing.T) {
 // so the next tick re-queries immediately.
 func TestBranchRenamedEventArmsBurst(t *testing.T) {
 	a := NewApp()
+	const repo = "/repo"
+	key := cacheKey(repo, "sess-1")
 	// Seed prior state so we can verify the handler resets it.
-	a.prPollStates["sess-1"] = &prSessionState{
+	a.prPollStates[key] = &prSessionState{
 		lastPoll:      time.Now(),
 		lastSHACheck:  time.Now(),
 		lastRemoteSHA: "oldsha",
 	}
 
 	model, _ := a.Update(agentEventMsg{
+		repoPath: repo,
 		event: agent.Event{
 			Type:      agent.EventBranchRenamed,
 			SessionID: "sess-1",
 			Branch:    "refrain/new-name",
 		},
 	})
-	got := model.(App).prPollStates["sess-1"]
+	got := model.(App).prPollStates[key]
 	if got == nil {
 		t.Fatal("prPollStates missing after event")
 	}
@@ -70,17 +73,19 @@ func TestBranchRenamedEventArmsBurst(t *testing.T) {
 // clobber a previously-cached PR entry.
 func TestPrPollMsg_ErrorPreservesCache(t *testing.T) {
 	a := NewApp()
+	const repo = "/repo"
+	key := cacheKey(repo, "sess-1")
 	a.prPollsInFlight = 1
-	a.prPollStates["sess-1"] = &prSessionState{inFlight: true}
+	a.prPollStates[key] = &prSessionState{inFlight: true}
 	prev := &prCacheEntry{}
-	a.prCache["sess-1"] = prev
+	a.prCache[key] = prev
 
-	model, _ := a.Update(prPollMsg{sessionID: "sess-1", err: errors.New("boom")})
+	model, _ := a.Update(prPollMsg{sessionID: "sess-1", repoPath: repo, err: errors.New("boom")})
 	got := model.(App)
-	if got.prCache["sess-1"] != prev {
+	if got.prCache[key] != prev {
 		t.Errorf("cache entry was clobbered on error")
 	}
-	if got.prPollStates["sess-1"].inFlight {
+	if got.prPollStates[key].inFlight {
 		t.Errorf("inFlight should be cleared after poll result")
 	}
 	if got.prPollsInFlight != 0 {
@@ -92,33 +97,35 @@ func TestPrPollMsg_ErrorPreservesCache(t *testing.T) {
 // the first nil preserves the cache entry, the second nil evicts it.
 func TestPrPollMsg_NilGracePeriod(t *testing.T) {
 	a := NewApp()
+	const repo = "/repo"
+	key := cacheKey(repo, "sess-1")
 	a.prPollsInFlight = 1
-	a.prPollStates["sess-1"] = &prSessionState{inFlight: true, lastCheckState: "success"}
-	a.prCache["sess-1"] = &prCacheEntry{}
+	a.prPollStates[key] = &prSessionState{inFlight: true, lastCheckState: "success"}
+	a.prCache[key] = &prCacheEntry{}
 
 	// First nil: cache should be preserved.
-	model, _ := a.Update(prPollMsg{sessionID: "sess-1"})
+	model, _ := a.Update(prPollMsg{sessionID: "sess-1", repoPath: repo})
 	got := model.(App)
-	if _, ok := got.prCache["sess-1"]; !ok {
+	if _, ok := got.prCache[key]; !ok {
 		t.Errorf("cache entry should be preserved on first nil poll (grace period)")
 	}
-	if got.prPollStates["sess-1"].consecutiveNilPolls != 1 {
-		t.Errorf("consecutiveNilPolls = %d, want 1", got.prPollStates["sess-1"].consecutiveNilPolls)
+	if got.prPollStates[key].consecutiveNilPolls != 1 {
+		t.Errorf("consecutiveNilPolls = %d, want 1", got.prPollStates[key].consecutiveNilPolls)
 	}
 
 	// Second nil: cache should be cleared.
 	got.prPollsInFlight = 1
-	got.prPollStates["sess-1"].inFlight = true
-	model2, _ := got.Update(prPollMsg{sessionID: "sess-1"})
+	got.prPollStates[key].inFlight = true
+	model2, _ := got.Update(prPollMsg{sessionID: "sess-1", repoPath: repo})
 	got2 := model2.(App)
-	if _, ok := got2.prCache["sess-1"]; ok {
+	if _, ok := got2.prCache[key]; ok {
 		t.Errorf("cache entry should be cleared after second consecutive nil poll")
 	}
-	if got2.prPollStates["sess-1"].lastCheckState != "" {
-		t.Errorf("lastCheckState should reset, got %q", got2.prPollStates["sess-1"].lastCheckState)
+	if got2.prPollStates[key].lastCheckState != "" {
+		t.Errorf("lastCheckState should reset, got %q", got2.prPollStates[key].lastCheckState)
 	}
-	if got2.prPollStates["sess-1"].consecutiveNilPolls != 0 {
-		t.Errorf("consecutiveNilPolls should reset to 0 after eviction, got %d", got2.prPollStates["sess-1"].consecutiveNilPolls)
+	if got2.prPollStates[key].consecutiveNilPolls != 0 {
+		t.Errorf("consecutiveNilPolls should reset to 0 after eviction, got %d", got2.prPollStates[key].consecutiveNilPolls)
 	}
 }
 
@@ -203,24 +210,26 @@ func TestResolveMergedFallback(t *testing.T) {
 // starts fresh on the next nil.
 func TestPrPollMsg_NilThenSuccessResetsCounter(t *testing.T) {
 	a := NewApp()
+	const repo = "/repo"
+	key := cacheKey(repo, "sess-1")
 	a.prPollsInFlight = 1
-	a.prPollStates["sess-1"] = &prSessionState{inFlight: true}
-	a.prCache["sess-1"] = &prCacheEntry{}
+	a.prPollStates[key] = &prSessionState{inFlight: true}
+	a.prCache[key] = &prCacheEntry{}
 
 	// First nil: increments counter.
-	model, _ := a.Update(prPollMsg{sessionID: "sess-1"})
+	model, _ := a.Update(prPollMsg{sessionID: "sess-1", repoPath: repo})
 	got := model.(App)
-	if got.prPollStates["sess-1"].consecutiveNilPolls != 1 {
-		t.Fatalf("consecutiveNilPolls after first nil = %d, want 1", got.prPollStates["sess-1"].consecutiveNilPolls)
+	if got.prPollStates[key].consecutiveNilPolls != 1 {
+		t.Fatalf("consecutiveNilPolls after first nil = %d, want 1", got.prPollStates[key].consecutiveNilPolls)
 	}
 
 	// Successful poll: counter resets.
 	got.prPollsInFlight = 1
-	got.prPollStates["sess-1"].inFlight = true
-	model2, _ := got.Update(prPollMsg{sessionID: "sess-1", pr: &github.PRState{Number: 1}})
+	got.prPollStates[key].inFlight = true
+	model2, _ := got.Update(prPollMsg{sessionID: "sess-1", repoPath: repo, pr: &github.PRState{Number: 1}})
 	got2 := model2.(App)
-	if got2.prPollStates["sess-1"].consecutiveNilPolls != 0 {
-		t.Errorf("consecutiveNilPolls should reset to 0 after success, got %d", got2.prPollStates["sess-1"].consecutiveNilPolls)
+	if got2.prPollStates[key].consecutiveNilPolls != 0 {
+		t.Errorf("consecutiveNilPolls should reset to 0 after success, got %d", got2.prPollStates[key].consecutiveNilPolls)
 	}
 }
 
@@ -228,15 +237,17 @@ func TestPrPollMsg_NilThenSuccessResetsCounter(t *testing.T) {
 // lookup for a session that never had a PR doesn't create spurious state.
 func TestPrPollMsg_NilWithNoPriorCacheIsNoop(t *testing.T) {
 	a := NewApp()
+	const repo = "/repo"
+	key := cacheKey(repo, "sess-1")
 	a.prPollsInFlight = 1
-	a.prPollStates["sess-1"] = &prSessionState{inFlight: true}
+	a.prPollStates[key] = &prSessionState{inFlight: true}
 
-	model, _ := a.Update(prPollMsg{sessionID: "sess-1"})
+	model, _ := a.Update(prPollMsg{sessionID: "sess-1", repoPath: repo})
 	got := model.(App)
-	if _, ok := got.prCache["sess-1"]; ok {
+	if _, ok := got.prCache[key]; ok {
 		t.Errorf("no cache entry should exist")
 	}
-	if got.prPollStates["sess-1"].inFlight {
+	if got.prPollStates[key].inFlight {
 		t.Errorf("inFlight should be cleared")
 	}
 }
@@ -391,14 +402,17 @@ func TestPrPollMsg_UnknownArmsBurst(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a := NewApp()
+			const repo = "/repo"
+			key := cacheKey(repo, "s1")
 			a.prPollsInFlight = 1
-			a.prPollStates["s1"] = &prSessionState{inFlight: true}
+			a.prPollStates[key] = &prSessionState{inFlight: true}
 
 			model, _ := a.Update(prPollMsg{
 				sessionID: "s1",
+				repoPath:  repo,
 				pr:        &github.PRState{Number: 1, MergeableState: tc.mergeableState},
 			})
-			got := model.(App).prPollStates["s1"]
+			got := model.(App).prPollStates[key]
 			if got == nil {
 				t.Fatal("prPollStates missing after update")
 			}
@@ -413,14 +427,17 @@ func TestPrPollMsg_UnknownArmsBurst(t *testing.T) {
 // mergeable state (e.g. "clean") does not arm the burst window.
 func TestPrPollMsg_KnownDoesNotArmBurst(t *testing.T) {
 	a := NewApp()
+	const repo = "/repo"
+	key := cacheKey(repo, "s1")
 	a.prPollsInFlight = 1
-	a.prPollStates["s1"] = &prSessionState{inFlight: true}
+	a.prPollStates[key] = &prSessionState{inFlight: true}
 
 	model, _ := a.Update(prPollMsg{
 		sessionID: "s1",
+		repoPath:  repo,
 		pr:        &github.PRState{Number: 1, MergeableState: "clean"},
 	})
-	got := model.(App).prPollStates["s1"]
+	got := model.(App).prPollStates[key]
 	if got == nil {
 		t.Fatal("prPollStates missing after update")
 	}

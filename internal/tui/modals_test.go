@@ -83,7 +83,7 @@ func TestModals_Close_NilsEveryModel(t *testing.T) {
 		{"shipping", func(m *Modals) { m.OpenShipping(&shippingPanelModel{}) }},
 		{"planEditor", func(m *Modals) { m.OpenPlanEditor(&planEditorModel{}) }},
 		{"config", func(m *Modals) { m.OpenConfig(&configForm{}, "/repo") }},
-		{"launch", func(m *Modals) { m.OpenLaunch(&agent.Session{}, &agent.Agent{}) }},
+		{"launch", func(m *Modals) { m.OpenLaunch(&agent.Session{}, &agent.Agent{}, "") }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,7 +145,7 @@ func TestModals_Close_NilsInternalState(t *testing.T) {
 	if m.config != nil || m.configRepo != "" {
 		t.Error("internal config state should be empty after Close")
 	}
-	m.OpenLaunch(&agent.Session{}, &agent.Agent{})
+	m.OpenLaunch(&agent.Session{}, &agent.Agent{}, "")
 	m.Close()
 	if m.launchAgent != nil || m.launchSess != nil {
 		t.Error("internal launch refs should be nil after Close")
@@ -214,7 +214,7 @@ func TestModals_TableInvariant(t *testing.T) {
 		},
 		{
 			name:       "launch",
-			open:       func(m *Modals) { m.OpenLaunch(&agent.Session{}, &agent.Agent{}) },
+			open:       func(m *Modals) { m.OpenLaunch(&agent.Session{}, &agent.Agent{}, "") },
 			wantFocus:  focusLaunch,
 			wantNonNil: "launch",
 		},
@@ -297,7 +297,7 @@ func TestModals_SetLaunchAgent(t *testing.T) {
 	a1 := &agent.Agent{}
 	a2 := &agent.Agent{}
 
-	m.OpenLaunch(sess, a1)
+	m.OpenLaunch(sess, a1, "")
 	if m.LaunchAgent() != a1 {
 		t.Fatal("LaunchAgent should return a1 after OpenLaunch")
 	}

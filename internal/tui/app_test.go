@@ -677,7 +677,7 @@ func TestMouseWheelForwardsInAltScreen(t *testing.T) {
 	app.dashboard.items = []listItem{
 		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
 	}
-	app.openLaunchPanel(sess, ag)
+	app.openLaunchPanel(sess, ag, dir)
 
 	// Set a non-zero offset so we can tell the wheel branch didn't mutate it.
 	app.dashboard.scrollOffset = 5
@@ -844,12 +844,13 @@ func TestKillAgentAsyncMarksClosing(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("Expected non-nil cmd from 'x' (async kill), got nil")
 	}
-	if !app.closingAgents[ag.ID] {
-		t.Fatalf("Expected closingAgents[%s]=true, got %v", ag.ID, app.closingAgents)
+	agentKey := agentCacheKey(dir, ag.ID)
+	if !app.closingAgents[agentKey] {
+		t.Fatalf("Expected closingAgents[%s]=true, got %v", agentKey, app.closingAgents)
 	}
 	// Dashboard should see the closing flag too.
-	if !app.dashboard.closingAgents[ag.ID] {
-		t.Fatalf("Expected dashboard.closingAgents[%s]=true", ag.ID)
+	if !app.dashboard.closingAgents[agentKey] {
+		t.Fatalf("Expected dashboard.closingAgents[%s]=true", agentKey)
 	}
 	// The manager still has the agent because the goroutine hasn't run yet.
 	if mgr.Get(ag.ID) == nil {
@@ -897,38 +898,44 @@ func TestKillResultMsgClearsClosingSet(t *testing.T) {
 	app.dashboard.width = 120
 	app.dashboard.height = 39
 
+	const repo = "/repo"
+	sessKey := cacheKey(repo, "sess-1")
+	agentAKey := agentCacheKey(repo, "agent-a")
+	agentBKey := agentCacheKey(repo, "agent-b")
+
 	// Pre-populate closing sets and diff cache as if 'X' had dispatched.
-	app.closingSessions["sess-1"] = true
-	app.closingAgents["agent-a"] = true
-	app.closingAgents["agent-b"] = true
-	app.lastKnownStatus["agent-a"] = agent.StatusActive
-	app.lastKnownStatus["agent-b"] = agent.StatusActive
-	app.diffStatsCache["sess-1"] = &diffStatsEntry{}
+	app.closingSessions[sessKey] = true
+	app.closingAgents[agentAKey] = true
+	app.closingAgents[agentBKey] = true
+	app.lastKnownStatus[agentAKey] = agent.StatusActive
+	app.lastKnownStatus[agentBKey] = agent.StatusActive
+	app.diffStatsCache[sessKey] = &diffStatsEntry{}
 
 	model, _ := app.Update(killResultMsg{
 		scope:     killScopeSession,
+		repoPath:  repo,
 		sessionID: "sess-1",
 		agentIDs:  []string{"agent-a", "agent-b"},
 	})
 	app = model.(App)
 
-	if app.closingSessions["sess-1"] {
+	if app.closingSessions[sessKey] {
 		t.Fatal("Expected closingSessions[sess-1] cleared")
 	}
-	if app.closingAgents["agent-a"] || app.closingAgents["agent-b"] {
+	if app.closingAgents[agentAKey] || app.closingAgents[agentBKey] {
 		t.Fatal("Expected closingAgents cleared for both agents")
 	}
-	if _, ok := app.diffStatsCache["sess-1"]; ok {
+	if _, ok := app.diffStatsCache[sessKey]; ok {
 		t.Fatal("Expected diffStatsCache[sess-1] removed")
 	}
-	if _, ok := app.lastKnownStatus["agent-a"]; ok {
+	if _, ok := app.lastKnownStatus[agentAKey]; ok {
 		t.Fatal("Expected lastKnownStatus cleared for agent-a")
 	}
 	// Dashboard should also see the cleared maps (refreshAgentList was called).
 	if app.dashboard.closingSessions == nil {
 		t.Fatal("Expected dashboard.closingSessions wired up after refresh")
 	}
-	if app.dashboard.closingSessions["sess-1"] {
+	if app.dashboard.closingSessions[sessKey] {
 		t.Fatal("Expected dashboard.closingSessions[sess-1] cleared after refresh")
 	}
 }
@@ -943,17 +950,20 @@ func TestKillResultMsgClearsClosingSetOnError(t *testing.T) {
 	app.dashboard.width = 120
 	app.dashboard.height = 39
 
-	app.closingAgents["agent-x"] = true
+	const repo = "/repo"
+	agentKey := agentCacheKey(repo, "agent-x")
+	app.closingAgents[agentKey] = true
 
 	model, _ := app.Update(killResultMsg{
 		scope:     killScopeAgent,
+		repoPath:  repo,
 		sessionID: "sess-1",
 		agentID:   "agent-x",
 		err:       errors.New("kill failed"),
 	})
 	app = model.(App)
 
-	if app.closingAgents["agent-x"] {
+	if app.closingAgents[agentKey] {
 		t.Fatal("Expected closingAgents[agent-x] cleared even on error")
 	}
 	if app.err != "kill failed" {
@@ -1743,7 +1753,7 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
 		{kind: listItemSession, repoPath: dir, session: sessR},
 	}
-	app.openLaunchPanel(sess, ag)
+	app.openLaunchPanel(sess, ag, dir)
 
 	for _, ch := range []rune{'m', 'r'} {
 		model, _ := app.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
@@ -2579,8 +2589,9 @@ func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
 		{kind: listItemSession, repoPath: "/r", session: sessR},
 	}
 	// Seed a PR cache entry so the indicator shows up and the early-return path is reachable.
+	sessKey := cacheKey("/r", sessR.ID)
 	app.prCache = map[string]*prCacheEntry{
-		sessR.ID: {pr: &github.PRState{Number: 42, URL: ""}},
+		sessKey: {pr: &github.PRState{Number: 42, URL: ""}},
 	}
 
 	// First click on the right edge of the review row triggers the PR
@@ -2593,7 +2604,7 @@ func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
 	if !app.lastPipelineClick.IsZero() {
 		// Empty URL skipped the early return — set a URL and try again so
 		// the test exercises the path we actually care about.
-		app.prCache[sessR.ID].pr.URL = "https://example/pr/42"
+		app.prCache[sessKey].pr.URL = "https://example/pr/42"
 		app.dashboard.prCache = app.prCache
 		model, _ = app.Update(prClick)
 		app = model.(App)
@@ -2718,7 +2729,6 @@ func TestSessionByIDInRepo_DisambiguatesAcrossRepos(t *testing.T) {
 	}
 
 	app := NewApp()
-	// repoA is listed first so sessionByID (first-match) returns repoA's session.
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: repoA}, {Path: repoB}}}
 	app.managers[repoA] = mgrA
 	app.managers[repoB] = mgrB
@@ -2742,10 +2752,11 @@ func TestSessionByIDInRepo_DisambiguatesAcrossRepos(t *testing.T) {
 		t.Errorf("sessionByIDInRepo(repoB) returned wrong session: got %p, want %p", gotB, sessB)
 	}
 
-	// Legacy sessionByID returns repoA's session (first-match).
-	firstMatch := app.sessionByID("session-1")
-	if firstMatch != sessA {
-		t.Errorf("sessionByID returned %p, want repoA's sessA %p (first-match behaviour)", firstMatch, sessA)
+	// repoPathForSession fails closed when the same ID lives in two repos.
+	// Pre-fix behaviour returned the first repo's path, which is the bug we
+	// are fixing — guard against regression.
+	if got := app.repoPathForSession("session-1"); got != "" {
+		t.Errorf("repoPathForSession returned %q for ambiguous session-1, want \"\" (fail-closed)", got)
 	}
 
 	// Unknown repo returns nil.
@@ -3046,7 +3057,7 @@ func TestTick_BreakDoesNotEnterWhilePanelOpen(t *testing.T) {
 			// guard reads modals.IsList(); the specific model doesn't matter.
 			switch tc.focus {
 			case focusLaunch:
-				app.modals.OpenLaunch(nil, nil)
+				app.modals.OpenLaunch(nil, nil, "")
 			case focusReview:
 				app.modals.OpenReview(&reviewPanelModel{})
 			case focusShipping:
@@ -4629,10 +4640,11 @@ func TestShippingPanel_CursorAndScrollKeys(t *testing.T) {
 	sess := agent.NewSessionForTest("ship-cs", "ship")
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, "", app.width, app.height))
+	const repo = "/repo"
+	app.openShipping(newShippingPanel(sess, repo, app.width, app.height))
 	app.width = 120
 	app.height = 40
-	app.prCache[sess.ID] = &prCacheEntry{
+	app.prCache[cacheKey(repo, sess.ID)] = &prCacheEntry{
 		pr: &github.PRState{Number: 1, MergeableState: "clean"},
 		threads: []github.ReviewThread{
 			{Reviewer: "alice", State: "CHANGES_REQUESTED", Body: "fix a"},
@@ -4692,11 +4704,13 @@ func TestShippingPanel_VerdictKeys(t *testing.T) {
 	sess := agent.NewSessionForTest("ship-v", "ship")
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, "", app.width, app.height))
+	const repo = "/repo"
+	app.openShipping(newShippingPanel(sess, repo, app.width, app.height))
 	app.width = 120
 	app.height = 40
+	sessKey := cacheKey(repo, sess.ID)
 	// One inline comment with ID=42.
-	app.prCache[sess.ID] = &prCacheEntry{
+	app.prCache[sessKey] = &prCacheEntry{
 		pr: &github.PRState{Number: 2, MergeableState: "clean"},
 		threads: []github.ReviewThread{
 			{
@@ -4713,21 +4727,21 @@ func TestShippingPanel_VerdictKeys(t *testing.T) {
 	// Press 'a' — approve.
 	m, _ := app.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := m.(App)
-	if e := got.feedbackTriage[sess.ID]["comment:42"]; e == nil || e.Verdict != feedbackApproved {
+	if e := got.feedbackTriage[sessKey]["comment:42"]; e == nil || e.Verdict != feedbackApproved {
 		t.Errorf("after a: want feedbackApproved, got %+v", e)
 	}
 
 	// Press 'x' — disagree.
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	got = m.(App)
-	if e := got.feedbackTriage[sess.ID]["comment:42"]; e == nil || e.Verdict != feedbackDisagreed {
+	if e := got.feedbackTriage[sessKey]["comment:42"]; e == nil || e.Verdict != feedbackDisagreed {
 		t.Errorf("after x: want feedbackDisagreed, got %+v", e)
 	}
 
 	// Press 'u' — neutral (should remove the entry since no note).
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	got = m.(App)
-	if e := got.feedbackTriage[sess.ID]["comment:42"]; e != nil {
+	if e := got.feedbackTriage[sessKey]["comment:42"]; e != nil {
 		t.Errorf("after u: expected entry removed (neutral+empty note), got %+v", e)
 	}
 }
@@ -4749,14 +4763,15 @@ func TestAddressFeedback_ClearsTriage(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.prCache[sess.ID] = &prCacheEntry{
+	sessKey := cacheKey(dir, sess.ID)
+	app.prCache[sessKey] = &prCacheEntry{
 		pr: &github.PRState{Number: 5, MergeableState: "clean"},
 		threads: []github.ReviewThread{
 			{Reviewer: "alice", State: "CHANGES_REQUESTED", Body: "fix it"},
 		},
 	}
 	// Seed triage.
-	app.feedbackTriage[sess.ID] = map[string]*feedbackTriageEntry{
+	app.feedbackTriage[sessKey] = map[string]*feedbackTriageEntry{
 		"thread:alice": {Verdict: feedbackDisagreed, Note: "n/a"},
 	}
 
@@ -4772,8 +4787,8 @@ func TestAddressFeedback_ClearsTriage(t *testing.T) {
 		}
 	}
 
-	if m := gotApp.feedbackTriage[sess.ID]; len(m) != 0 {
-		t.Errorf("expected feedbackTriage[%s] cleared after r, got: %v", sess.ID, m)
+	if m := gotApp.feedbackTriage[sessKey]; len(m) != 0 {
+		t.Errorf("expected feedbackTriage[%s] cleared after r, got: %v", sessKey, m)
 	}
 }
 
@@ -4808,7 +4823,7 @@ func TestAddressFeedback_RefusesOnMergedPR(t *testing.T) {
 			app.height = 40
 			app.dashboard.width = 120
 			app.dashboard.height = 39
-			app.prCache[sess.ID] = &prCacheEntry{
+			app.prCache[cacheKey(dir, sess.ID)] = &prCacheEntry{
 				pr: &github.PRState{Number: 5, State: tc.state},
 				threads: []github.ReviewThread{
 					{Reviewer: "alice", State: "CHANGES_REQUESTED", Body: "fix it"},
@@ -4870,7 +4885,7 @@ func TestReviewPanel_EnterDoesNotChangeView(t *testing.T) {
 	app.width = 120
 	app.height = 40
 	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
-	app.reviewDiffCache[sessR.ID] = entry
+	app.reviewDiffCache[cacheKey("", sessR.ID)] = entry
 
 	for _, key := range []string{"enter", "space"} {
 		msg := tea.KeyPressMsg{Code: tea.KeyEnter, Text: key}
@@ -4923,7 +4938,7 @@ func TestReviewPanel_ScrollBindingsAdvanceViewport(t *testing.T) {
 	app.width = 120
 	app.height = 40
 	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
-	app.reviewDiffCache[sessR.ID] = entry
+	app.reviewDiffCache[cacheKey("", sessR.ID)] = entry
 	// Load diff content and set viewport dimensions before sending scroll keys.
 	app.modals.Review().RefreshDiffViewport(app.panelServices())
 
@@ -5229,13 +5244,13 @@ func TestPollAllSessions_PassesCachedPRNumberForShippingOnly(t *testing.T) {
 	app := NewApp()
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-	app.prCache[shipping.ID] = &prCacheEntry{pr: &github.PRState{Number: 42}}
-	app.prCache[building.ID] = &prCacheEntry{pr: &github.PRState{Number: 99}}
+	app.prCache[cacheKey(dir, shipping.ID)] = &prCacheEntry{pr: &github.PRState{Number: 42}}
+	app.prCache[cacheKey(dir, building.ID)] = &prCacheEntry{pr: &github.PRState{Number: 99}}
 
-	if got := app.cachedPRNumberForFallback(shipping); got != 42 {
+	if got := app.cachedPRNumberForFallback(dir, shipping); got != 42 {
 		t.Errorf("Shipping session: got %d, want 42", got)
 	}
-	if got := app.cachedPRNumberForFallback(building); got != 0 {
+	if got := app.cachedPRNumberForFallback(dir, building); got != 0 {
 		t.Errorf("InProgress session: got %d, want 0", got)
 	}
 }
@@ -5324,4 +5339,163 @@ func TestApp_PlanEditorRetryMsg_CallsStartDraftWithOriginalPrompt(t *testing.T) 
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Error("stub drafter was not called within 2s of planEditorRetryMsg dispatch")
+}
+
+// --- Multi-repo cache-collision regression tests --------------------------
+//
+// Session IDs are minted by a per-manager counter, so two repos can each have
+// a session-1. All App-level per-session caches must therefore be keyed by
+// (repoPath, sessionID); these tests pin that contract so a future regression
+// to bare-ID keys fails loud.
+
+// TestPRCache_PerRepo_NoCollision verifies that two managers with overlapping
+// session IDs (session-1 in each) write to distinct prCache entries.
+func TestPRCache_PerRepo_NoCollision(t *testing.T) {
+	const repoA, repoB = "/repo/a", "/repo/b"
+	app := NewApp()
+
+	keyA := cacheKey(repoA, "session-1")
+	keyB := cacheKey(repoB, "session-1")
+	app.prCache[keyA] = &prCacheEntry{pr: &github.PRState{Number: 100, State: "open"}}
+	app.prCache[keyB] = &prCacheEntry{pr: &github.PRState{Number: 200, State: "merged"}}
+
+	if got := app.prCache[keyA]; got == nil || got.pr.Number != 100 {
+		t.Errorf("repoA's session-1 cache clobbered: got %+v, want PR #100", got)
+	}
+	if got := app.prCache[keyB]; got == nil || got.pr.Number != 200 {
+		t.Errorf("repoB's session-1 cache clobbered: got %+v, want PR #200", got)
+	}
+}
+
+// TestHandlePRPoll_DoesNotClobberAcrossRepos drives two prPollMsg through
+// handlePRPoll back-to-back with the same sessionID but different repoPath
+// and verifies that each repo's cache lands in its own slot.
+func TestHandlePRPoll_DoesNotClobberAcrossRepos(t *testing.T) {
+	const repoA, repoB = "/repo/a", "/repo/b"
+	sessA := agent.NewSessionForTest("session-1", "branch-a")
+	sessA.SetLifecyclePhase(agent.LifecycleShipping)
+	sessB := agent.NewSessionForTest("session-1", "branch-b")
+	sessB.SetLifecyclePhase(agent.LifecycleShipping)
+
+	mgrA := agent.NewManager(repoA, config.Resolve(nil, nil))
+	defer mgrA.Shutdown()
+	mgrB := agent.NewManager(repoB, config.Resolve(nil, nil))
+	defer mgrB.Shutdown()
+	mgrA.AddSessionForTest(sessA)
+	mgrB.AddSessionForTest(sessB)
+
+	app := NewApp()
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: repoA}, {Path: repoB}}}
+	app.managers[repoA] = mgrA
+	app.managers[repoB] = mgrB
+	keyA := cacheKey(repoA, "session-1")
+	keyB := cacheKey(repoB, "session-1")
+	app.prPollStates[keyA] = &prSessionState{inFlight: true}
+	app.prPollStates[keyB] = &prSessionState{inFlight: true}
+	app.prPollsInFlight = 2
+
+	model, _ := app.Update(prPollMsg{
+		sessionID: "session-1",
+		repoPath:  repoA,
+		pr:        &github.PRState{Number: 100, State: "open", MergeableState: "clean"},
+	})
+	app = model.(App)
+	app.prPollsInFlight = 1
+	app.prPollStates[keyB].inFlight = true
+	model, _ = app.Update(prPollMsg{
+		sessionID: "session-1",
+		repoPath:  repoB,
+		pr:        &github.PRState{Number: 200, State: "open", MergeableState: "clean"},
+	})
+	app = model.(App)
+
+	if got := app.prCache[keyA]; got == nil || got.pr.Number != 100 {
+		t.Errorf("repoA's cache was clobbered by repoB's poll: got %+v, want PR #100", got)
+	}
+	if got := app.prCache[keyB]; got == nil || got.pr.Number != 200 {
+		t.Errorf("repoB's cache missing/wrong: got %+v, want PR #200", got)
+	}
+}
+
+// TestClosingSessions_PerRepo verifies that pressing X on repoB's session-1
+// does not flip the "closing…" badge for repoA's session-1.
+func TestClosingSessions_PerRepo(t *testing.T) {
+	const repoA, repoB = "/repo/a", "/repo/b"
+	keyA := cacheKey(repoA, "session-1")
+	keyB := cacheKey(repoB, "session-1")
+
+	app := NewApp()
+	app.closingSessions[keyB] = true
+
+	if app.closingSessions[keyA] {
+		t.Error("repoA's session-1 should NOT be marked closing when only repoB's was set")
+	}
+	if !app.closingSessions[keyB] {
+		t.Error("repoB's session-1 should be marked closing")
+	}
+}
+
+// TestLastKnownStatus_PerRepo verifies that emitting a status event for
+// {repoA, session-1-agent-1} does not overwrite repoB's same-named agent's
+// entry.
+func TestLastKnownStatus_PerRepo(t *testing.T) {
+	const repoA, repoB = "/repo/a", "/repo/b"
+	keyA := agentCacheKey(repoA, "session-1-agent-1")
+	keyB := agentCacheKey(repoB, "session-1-agent-1")
+
+	app := NewApp()
+	app.lastKnownStatus[keyA] = agent.StatusActive
+	app.lastKnownStatus[keyB] = agent.StatusIdle
+
+	app.Update(agentEventMsg{
+		repoPath: repoA,
+		event: agent.Event{
+			Type:    agent.EventStatusChanged,
+			AgentID: "session-1-agent-1",
+			Status:  agent.StatusDone,
+		},
+	})
+
+	if got := app.lastKnownStatus[keyA]; got != agent.StatusDone {
+		t.Errorf("repoA's agent status: got %v, want StatusDone", got)
+	}
+	if got := app.lastKnownStatus[keyB]; got != agent.StatusIdle {
+		t.Errorf("repoB's agent status was clobbered: got %v, want StatusIdle", got)
+	}
+}
+
+// TestCleanStaleCaches_ScopesByRepo verifies that when repoB's session-1 is
+// killed but repoA's session-1 is alive, the cleanup retains repoA's entries
+// and evicts only repoB's. This is the live-data view of the bug — a single
+// cleanup pass must not blow away both repos because the IDs match.
+func TestCleanStaleCaches_ScopesByRepo(t *testing.T) {
+	const repoA, repoB = "/repo/a", "/repo/b"
+
+	sessA := agent.NewSessionForTest("session-1", "branch-a")
+	mgrA := agent.NewManager(repoA, config.Resolve(nil, nil))
+	defer mgrA.Shutdown()
+	mgrA.AddSessionForTest(sessA)
+
+	// repoB has no live sessions — its session-1 is "dead".
+	mgrB := agent.NewManager(repoB, config.Resolve(nil, nil))
+	defer mgrB.Shutdown()
+
+	app := NewApp()
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: repoA}, {Path: repoB}}}
+	app.managers[repoA] = mgrA
+	app.managers[repoB] = mgrB
+
+	keyA := cacheKey(repoA, "session-1")
+	keyB := cacheKey(repoB, "session-1")
+	app.prCache[keyA] = &prCacheEntry{pr: &github.PRState{Number: 100}}
+	app.prCache[keyB] = &prCacheEntry{pr: &github.PRState{Number: 200}}
+
+	app.cleanStaleCaches()
+
+	if got := app.prCache[keyA]; got == nil {
+		t.Error("repoA's live cache entry was evicted (it should survive)")
+	}
+	if _, had := app.prCache[keyB]; had {
+		t.Error("repoB's dead cache entry survived cleanup (it should be evicted)")
+	}
 }

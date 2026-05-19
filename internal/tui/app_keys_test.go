@@ -210,9 +210,9 @@ func TestPipeline_UnknownKey_NoOp(t *testing.T) {
 // Tests using this fixture do not spawn a real claude subprocess.
 func appInFocusLaunch(t *testing.T) (App, *agent.Session, *agent.Agent) {
 	t.Helper()
-	app, sess, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	app, sess, repoPath := appWithSeededSession(t, agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("primary", false, agent.StatusIdle)
-	app.openLaunchPanel(sess, ag)
+	app.openLaunchPanel(sess, ag, repoPath)
 	return app, sess, ag
 }
 
@@ -224,7 +224,7 @@ func TestFocusLaunch_NilAgent_RoutesBackToList(t *testing.T) {
 	// Force panelFocus into focusLaunch with no agent by reaching into Modals
 	// directly — production code can't construct this state, but the guard at
 	// the top of updateFocusLaunchKeys must still handle it.
-	app.modals.OpenLaunch(nil, nil)
+	app.modals.OpenLaunch(nil, nil, "")
 	app.syncModalsToDashboard()
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
