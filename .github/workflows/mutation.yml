@@ -13,7 +13,34 @@ permissions:
   pull-requests: write
 
 jobs:
-  mutation:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.gocheck.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.base_ref }}
+
+      - name: Detect production Go changes
+        id: gocheck
+        run: |
+          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -E '\.go$' | grep -v '_test\.go$' > /tmp/changed-go.txt; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "Go files changed:"
+            cat /tmp/changed-go.txt
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No production Go files changed; skipping mutation testing."
+          fi
+
+  gremlins:
+    needs: detect
+    if: needs.detect.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 30
@@ -36,26 +63,12 @@ jobs:
           git config --global user.name "CI"
           git config --global user.email "ci@test.com"
 
-      - name: Skip when no Go changes
-        id: gocheck
-        run: |
-          mkdir -p reports
-          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -E '\.go$' | grep -v '_test\.go$' > /tmp/changed-go.txt; then
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-            echo "Go files changed:"
-            cat /tmp/changed-go.txt
-          else
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-            echo "No production Go files changed; skipping mutation testing."
-          fi
-
       - name: Install gremlins
-        if: steps.gocheck.outputs.has_changes == 'true'
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
 
       - name: Run gremlins (diff mode)
-        if: steps.gocheck.outputs.has_changes == 'true'
         run: |
+          mkdir -p reports
           set +e
           gremlins unleash \
             --diff "origin/${{ github.base_ref }}" \
@@ -71,9 +84,7 @@ jobs:
             echo "# Mutation testing baseline"
             echo
           } > reports/summary.md
-          if [ "${{ steps.gocheck.outputs.has_changes }}" != "true" ]; then
-            echo "_No production Go files changed in this PR; mutation testing skipped._" >> reports/summary.md
-          elif [ ! -s reports/mutation.json ]; then
+          if [ ! -s reports/mutation.json ]; then
             echo "_gremlins produced no JSON output. See the \`gremlins-reports\` artifact for the raw log._" >> reports/summary.md
           else
             counts=$(jq -r '
@@ -140,4 +151,99 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: gremlins
+          path: reports/summary.md
+
+  kanly:
+    needs: detect
+    if: needs.detect.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.base_ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Configure git for tests
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@test.com"
+
+      - name: Install kanly
+        run: go install github.com/devenjarvis/kanly/cmd/kanly@latest
+
+      - name: Run kanly (diff mode)
+        run: |
+          mkdir -p reports
+          set +e
+          kanly \
+            --diff \
+            --diff-base="origin/${{ github.base_ref }}" \
+            --format=text \
+            > reports/kanly.txt 2>&1
+          status=$?
+          echo "exit=$status" >> reports/kanly.txt
+
+      - name: Build summary
+        run: |
+          {
+            echo "# kanly mutation testing baseline"
+            echo
+          } > reports/summary.md
+          totals_line=$(grep -E '^Total:' reports/kanly.txt | tail -1 || true)
+          if [ -z "$totals_line" ]; then
+            {
+              echo "_kanly did not emit a totals line. See the \`kanly-reports\` artifact for the raw log._"
+            } >> reports/summary.md
+          else
+            total=$(echo "$totals_line" | sed -nE 's/.*Total:[[:space:]]*([0-9]+).*/\1/p')
+            killed=$(echo "$totals_line" | sed -nE 's/.*Killed:[[:space:]]*([0-9]+).*/\1/p')
+            survived=$(echo "$totals_line" | sed -nE 's/.*Survived:[[:space:]]*([0-9]+).*/\1/p')
+            timeout=$(echo "$totals_line" | sed -nE 's/.*Timeout:[[:space:]]*([0-9]+).*/\1/p')
+            score=$(echo "$totals_line" | sed -nE 's/.*Score:[[:space:]]*([0-9.]+%).*/\1/p')
+            {
+              echo "Scoped to lines changed vs \`origin/${{ github.base_ref }}\` (diff mode)."
+              echo
+              echo "| Total | Killed | Survived | Timed out | Score |"
+              echo "| --- | --- | --- | --- | --- |"
+              echo "| ${total:-?} | ${killed:-?} | ${survived:-?} | ${timeout:-?} | ${score:-?} |"
+              echo
+              echo "<details><summary>Full report</summary>"
+              echo
+              echo '```'
+              cat reports/kanly.txt
+              echo '```'
+              echo
+              echo "</details>"
+            } >> reports/summary.md
+          fi
+          {
+            echo
+            echo "Full report attached as the \`kanly-reports\` workflow artifact. Non-blocking; temporary comparison vs gremlins."
+          } >> reports/summary.md
+          cat reports/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kanly-reports
+          path: reports/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Post PR comment
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: kanly
           path: reports/summary.md
