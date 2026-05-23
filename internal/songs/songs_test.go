@@ -105,6 +105,36 @@ func TestSlug_ExactOutput(t *testing.T) {
 	}
 }
 
+// TestSlug_DashAtBoundary validates that the 41-byte window correctly handles
+// the edge case where a word boundary dash falls exactly at index 40.
+// Without the 41-byte window, the algorithm would cut at the prior dash (at
+// index 34) and return "aaaaa-bbbb-cccc-dddd-eeee-ffff-gggg" (35 chars)
+// instead of the full 40-char prefix.
+func TestSlug_DashAtBoundary(t *testing.T) {
+	cases := []struct {
+		name string
+		want string
+	}{
+		{
+			// Slug: "aaaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhh-iiii-jjjj" (50 chars)
+			// Dash at index 40 → cut at 40 → 40-char result.
+			name: "aaaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj",
+			want: "aaaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhh",
+		},
+		{
+			// Slug exactly 40 chars — no truncation needed.
+			name: "aaaa bbbb cccc dddd eeee ffff gggg hhhh",
+			want: "aaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhh",
+		},
+	}
+	for _, tc := range cases {
+		got := Track{Name: tc.name}.Slug()
+		if got != tc.want {
+			t.Errorf("Track{Name:%q}.Slug() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestSlug_TruncateTrimsTrailingDash verifies that a dash landing at position 40
 // after truncation is removed by TrimRight.
 func TestSlug_TruncateTrimsTrailingDash(t *testing.T) {

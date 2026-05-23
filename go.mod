@@ -17,6 +17,7 @@ require (
 	github.com/muesli/termenv v0.16.0
 	github.com/sergi/go-diff v1.4.0
 	github.com/spf13/cobra v1.10.2
+	pgregory.net/rapid v1.3.0
 )
 
 require (

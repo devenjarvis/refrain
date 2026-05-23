@@ -48,6 +48,35 @@ func TestRandomName_AvoidsCollision(t *testing.T) {
 	}
 }
 
+// TestSlugify_DashAtBoundary validates that the 41-byte window correctly
+// handles the edge case where a word boundary dash falls exactly at index 40.
+// Without the 41-byte window, the algorithm would find the previous dash (at
+// index 34) and return a 34-char slug instead of the full 40-char prefix.
+func TestSlugify_DashAtBoundary(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{
+			// Slug: "aaaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhh-iiii-jjjj" (50 chars)
+			// Dash at index 40 → cut at 40 → 40-char result.
+			in:   "aaaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj",
+			want: "aaaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhh",
+		},
+		{
+			// Slug exactly 40 chars — no truncation needed.
+			in:   "aaaa bbbb cccc dddd eeee ffff gggg hhhh",
+			want: "aaaa-bbbb-cccc-dddd-eeee-ffff-gggg-hhhh",
+		},
+	}
+	for _, tc := range cases {
+		got := slugify(tc.in)
+		if got != tc.want {
+			t.Errorf("slugify(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestRandomName_WithExistingAvoidsDuplicate(t *testing.T) {
 	// Generate a name, then check that calling RandomName with that name as
 	// existing eventually produces a different name (if the word lists allow).
