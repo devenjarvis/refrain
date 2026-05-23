@@ -41,8 +41,9 @@ func TestPlayer_Debounce(t *testing.T) {
 	}
 	defer p.Close()
 
-	// Override chimePath to a nonexistent file so afplay fails silently
-	// (we only care about debounce logic, not actual playback).
+	// Use "true" as a no-op command so Play() sets lastPlayed without
+	// needing a real audio player.
+	p.playCmd = "true"
 	p.chimePath = "/dev/null"
 
 	// First call should update lastPlayed.
@@ -60,5 +61,20 @@ func TestPlayer_Debounce(t *testing.T) {
 
 	if !second.Equal(first) {
 		t.Errorf("expected debounce to suppress second Play(); lastPlayed changed from %v to %v", first, second)
+	}
+}
+
+func TestPlayer_NoPlayCmd_Noop(t *testing.T) {
+	p, err := NewPlayer()
+	if err != nil {
+		t.Fatalf("NewPlayer() error: %v", err)
+	}
+	defer p.Close()
+
+	p.playCmd = ""
+	p.Play()
+
+	if !p.LastPlayedTime().IsZero() {
+		t.Error("expected Play() to be a no-op when playCmd is empty")
 	}
 }

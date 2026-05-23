@@ -10,6 +10,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func init() {
+	rootCmd.Version = resolvedVersion()
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "refrain",
 	Short: "A terminal-native tool for orchestrating multiple Claude Code agents",
