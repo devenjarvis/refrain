@@ -63,7 +63,7 @@ func TestSession_StatusDoneWhenAllNonShellDone(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		nonShellCount := rapid.IntRange(1, 5).Draw(t, "non_shell_count")
 		shellCount := rapid.IntRange(0, 3).Draw(t, "shell_count")
-		var specs []agentSpec
+		specs := make([]agentSpec, 0, nonShellCount+shellCount)
 		for range nonShellCount {
 			specs = append(specs, agentSpec{IsShell: false, Status: StatusDone})
 		}
@@ -139,7 +139,7 @@ func TestSession_IsReviewableFalseIfNoNonShellAgents(t *testing.T) {
 func TestSession_IsReviewableFalseIfAnyNonShellBlocking(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		n := rapid.IntRange(0, 4).Draw(t, "extra_count")
-		var specs []agentSpec
+		specs := make([]agentSpec, 0, n+1)
 		for range n {
 			specs = append(specs, agentSpec{IsShell: false, Status: genReviewableStatus(t)})
 		}
@@ -157,7 +157,7 @@ func TestSession_IsReviewableTrueWhenAllSettled(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		n := rapid.IntRange(1, 5).Draw(t, "count")
 		shellCount := rapid.IntRange(0, 3).Draw(t, "shell_count")
-		var specs []agentSpec
+		specs := make([]agentSpec, 0, n+shellCount)
 		for range n {
 			specs = append(specs, agentSpec{IsShell: false, Status: genReviewableStatus(t)})
 		}

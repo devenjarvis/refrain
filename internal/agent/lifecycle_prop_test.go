@@ -52,11 +52,8 @@ func TestLifecyclePhase_ForwardPhasesStrictlyOrdered(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		a := genForwardLifecyclePhase(t)
 		b := genForwardLifecyclePhase(t)
-		if a != b {
-			// The numeric ordering must match the pipeline order.
-			if a < b && !(int(a) < int(b)) {
-				t.Fatalf("phase %v (%d) should be numerically < %v (%d)", a, a, b, b)
-			}
+		if a != b && a < b && int(a) >= int(b) {
+			t.Fatalf("phase %v (%d) should be numerically < %v (%d)", a, a, b, b)
 		}
 		// Drafting is always less than any forward phase.
 		if LifecycleDrafting >= a {
