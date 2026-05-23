@@ -2,9 +2,6 @@
 
 A terminal-native dashboard for running [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents in parallel — designed around how many agents a human can actually oversee, not how many you can launch.
 
-<!-- TODO: record demo GIF and replace placeholder -->
-![Refrain demo](docs/demo.gif)
-
 > **Alpha software — v0.1.0 shipped.** The core loop is working and stabilizing, but rough edges remain. APIs, config schema, and keybindings may change between versions. Git operations are conservative — Refrain only writes to `refrain/*` branches inside `.refrain/worktrees/` and uses `git merge --no-ff` with explicit confirmation — but keep your work committed and file issues when things break.
 
 ## Install
@@ -31,9 +28,14 @@ go build -o refrain .
 
 ## Requirements
 
+- **Platforms:** macOS (amd64, arm64) and Linux (amd64, arm64). Windows is not currently supported.
 - Git 2.20+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH, with `--settings` support for hook integration)
 - Optional: `gh` CLI or `GITHUB_TOKEN` for PR creation and checks polling
+
+**Platform notes:**
+- Audio chimes work on macOS (`afplay`) and Linux (`paplay` or `aplay`). Silent on other platforms.
+- IDE detection auto-discovers editors on macOS (`.app` bundles) and Linux (PATH lookup). The `IDECommand` setting works everywhere.
 
 Verify your environment:
 

@@ -2,14 +2,15 @@ package editor
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 )
 
-func TestDetect_NonDarwin(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("only runs on non-darwin")
+func TestDetect_UnsupportedPlatform(t *testing.T) {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+		t.Skip("only runs on unsupported platforms")
 	}
 	if got := Detect(); got != nil {
 		t.Fatalf("Detect on %s: want nil, got %v", runtime.GOOS, got)
@@ -95,6 +96,81 @@ func TestMatchCommand(t *testing.T) {
 	}
 }
 
+func TestDetect_Linux_FindsCLIs(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("only runs on linux")
+	}
+	available := map[string]bool{"code": true, "zed": true}
+	withLookPath(t, func(name string) (string, error) {
+		if available[name] {
+			return "/usr/bin/" + name, nil
+		}
+		return "", exec.ErrNotFound
+	})
+
+	got := detectLinux()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 editors, got %d: %+v", len(got), got)
+	}
+	if got[0].Name != "Zed" || got[0].Command != "zed" {
+		t.Fatalf("expected Zed first, got %+v", got[0])
+	}
+	if got[1].Name != "Visual Studio Code" || got[1].Command != "code" {
+		t.Fatalf("expected VS Code second, got %+v", got[1])
+	}
+}
+
+func TestDetect_Linux_IncludesEnvEditors(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("only runs on linux")
+	}
+	withLookPath(t, func(name string) (string, error) {
+		if name == "nvim" {
+			return "/usr/bin/nvim", nil
+		}
+		return "", exec.ErrNotFound
+	})
+	t.Setenv("VISUAL", "nvim")
+	t.Setenv("EDITOR", "")
+
+	got := detectLinux()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 editor from $VISUAL, got %d: %+v", len(got), got)
+	}
+	if got[0].Command != "nvim" {
+		t.Fatalf("expected nvim, got %+v", got[0])
+	}
+}
+
+func TestDetect_Linux_NoDuplicateEnv(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("only runs on linux")
+	}
+	withLookPath(t, func(name string) (string, error) {
+		if name == "code" {
+			return "/usr/bin/code", nil
+		}
+		return "", exec.ErrNotFound
+	})
+	t.Setenv("VISUAL", "code")
+
+	got := detectLinux()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 (no duplicate from $VISUAL), got %d: %+v", len(got), got)
+	}
+}
+
+func TestMatchCommand_LinuxCLI(t *testing.T) {
+	got := MatchCommand("code")
+	if got == nil || got.Name != "Visual Studio Code" {
+		t.Fatalf("MatchCommand(\"code\") = %+v, want VS Code", got)
+	}
+	got = MatchCommand("zed")
+	if got == nil || got.Name != "Zed" {
+		t.Fatalf("MatchCommand(\"zed\") = %+v, want Zed", got)
+	}
+}
+
 // mkAppBundle creates a directory simulating a .app bundle under root.
 func mkAppBundle(t *testing.T, root, name string) {
 	t.Helper()
@@ -109,4 +185,12 @@ func withSearchRoots(t *testing.T, roots []string) {
 	prev := searchRoots
 	searchRoots = func() []string { return roots }
 	t.Cleanup(func() { searchRoots = prev })
+}
+
+// withLookPath swaps the package-level lookPath for the duration of a test.
+func withLookPath(t *testing.T, fn func(string) (string, error)) {
+	t.Helper()
+	prev := lookPath
+	lookPath = fn
+	t.Cleanup(func() { lookPath = prev })
 }

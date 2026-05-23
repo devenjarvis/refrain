@@ -49,7 +49,7 @@ type sessionTicker struct {
 // ColorWaiting is the accent used for agents in StatusWaiting (permission
 // prompts, input blocks). Scoped to the dashboard because no other view
 // needs it today — add to theme.go if another view ever surfaces waiting.
-var ColorWaiting = lipgloss.Color("#D946EF")
+var ColorWaiting = initColor("#D946EF")
 
 // listItemKind distinguishes repo headers, session rows, and agent rows in the dashboard list.
 type listItemKind int

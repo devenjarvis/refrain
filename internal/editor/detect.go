@@ -1,10 +1,11 @@
-// Package editor detects installed GUI editors on macOS and maps stored
-// launch commands back to detected editors for UI pre-selection.
+// Package editor detects installed GUI editors on macOS and Linux and maps
+// stored launch commands back to detected editors for UI pre-selection.
 package editor
 
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 )
@@ -36,6 +37,24 @@ var curatedApps = []struct {
 	{"RustRover", "RustRover.app"},
 }
 
+// curatedCLIs lists editor CLI commands to probe on Linux, in display order.
+var curatedCLIs = []struct {
+	Name string
+	Cmd  string
+}{
+	{"Zed", "zed"},
+	{"Visual Studio Code", "code"},
+	{"Cursor", "cursor"},
+	{"IntelliJ IDEA", "idea"},
+	{"GoLand", "goland"},
+	{"PyCharm", "pycharm"},
+	{"WebStorm", "webstorm"},
+	{"RubyMine", "rubymine"},
+	{"PhpStorm", "phpstorm"},
+	{"CLion", "clion"},
+	{"RustRover", "rustrover"},
+}
+
 // searchRoots returns the directories to probe for .app bundles on macOS.
 // Overridden in tests via setSearchRoots.
 var searchRoots = defaultSearchRoots
@@ -48,12 +67,24 @@ func defaultSearchRoots() []string {
 	return roots
 }
 
-// Detect probes known locations for editor .app bundles on macOS and returns
-// the matches in curated-list order. On non-darwin platforms returns nil.
+// lookPath is overridden in tests.
+var lookPath = exec.LookPath
+
+// Detect probes known locations for editors and returns matches in curated
+// order. On macOS it probes .app bundles; on Linux it checks PATH for CLI
+// commands and $VISUAL/$EDITOR. On other platforms returns nil.
 func Detect() []Editor {
-	if runtime.GOOS != "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
+		return detectDarwin()
+	case "linux":
+		return detectLinux()
+	default:
 		return nil
 	}
+}
+
+func detectDarwin() []Editor {
 	roots := searchRoots()
 	out := make([]Editor, 0, len(curatedApps))
 	for _, app := range curatedApps {
@@ -70,6 +101,32 @@ func Detect() []Editor {
 	return out
 }
 
+func detectLinux() []Editor {
+	out := make([]Editor, 0, len(curatedCLIs))
+	seen := make(map[string]bool)
+	for _, cli := range curatedCLIs {
+		if _, err := lookPath(cli.Cmd); err == nil {
+			out = append(out, Editor{
+				Name:    cli.Name,
+				Command: cli.Cmd,
+			})
+			seen[cli.Cmd] = true
+		}
+	}
+	for _, env := range []string{"VISUAL", "EDITOR"} {
+		if val := os.Getenv(env); val != "" && !seen[val] {
+			if _, err := lookPath(val); err == nil {
+				out = append(out, Editor{
+					Name:    "$" + env + " (" + val + ")",
+					Command: val,
+				})
+				seen[val] = true
+			}
+		}
+	}
+	return out
+}
+
 // MatchCommand reverse-looks up a stored command string to a curated editor.
 // Returns nil if no exact match. Used to pre-select the dropdown when loading
 // an existing config.
@@ -78,6 +135,11 @@ func MatchCommand(cmd string) *Editor {
 		expected := fmt.Sprintf(`open -a %q`, app.Name)
 		if cmd == expected {
 			return &Editor{Name: app.Name, Command: expected}
+		}
+	}
+	for _, cli := range curatedCLIs {
+		if cmd == cli.Cmd {
+			return &Editor{Name: cli.Name, Command: cli.Cmd}
 		}
 	}
 	return nil
