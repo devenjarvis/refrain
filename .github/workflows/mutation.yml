@@ -148,7 +148,7 @@ jobs:
 
       - name: Post PR comment
         if: always()
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: gremlins
           path: reports/summary.md
@@ -243,7 +243,7 @@ jobs:
 
       - name: Post PR comment
         if: always()
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: kanly
           path: reports/summary.md
