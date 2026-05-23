@@ -7,51 +7,35 @@ import (
 	"pgregory.net/rapid"
 )
 
-// Resolve(nil, nil) always produces the documented defaults for every field.
+// Resolve(nil, nil) produces the documented defaults for every field.
 func TestResolve_DefaultsProperty(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		r := config.Resolve(nil, nil)
+	r := config.Resolve(nil, nil)
 
-		if r.AudioEnabled != config.DefaultAudioEnabled {
-			t.Fatalf("AudioEnabled = %v, want %v", r.AudioEnabled, config.DefaultAudioEnabled)
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"AudioEnabled", r.AudioEnabled, config.DefaultAudioEnabled},
+		{"BypassPermissions", r.BypassPermissions, config.DefaultBypassPermissions},
+		{"BranchPrefix", r.BranchPrefix, config.DefaultBranchPrefix},
+		{"AgentProgram", r.AgentProgram, config.DefaultAgentProgram},
+		{"WorktreeDir", r.WorktreeDir, config.DefaultWorktreeDir},
+		{"SidebarWidth", r.SidebarWidth, config.DefaultSidebarWidth},
+		{"MergeMethod", r.MergeMethod, config.DefaultMergeMethod},
+		{"FocusSessionMinutes", r.FocusSessionMinutes, config.DefaultFocusSessionMinutes},
+		{"FocusBreakMinutes", r.FocusBreakMinutes, config.DefaultFocusBreakMinutes},
+		{"MaxConcurrentAgents", r.MaxConcurrentAgents, config.DefaultMaxConcurrentAgents},
+		{"MaxReviewBacklog", r.MaxReviewBacklog, config.DefaultMaxReviewBacklog},
+		{"PlanFirstEnabled", r.PlanFirstEnabled, config.DefaultPlanFirstEnabled},
+		{"PRDraftByDefault", r.PRDraftByDefault, config.DefaultPRDraftByDefault},
+		{"AutoOpenPRInBrowser", r.AutoOpenPRInBrowser, config.DefaultAutoOpenPRInBrowser},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
 		}
-		if r.BypassPermissions != config.DefaultBypassPermissions {
-			t.Fatalf("BypassPermissions = %v, want %v", r.BypassPermissions, config.DefaultBypassPermissions)
-		}
-		if r.BranchPrefix != config.DefaultBranchPrefix {
-			t.Fatalf("BranchPrefix = %q, want %q", r.BranchPrefix, config.DefaultBranchPrefix)
-		}
-		if r.AgentProgram != config.DefaultAgentProgram {
-			t.Fatalf("AgentProgram = %q, want %q", r.AgentProgram, config.DefaultAgentProgram)
-		}
-		if r.WorktreeDir != config.DefaultWorktreeDir {
-			t.Fatalf("WorktreeDir = %q, want %q", r.WorktreeDir, config.DefaultWorktreeDir)
-		}
-		if r.SidebarWidth != config.DefaultSidebarWidth {
-			t.Fatalf("SidebarWidth = %d, want %d", r.SidebarWidth, config.DefaultSidebarWidth)
-		}
-		if r.MergeMethod != config.DefaultMergeMethod {
-			t.Fatalf("MergeMethod = %q, want %q", r.MergeMethod, config.DefaultMergeMethod)
-		}
-		if r.FocusSessionMinutes != config.DefaultFocusSessionMinutes {
-			t.Fatalf("FocusSessionMinutes = %d, want %d", r.FocusSessionMinutes, config.DefaultFocusSessionMinutes)
-		}
-		if r.FocusBreakMinutes != config.DefaultFocusBreakMinutes {
-			t.Fatalf("FocusBreakMinutes = %d, want %d", r.FocusBreakMinutes, config.DefaultFocusBreakMinutes)
-		}
-		if r.MaxConcurrentAgents != config.DefaultMaxConcurrentAgents {
-			t.Fatalf("MaxConcurrentAgents = %d, want %d", r.MaxConcurrentAgents, config.DefaultMaxConcurrentAgents)
-		}
-		if r.PlanFirstEnabled != config.DefaultPlanFirstEnabled {
-			t.Fatalf("PlanFirstEnabled = %v, want %v", r.PlanFirstEnabled, config.DefaultPlanFirstEnabled)
-		}
-		if r.PRDraftByDefault != config.DefaultPRDraftByDefault {
-			t.Fatalf("PRDraftByDefault = %v, want %v", r.PRDraftByDefault, config.DefaultPRDraftByDefault)
-		}
-		if r.AutoOpenPRInBrowser != config.DefaultAutoOpenPRInBrowser {
-			t.Fatalf("AutoOpenPRInBrowser = %v, want %v", r.AutoOpenPRInBrowser, config.DefaultAutoOpenPRInBrowser)
-		}
-	})
+	}
 }
 
 // For any non-nil RepoSettings field, that field's value appears in the resolved output.
@@ -64,11 +48,29 @@ func TestResolve_RepoOverridesGlobal_Property(t *testing.T) {
 		if repo.BypassPermissions != nil && r.BypassPermissions != *repo.BypassPermissions {
 			t.Fatalf("BypassPermissions: repo=%v resolved=%v", *repo.BypassPermissions, r.BypassPermissions)
 		}
+		if repo.DefaultBranch != nil && r.DefaultBranch != *repo.DefaultBranch {
+			t.Fatalf("DefaultBranch: repo=%q resolved=%q", *repo.DefaultBranch, r.DefaultBranch)
+		}
 		if repo.BranchPrefix != nil && r.BranchPrefix != *repo.BranchPrefix {
 			t.Fatalf("BranchPrefix: repo=%q resolved=%q", *repo.BranchPrefix, r.BranchPrefix)
 		}
+		if repo.BranchNamePrompt != nil && r.BranchNamePrompt != *repo.BranchNamePrompt {
+			t.Fatalf("BranchNamePrompt: repo=%q resolved=%q", *repo.BranchNamePrompt, r.BranchNamePrompt)
+		}
 		if repo.AgentProgram != nil && r.AgentProgram != *repo.AgentProgram {
 			t.Fatalf("AgentProgram: repo=%q resolved=%q", *repo.AgentProgram, r.AgentProgram)
+		}
+		if repo.AgentModel != nil && r.AgentModel != *repo.AgentModel {
+			t.Fatalf("AgentModel: repo=%q resolved=%q", *repo.AgentModel, r.AgentModel)
+		}
+		if repo.PlanModel != nil && r.PlanModel != *repo.PlanModel {
+			t.Fatalf("PlanModel: repo=%q resolved=%q", *repo.PlanModel, r.PlanModel)
+		}
+		if repo.ReviewerModel != nil && r.ReviewerModel != *repo.ReviewerModel {
+			t.Fatalf("ReviewerModel: repo=%q resolved=%q", *repo.ReviewerModel, r.ReviewerModel)
+		}
+		if repo.IDECommand != nil && r.IDECommand != *repo.IDECommand {
+			t.Fatalf("IDECommand: repo=%q resolved=%q", *repo.IDECommand, r.IDECommand)
 		}
 		if repo.WorktreeDir != nil && r.WorktreeDir != *repo.WorktreeDir {
 			t.Fatalf("WorktreeDir: repo=%q resolved=%q", *repo.WorktreeDir, r.WorktreeDir)
@@ -76,7 +78,19 @@ func TestResolve_RepoOverridesGlobal_Property(t *testing.T) {
 		if repo.PlanFirstEnabled != nil && r.PlanFirstEnabled != *repo.PlanFirstEnabled {
 			t.Fatalf("PlanFirstEnabled: repo=%v resolved=%v", *repo.PlanFirstEnabled, r.PlanFirstEnabled)
 		}
-		// MergeMethod is normalized, so only check when the raw value is already valid.
+		if repo.BuildFromPlanPrompt != nil && r.BuildFromPlanPrompt != *repo.BuildFromPlanPrompt {
+			t.Fatalf("BuildFromPlanPrompt: repo=%q resolved=%q", *repo.BuildFromPlanPrompt, r.BuildFromPlanPrompt)
+		}
+		if repo.BuildSystemPrompt != nil && r.BuildSystemPrompt != *repo.BuildSystemPrompt {
+			t.Fatalf("BuildSystemPrompt: repo=%q resolved=%q", *repo.BuildSystemPrompt, r.BuildSystemPrompt)
+		}
+		if repo.PRDraftByDefault != nil && r.PRDraftByDefault != *repo.PRDraftByDefault {
+			t.Fatalf("PRDraftByDefault: repo=%v resolved=%v", *repo.PRDraftByDefault, r.PRDraftByDefault)
+		}
+		if repo.AutoOpenPRInBrowser != nil && r.AutoOpenPRInBrowser != *repo.AutoOpenPRInBrowser {
+			t.Fatalf("AutoOpenPRInBrowser: repo=%v resolved=%v", *repo.AutoOpenPRInBrowser, r.AutoOpenPRInBrowser)
+		}
+		// MergeMethod is normalized; verify through Resolve itself rather than raw string comparison.
 		if repo.MergeMethod != nil {
 			want := config.Resolve(nil, &config.RepoSettings{MergeMethod: repo.MergeMethod}).MergeMethod
 			if r.MergeMethod != want {
