@@ -671,6 +671,7 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 				}
 				a.prDraftInFlight = true
 				a.prDraftSessionID = sess.ID
+				a.prDraftRepoPath = repoPath
 				return a, a.startPRDraftCmd(sess, repoPath, false), true
 			}
 		}

@@ -66,9 +66,9 @@ type PanelServices struct {
 	FetchReviewDiff func(sess *agent.Session, repoPath string) tea.Cmd
 
 	// prDraftInFlightFor reports whether a PR draft request is currently in
-	// flight for the given session ID. The review panel uses this to render
-	// the "Drafting PR…" footer hint.
-	prDraftInFlightFor func(sessionID string) bool
+	// flight for the given (sessionID, repoPath) pair. The review panel uses
+	// this to render the "Drafting PR…" footer hint.
+	prDraftInFlightFor func(sessionID, repoPath string) bool
 
 	// Shipping-panel feedback triage state. Reads return the live map (or
 	// nil); the setters lazily allocate and apply the same cleanup rules as
