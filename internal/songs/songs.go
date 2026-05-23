@@ -30,8 +30,9 @@ func (t Track) Slug() string {
 	slug := nonAlnumRe.ReplaceAllString(strings.ToLower(t.Name), "-")
 	slug = strings.Trim(slug, "-")
 	if len(slug) > 40 {
-		// Use the 41-byte window so a dash at index 40 is recognised as a
-		// natural word boundary rather than being trimmed back one word.
+		// Include the byte at index 40 in the search window so a slug whose
+		// 41st byte is '-' is recognised as already ending on a boundary at
+		// index 40, rather than being trimmed back to the previous '-'.
 		window := slug[:41]
 		if cut := strings.LastIndexByte(window, '-'); cut > 0 {
 			slug = slug[:cut]
