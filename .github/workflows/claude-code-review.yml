@@ -63,7 +63,7 @@ jobs:
               2. Read related files if you need context.
               3. Write findings JSON to /tmp/findings-security.json.
               4. Empty findings array is a valid result.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: findings-security
@@ -94,7 +94,7 @@ jobs:
             Steps:
               1. gh pr diff ${{ github.event.pull_request.number }}
               2. Write findings JSON to /tmp/findings-performance.json.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: findings-performance
@@ -124,7 +124,7 @@ jobs:
             Steps:
               1. gh pr diff ${{ github.event.pull_request.number }}
               2. Write findings JSON to /tmp/findings-testing.json.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: findings-testing
@@ -153,7 +153,7 @@ jobs:
             Steps:
               1. gh pr diff ${{ github.event.pull_request.number }}
               2. Write findings JSON to /tmp/findings-correctness.json.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: findings-correctness
