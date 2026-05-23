@@ -56,7 +56,7 @@ func TestSlugify_FirstCharAlphanumeric(t *testing.T) {
 			return
 		}
 		c := out[0]
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
 			t.Fatalf("slugify(%q) = %q first char %q is not [a-z0-9]", s, out, c)
 		}
 	})
