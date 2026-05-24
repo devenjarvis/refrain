@@ -471,24 +471,6 @@ func (m *planEditorModel) Update(msg tea.Msg) tea.Cmd {
 	}
 }
 
-// activeSectionIndex returns the index into m.sections of the section that
-// contains the current viewport top (m.scrollOff). Returns -1 if there are no
-// sections or if scrollOff is in the preamble before any section heading.
-func (m *planEditorModel) activeSectionIndex() int {
-	// Ensure sectionDisplayStart is populated.
-	m.displayLines()
-	if len(m.sectionDisplayStart) == 0 {
-		return -1
-	}
-	// Walk backward to find the last section whose display start <= scrollOff.
-	result := -1
-	for i, start := range m.sectionDisplayStart {
-		if start <= m.scrollOff {
-			result = i
-		}
-	}
-	return result
-}
 
 func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 	if m.drafting {

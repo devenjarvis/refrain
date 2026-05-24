@@ -406,7 +406,7 @@ func TestPlanEditor_FoldedSectionMidPlanCountsBlankLine(t *testing.T) {
 }
 
 // TestPlanEditor_TabTogglesFoldAtViewportTop verifies that pressing tab in
-// scroll mode toggles the fold of whichever section contains the viewport top.
+// scroll mode toggles the fold of the section at sectionCursor.
 func TestPlanEditor_TabTogglesFoldAtViewportTop(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	const plan = "# Goal\nGoal body\n\n## Spec\nspec body\n\n## Context\nctx body\n"
@@ -426,98 +426,60 @@ func TestPlanEditor_TabTogglesFoldAtViewportTop(t *testing.T) {
 		t.Fatal("Context should be collapsed by default")
 	}
 
-	// Viewport top is at scrollOff=0 → Goal section; pressing tab collapses it.
+	// Cursor at 0 (Goal); pressing tab collapses it.
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if !editor.folds["Goal"] {
-		t.Errorf("after tab at Goal, folds[Goal] = false, want true (collapsed)")
+		t.Errorf("after tab at Goal (cursor=0), folds[Goal] = false, want true (collapsed)")
 	}
 
-	// Move viewport to Spec's heading display line, then tab toggles Spec.
-	lines := editor.displayLines()
-	specDisplayLine := -1
-	for i, l := range lines {
-		stripped := testutil.StripANSI(l)
-		if strings.Contains(stripped, "Spec") && !strings.Contains(stripped, "Goal") {
-			specDisplayLine = i
-			break
-		}
-	}
-	if specDisplayLine < 0 {
-		t.Fatal("could not find Spec heading in displayLines")
-	}
-	editor.scrollOff = specDisplayLine
+	// Move cursor to Spec (index 1), then tab toggles Spec.
+	editor.sectionCursor = 1
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if !editor.folds["Spec"] {
-		t.Errorf("after tab at Spec, folds[Spec] = false, want true (collapsed)")
+		t.Errorf("after tab at Spec (cursor=1), folds[Spec] = false, want true (collapsed)")
 	}
 }
 
-// TestPlanEditor_BracketsJumpBetweenSections verifies that ] and [ step the
-// viewport to the next and previous section headings respectively, clamping at
+// TestPlanEditor_BracketsJumpBetweenSections verifies that ] and [ step
+// sectionCursor to the next and previous sections respectively, clamping at
 // the ends.
 func TestPlanEditor_BracketsJumpBetweenSections(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
-	// Use non-default folds: all expanded so we get display lines between sections.
 	const plan = "# Goal\nGoal body\n\n## Spec\nspec body\n\n## Tasks\ntask body\n"
 	if err := sess.WritePlan(plan); err != nil {
 		t.Fatalf("WritePlan: %v", err)
 	}
-	// height=8 gives bodyHeight=3, so clampScroll allows scrolling (content > viewport).
 	editor := newPlanEditor(sess, "", 80, 8)
-	// Expand all sections so navigation has multiple display lines to cross.
-	for k := range editor.folds {
-		editor.folds[k] = false
-	}
-	editor.invalidateDisplayCache()
-	editor.scrollOff = 0
-
-	lines := editor.displayLines()
-	if len(lines) == 0 {
-		t.Fatal("no display lines")
+	if len(editor.sections) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(editor.sections))
 	}
 
-	// Find display-line indices for ## Spec and ## Tasks headings.
-	specLine, tasksLine := -1, -1
-	for i, l := range lines {
-		stripped := testutil.StripANSI(l)
-		if strings.Contains(stripped, "## Spec") && specLine < 0 {
-			specLine = i
-		}
-		if strings.Contains(stripped, "## Tasks") && tasksLine < 0 {
-			tasksLine = i
-		}
-	}
-	if specLine < 0 || tasksLine < 0 {
-		t.Fatalf("couldn't find section headings; specLine=%d tasksLine=%d\nlines:\n%s",
-			specLine, tasksLine, strings.Join(lines, "\n"))
-	}
-
-	// ] from top → Spec heading.
+	// ] from 0 → cursor 1 (Spec).
 	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
-	if editor.scrollOff != specLine {
-		t.Errorf("] from 0: scrollOff = %d, want %d (Spec)", editor.scrollOff, specLine)
+	if editor.sectionCursor != 1 {
+		t.Errorf("] from 0: sectionCursor = %d, want 1 (Spec)", editor.sectionCursor)
 	}
 
-	// ] again → Tasks heading.
+	// ] again → cursor 2 (Tasks).
 	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
-	if editor.scrollOff != tasksLine {
-		t.Errorf("] from Spec: scrollOff = %d, want %d (Tasks)", editor.scrollOff, tasksLine)
+	if editor.sectionCursor != 2 {
+		t.Errorf("] from Spec: sectionCursor = %d, want 2 (Tasks)", editor.sectionCursor)
 	}
 
-	// ] at last section → no change.
+	// ] at last section → still 2 (clamped).
 	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
-	if editor.scrollOff != tasksLine {
-		t.Errorf("] at last section: scrollOff = %d, want %d (clamp)", editor.scrollOff, tasksLine)
+	if editor.sectionCursor != 2 {
+		t.Errorf("] at last section: sectionCursor = %d, want 2 (clamp)", editor.sectionCursor)
 	}
 
-	// [ twice → back to top (Goal heading).
+	// [ twice → back to 0 (Goal).
 	editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
-	if editor.scrollOff != specLine {
-		t.Errorf("[ from Tasks: scrollOff = %d, want %d (Spec)", editor.scrollOff, specLine)
+	if editor.sectionCursor != 1 {
+		t.Errorf("[ from Tasks: sectionCursor = %d, want 1 (Spec)", editor.sectionCursor)
 	}
 	editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
-	if editor.scrollOff != 0 {
-		t.Errorf("[ from Spec: scrollOff = %d, want 0 (Goal)", editor.scrollOff)
+	if editor.sectionCursor != 0 {
+		t.Errorf("[ from Spec: sectionCursor = %d, want 0 (Goal)", editor.sectionCursor)
 	}
 }
 
@@ -674,49 +636,35 @@ func TestPlanEditor_R_NoopWhenNoOriginalPrompt(t *testing.T) {
 
 func TestPlanEditor_JK_ScrollLines(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
-	// Long plan so we have scroll travel.
-	var sb strings.Builder
-	sb.WriteString("# Goal\nDo X\n\n## Spec\n")
-	for i := 0; i < 60; i++ {
-		sb.WriteString("line ")
-		sb.WriteString(strings.Repeat(".", 5))
-		sb.WriteString("\n")
-	}
-	if err := sess.WritePlan(sb.String()); err != nil {
+	const plan = "# Goal\nDo X\n\n## Spec\nspec body\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
 		t.Fatal(err)
 	}
 	editor := newPlanEditor(sess, "", 80, 20)
-	if editor.scrollOff != 0 {
-		t.Fatalf("scrollOff = %d, want 0 initially", editor.scrollOff)
+	if editor.sectionCursor != 0 {
+		t.Fatalf("sectionCursor = %d, want 0 initially", editor.sectionCursor)
 	}
 	editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	if editor.scrollOff != 1 {
-		t.Errorf("after j, scrollOff = %d, want 1", editor.scrollOff)
+	if editor.sectionCursor != 1 {
+		t.Errorf("after j, sectionCursor = %d, want 1", editor.sectionCursor)
 	}
 	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	if editor.scrollOff != 0 {
-		t.Errorf("after k, scrollOff = %d, want 0", editor.scrollOff)
+	if editor.sectionCursor != 0 {
+		t.Errorf("after k, sectionCursor = %d, want 0", editor.sectionCursor)
+	}
+	// k at first section → stays 0 (clamped).
+	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	if editor.sectionCursor != 0 {
+		t.Errorf("k at first section: sectionCursor = %d, want 0", editor.sectionCursor)
 	}
 	// down/up are aliases for j/k.
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if editor.scrollOff != 1 {
-		t.Errorf("after down, scrollOff = %d, want 1", editor.scrollOff)
+	if editor.sectionCursor != 1 {
+		t.Errorf("after down, sectionCursor = %d, want 1", editor.sectionCursor)
 	}
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-	if editor.scrollOff != 0 {
-		t.Errorf("after up, scrollOff = %d, want 0", editor.scrollOff)
-	}
-}
-
-func TestPlanEditor_K_AtTop_ClampedToZero(t *testing.T) {
-	sess, _ := newEditorTestSession(t)
-	if err := sess.WritePlan("# Goal\n\n## Spec\nbody\n"); err != nil {
-		t.Fatal(err)
-	}
-	editor := newPlanEditor(sess, "", 80, 20)
-	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	if editor.scrollOff != 0 {
-		t.Errorf("k at top moved scroll, got %d, want 0", editor.scrollOff)
+	if editor.sectionCursor != 0 {
+		t.Errorf("after up, sectionCursor = %d, want 0", editor.sectionCursor)
 	}
 }
 
@@ -814,6 +762,9 @@ func TestPlanEditor_DraftingState_BlocksAllExceptEscAndQ(t *testing.T) {
 	}
 	if editor.scrollOff != 0 {
 		t.Errorf("scroll changed during drafting, got %d", editor.scrollOff)
+	}
+	if editor.sectionCursor != 0 {
+		t.Errorf("sectionCursor changed during drafting, got %d", editor.sectionCursor)
 	}
 	if editor.mode != planEditorModeScroll {
 		t.Errorf("mode changed during drafting to %v", editor.mode)
