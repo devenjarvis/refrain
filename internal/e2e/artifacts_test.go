@@ -9,46 +9,58 @@ import (
 	"time"
 )
 
-// TestArtifactsOnPlanReview drives a bash-scripted agent through a
-// plan-approval-shaped interaction: enter alt-screen, draw a frame ending in a
-// distinctive marker, sleep long enough for refrain to render it to the outer
-// terminal, then redraw a shorter frame. The test asserts on refrain's emitted
-// View (written to REFRAIN_E2E_DEBUG_DUMP by dashboard.View), not on the
-// downstream terminal emulator — because lipgloss already width-pads content
-// inside the preview box, the Render()→RenderPadded() distinction shows up
-// deterministically in refrain's output but can be masked by tu/Bubble Tea diff
-// rendering at the terminal layer. Regression target: after alt-screen entry
-// and a clean redraw, refrain's preview View must not contain GHOST_ARTIFACT_FOO.
+// artifactScenario replays a two-frame alt-screen sequence via raw content
+// blocks. Turn 1 enters alt-screen, draws 4 lines plus a GHOST_ARTIFACT_FOO
+// marker. Turn 2 (after 600ms) clears and redraws without the marker. The
+// delay ensures refrain ticks frame 1 before frame 2 overwrites the VT cells.
+var artifactScenario = scenarioFile{
+	name: "artifact.yaml",
+	content: `name: artifact
+match:
+  prompt: "go"
+session:
+  id: "e2e-artifact"
+  model: "claude-sonnet-4-6"
+turns:
+  - assistant:
+      - type: raw
+        text: "\x1b[?1049h\x1b[2J\x1b[H"
+      - type: raw
+        text: "LINE 1\nLINE 2\nLINE 3\nLINE 4\n"
+      - type: raw
+        text: "GHOST_ARTIFACT_FOO"
+  - delay: "600ms"
+    assistant:
+      - type: raw
+        text: "\x1b[2J\x1b[H"
+      - type: raw
+        text: "LINE 1\nLINE 2\nLINE 3\nLINE 4\n"
+      - type: raw
+        text: "> "
+`,
+}
+
+// TestArtifactsOnPlanReview drives a scrim agent through a plan-approval-shaped
+// interaction: enter alt-screen, draw a frame ending in a distinctive marker,
+// wait long enough for refrain to render it to the outer terminal, then redraw
+// a shorter frame. The test asserts on refrain's emitted View (written to
+// REFRAIN_E2E_DEBUG_DUMP by dashboard.View). Regression target: after
+// alt-screen entry and a clean redraw, refrain's preview View must not contain
+// GHOST_ARTIFACT_FOO.
 func TestArtifactsOnPlanReview(t *testing.T) {
-	s := newSession(t)
+	s := newScrimSession(t, artifactScenario)
 	dumpPath := t.TempDir() + "/baton_view_dump.txt"
 	s.extraEnv = append(s.extraEnv, "REFRAIN_E2E_DEBUG_DUMP="+dumpPath)
 	s.Start()
 	s.WaitForText("FOCUS", 10000)
 
-	// Create a session; "n" auto-focuses the terminal and launches bash.
 	s.Press("n")
 	s.WaitForText("back", 10000)
 
-	// Frame 1: alt-screen enter + clear + home, 4 rows, then a long
-	// GHOST_ARTIFACT marker on row 5. The marker is longer than frame 2's
-	// prompt so trailing cells must be cleared for the artifact to vanish.
-	// The first sleep is tuned above the 100ms refrain tick so refrain definitely
-	// ticks frame 1 into the outer terminal before frame 2 overwrites the VT
-	// cells. Frame 2 uses \e[2J\e[H (clear + home) so every VT cell beyond
-	// '> ' is explicitly EmptyCell — this is exactly the condition that
-	// exposes renderLine's trailing-whitespace trim.
-	script := `printf '\033[?1049h\033[2J\033[H' && ` +
-		`for i in 1 2 3 4; do echo "LINE $i"; done && ` +
-		`printf 'GHOST_ARTIFACT_FOO'; ` +
-		`sleep 0.6; ` +
-		`printf '\033[2J\033[H' && ` +
-		`for i in 1 2 3 4; do echo "LINE $i"; done && ` +
-		`printf '> '; sleep 30`
-	s.Type(script + "\n")
+	s.Type("go\n")
 
-	// Wait past the in-script sleep plus a few refrain ticks so the latest
-	// dump reflects frame 2.
+	// Wait past the in-scenario delay (600ms) plus a few refrain ticks so
+	// the latest dump reflects frame 2.
 	time.Sleep(2 * time.Second)
 	s.WaitStable(500)
 
