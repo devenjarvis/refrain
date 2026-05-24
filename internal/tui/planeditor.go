@@ -119,8 +119,9 @@ type planEditorModel struct {
 	// plan. folds maps section heading name to its current fold state (true =
 	// collapsed). Both are repopulated by reload() and preserved across Reload()
 	// for headings that survive the edit.
-	sections []planSection
-	folds    map[string]bool
+	sections      []planSection
+	folds         map[string]bool
+	sectionCursor int // index into sections of the cursor-selected section
 
 	// displayCache memoises the post-wrap, post-style display lines for the
 	// current textarea value at the current width. Invalidated by content
@@ -386,6 +387,7 @@ func (m *planEditorModel) rebuildSections() {
 	}
 	m.sections = newSections
 	m.folds = newFolds
+	m.clampCursor()
 }
 
 // rebuildSectionsPreservingFolds rebuilds section boundaries from the current
@@ -949,6 +951,20 @@ func (m *planEditorModel) clampScroll() {
 	}
 	if m.scrollOff < 0 {
 		m.scrollOff = 0
+	}
+}
+
+func (m *planEditorModel) clampCursor() {
+	if len(m.sections) == 0 {
+		m.sectionCursor = 0
+		return
+	}
+	last := len(m.sections) - 1
+	if m.sectionCursor > last {
+		m.sectionCursor = last
+	}
+	if m.sectionCursor < 0 {
+		m.sectionCursor = 0
 	}
 }
 

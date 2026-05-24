@@ -903,3 +903,40 @@ func TestPlanEditor_R_NoopWhenDrafting(t *testing.T) {
 		t.Errorf("R while drafting should be a no-op, got cmd that returns %T", cmd())
 	}
 }
+
+// TestPlanEditor_ClampCursor verifies that clampCursor keeps sectionCursor
+// within [0, len(sections)-1], including when sections is empty.
+func TestPlanEditor_ClampCursor(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	if len(editor.sections) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(editor.sections))
+	}
+
+	// Cursor above max → clamp to last index.
+	editor.sectionCursor = 5
+	editor.clampCursor()
+	if editor.sectionCursor != 2 {
+		t.Errorf("clampCursor with cursor=5/len=3: got %d, want 2", editor.sectionCursor)
+	}
+
+	// Cursor below 0 → clamp to 0.
+	editor.sectionCursor = -3
+	editor.clampCursor()
+	if editor.sectionCursor != 0 {
+		t.Errorf("clampCursor with cursor=-3: got %d, want 0", editor.sectionCursor)
+	}
+
+	// Empty sections → cursor stays 0 without panic.
+	editor2 := newPlanEditor(sess, "", 80, 30)
+	editor2.sections = nil
+	editor2.sectionCursor = 3
+	editor2.clampCursor()
+	if editor2.sectionCursor != 0 {
+		t.Errorf("clampCursor with empty sections: got %d, want 0", editor2.sectionCursor)
+	}
+}
