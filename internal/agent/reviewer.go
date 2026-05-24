@@ -37,6 +37,8 @@ type ReviewRequest struct {
 	TaskText       string
 	TaskDiff       string
 	OriginalPrompt string
+	TaskDetail     string   // plan sub-bullets for this task; empty when no plan or freeform plan
+	ChangedFiles   []string // paths of files modified in this task's commits; empty when unknown
 }
 
 // ReviewerAgent reviews a single task's diff and returns a verdict.
@@ -61,29 +63,6 @@ type defaultReviewerAgent struct {
 	model string
 }
 
-// reviewPromptTemplate is sent to the reviewer subprocess on stdin.
-// The concrete task fields are interpolated by buildReviewPrompt.
-const reviewPromptTemplate = `You are a code reviewer checking whether a code diff fulfills a specific task.
-
-ORIGINAL INTENT:
-%s
-
-TASK #%d:
-%s
-
-DIFF:
-%s
-
-Review the diff and decide:
-- "pass" — the diff clearly fulfills this task
-- "concerns" — the diff addresses this task but has notable gaps, risks, or incomplete work
-- "fail" — the diff does not fulfill this task or introduces clear regressions
-
-Respond with EXACTLY this format (no other text):
-VERDICT: <pass|concerns|fail>
-RATIONALE: <one or two sentences explaining your verdict>
-`
-
 func buildReviewPrompt(req ReviewRequest) string {
 	prompt := strings.TrimSpace(req.OriginalPrompt)
 	if prompt == "" {
@@ -93,7 +72,38 @@ func buildReviewPrompt(req ReviewRequest) string {
 	if diff == "" {
 		diff = "(no diff — task may have no committed changes)"
 	}
-	return fmt.Sprintf(reviewPromptTemplate, prompt, req.TaskIndex, req.TaskText, diff)
+
+	var b strings.Builder
+	b.WriteString("You are a code reviewer checking whether a code diff fulfills a specific task.\n\n")
+	fmt.Fprintf(&b, "ORIGINAL INTENT:\n%s\n\n", prompt)
+	fmt.Fprintf(&b, "TASK #%d:\n%s\n\n", req.TaskIndex, req.TaskText)
+
+	if req.TaskDetail != "" {
+		fmt.Fprintf(&b, "TASK DETAIL:\n%s\n\n", req.TaskDetail)
+	}
+
+	if len(req.ChangedFiles) > 0 {
+		b.WriteString("CHANGED FILES:\n")
+		for _, f := range req.ChangedFiles {
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+		b.WriteString("\n")
+	}
+
+	fmt.Fprintf(&b, "DIFF:\n%s\n\n", diff)
+
+	b.WriteString("Review the diff and decide:\n")
+	b.WriteString("- \"pass\" — the diff clearly fulfills this task\n")
+	b.WriteString("- \"concerns\" — the diff addresses this task but has notable gaps, risks, or incomplete work\n")
+	b.WriteString("- \"fail\" — the diff does not fulfill this task or introduces clear regressions\n\n")
+	if req.TaskDetail != "" || len(req.ChangedFiles) > 0 {
+		b.WriteString("Check that the diff touches the files and implements the behavior described in TASK DETAIL.\n\n")
+	}
+	b.WriteString("Respond with EXACTLY this format (no other text):\n")
+	b.WriteString("VERDICT: <pass|concerns|fail>\n")
+	b.WriteString("RATIONALE: <one or two sentences explaining your verdict>\n")
+
+	return b.String()
 }
 
 // buildReviewerArgs returns the argv (excluding the binary path) for the

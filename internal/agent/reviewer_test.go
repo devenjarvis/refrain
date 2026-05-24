@@ -209,6 +209,116 @@ func TestGroupCommitsByTask_NoOtherBucket(t *testing.T) {
 	}
 }
 
+// TestBuildReviewPrompt verifies the reviewer prompt is assembled correctly
+// depending on which optional fields are populated.
+func TestBuildReviewPrompt(t *testing.T) {
+	base := ReviewRequest{
+		TaskIndex:      2,
+		TaskText:       "Add widget",
+		TaskDiff:       "diff --git a/widget.go\n+func NewWidget() {}",
+		OriginalPrompt: "Build a widget system",
+	}
+
+	tests := []struct {
+		name              string
+		req               ReviewRequest
+		wantTaskDetail    bool
+		wantChangedFiles  bool
+		detailSnippet     string
+		filesSnippet      string
+	}{
+		{
+			name: "all fields populated",
+			req: func() ReviewRequest {
+				r := base
+				r.TaskDetail = "  - Files: internal/widget.go\n  - Implement: add NewWidget"
+				r.ChangedFiles = []string{"internal/widget.go", "internal/widget_test.go"}
+				return r
+			}(),
+			wantTaskDetail:   true,
+			wantChangedFiles: true,
+			detailSnippet:    "Files: internal/widget.go",
+			filesSnippet:     "internal/widget_test.go",
+		},
+		{
+			name: "empty TaskDetail omits section",
+			req: func() ReviewRequest {
+				r := base
+				r.TaskDetail = ""
+				r.ChangedFiles = []string{"internal/widget.go"}
+				return r
+			}(),
+			wantTaskDetail:   false,
+			wantChangedFiles: true,
+			filesSnippet:     "internal/widget.go",
+		},
+		{
+			name: "empty ChangedFiles omits section",
+			req: func() ReviewRequest {
+				r := base
+				r.TaskDetail = "  - Files: internal/widget.go"
+				r.ChangedFiles = nil
+				return r
+			}(),
+			wantTaskDetail:   true,
+			wantChangedFiles: false,
+			detailSnippet:    "Files: internal/widget.go",
+		},
+		{
+			name:             "both empty - plain format",
+			req:              base,
+			wantTaskDetail:   false,
+			wantChangedFiles: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildReviewPrompt(tt.req)
+
+			if tt.wantTaskDetail {
+				if !strings.Contains(got, "TASK DETAIL:") {
+					t.Error("expected TASK DETAIL section, not found")
+				}
+				if tt.detailSnippet != "" && !strings.Contains(got, tt.detailSnippet) {
+					t.Errorf("expected detail snippet %q in prompt, got:\n%s", tt.detailSnippet, got)
+				}
+			} else {
+				if strings.Contains(got, "TASK DETAIL:") {
+					t.Error("TASK DETAIL section must be absent when TaskDetail is empty")
+				}
+			}
+
+			if tt.wantChangedFiles {
+				if !strings.Contains(got, "CHANGED FILES:") {
+					t.Error("expected CHANGED FILES section, not found")
+				}
+				if tt.filesSnippet != "" && !strings.Contains(got, tt.filesSnippet) {
+					t.Errorf("expected files snippet %q in prompt, got:\n%s", tt.filesSnippet, got)
+				}
+			} else {
+				if strings.Contains(got, "CHANGED FILES:") {
+					t.Error("CHANGED FILES section must be absent when ChangedFiles is empty")
+				}
+			}
+
+			// Core sections always present.
+			if !strings.Contains(got, "ORIGINAL INTENT:") {
+				t.Error("ORIGINAL INTENT section missing")
+			}
+			if !strings.Contains(got, "TASK #2:") {
+				t.Error("TASK #N section missing")
+			}
+			if !strings.Contains(got, "Add widget") {
+				t.Error("task text missing")
+			}
+			if !strings.Contains(got, "DIFF:") {
+				t.Error("DIFF section missing")
+			}
+		})
+	}
+}
+
 // TestBuildReviewerArgs_NoBare verifies --bare is absent without an API key.
 func TestBuildReviewerArgs_NoBare(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
