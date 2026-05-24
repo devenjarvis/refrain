@@ -2,11 +2,11 @@ package agent
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"pgregory.net/rapid"
 )
@@ -138,15 +138,39 @@ func (c *capturingDrafter) ReviseCwds() []string {
 	return out
 }
 
-// waitForConditionProp polls cond until it returns true or timeout elapses.
-// Like waitForCondition but accepts fataler so it works inside rapid.Check.
-func waitForConditionProp(t fataler, timeout time.Duration, cond func() bool) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+// setupTestRepoForProp creates a temporary git repo with an initial commit.
+// Unlike setupTestRepo, it does not require *testing.T so it can be called
+// inside rapid.Check closures. The caller must defer os.RemoveAll on the
+// returned path.
+func setupTestRepoForProp() string {
+	dir, err := os.MkdirTemp("", "refrain-prop-*")
+	if err != nil {
+		panic("setupTestRepoForProp: " + err.Error())
 	}
-	t.Fatalf("condition not satisfied within %v", timeout)
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "config", "commit.gpgsign", "false"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			panic("setupTestRepoForProp " + args[1] + ": " + err.Error() + "\n" + string(out))
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		panic("setupTestRepoForProp: " + err.Error())
+	}
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "initial"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			panic("setupTestRepoForProp " + args[1] + ": " + err.Error() + "\n" + string(out))
+		}
+	}
+	return dir
 }
