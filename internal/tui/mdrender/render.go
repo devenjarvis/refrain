@@ -339,10 +339,19 @@ func (r *Renderer) styleSegmentWithFence(segment string, parent LineCtx, isConti
 	case LineHR:
 		return styleHR.Render(segment)
 	case LineBlockquote:
-		// Blockquotes get a subtle marker treatment over the whole line; we
-		// don't try to style the `>` glyph differently from the body since
-		// the wrap can split between marker and content.
-		return styleBlockquote.Render(segment)
+		depth := parent.BlockquoteDepth
+		if depth < 1 {
+			depth = 1
+		}
+		barStyle := lipgloss.NewStyle().Foreground(colQuote)
+		bar := barStyle.Render(strings.Repeat("│", depth)) + " "
+		if isContinuation {
+			// Align continuation text under the body column.
+			indent := strings.Repeat(" ", depth+1)
+			return indent + styleItalic.Render(segment)
+		}
+		body := stripBlockquotePrefix(segment, depth)
+		return bar + styleItalic.Render(body)
 	case LineList:
 		styled := styleListSegment(segment, parent, isContinuation)
 		return styled
@@ -517,6 +526,19 @@ func blockquoteDepth(trimmed string) int {
 		}
 	}
 	return depth
+}
+
+// stripBlockquotePrefix strips depth `>` markers and their adjacent spaces
+// from the start of a blockquote segment, returning the body text.
+func stripBlockquotePrefix(segment string, depth int) string {
+	s := strings.TrimLeft(segment, " \t")
+	for i := 0; i < depth && len(s) > 0; i++ {
+		if s[0] == '>' {
+			s = s[1:]
+			s = strings.TrimLeft(s, " \t")
+		}
+	}
+	return s
 }
 
 // listMarker detects unordered (-, *, +) and simple ordered (1.) bullets.

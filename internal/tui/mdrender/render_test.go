@@ -347,6 +347,21 @@ func TestStyleLine_FenceContentMultiSegmentColumnTracking(t *testing.T) {
 	}
 }
 
+func TestRenderLines_BlockquoteLeftBar(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("> quoted text\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	stripped := testutil.StripANSI(got[0])
+	if !strings.HasPrefix(stripped, "│ ") {
+		t.Errorf("blockquote line does not start with '│ ': %q", stripped)
+	}
+	if strings.Contains(stripped, ">") {
+		t.Errorf("blockquote line still contains '>': %q", stripped)
+	}
+}
+
 func TestRenderLines_FenceContentHasLeftBar(t *testing.T) {
 	r := New("monokai")
 	got := r.RenderLines("```go\nfunc X() {}\n```\n", 80)
