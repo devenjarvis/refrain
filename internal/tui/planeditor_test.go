@@ -555,9 +555,15 @@ func TestPlanEditor_ScrollFooterIncludesFoldHints(t *testing.T) {
 	}
 	editor := newPlanEditor(sess, "", 80, 30)
 	view := testutil.StripANSI(editor.View())
-	for _, want := range []string{"tab", "fold", "[", "]", "Z", "toggle all"} {
+	for _, want := range []string{"j/k", "navigate", "tab", "fold", "Z", "toggle all"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("footer hint %q missing from view:\n%s", want, view)
+		}
+	}
+	// Brackets are now just aliases for j/k; they should not appear in the footer.
+	for _, notWant := range []string{"[ ]", "sections"} {
+		if strings.Contains(view, notWant) {
+			t.Errorf("footer hint %q should no longer appear in view:\n%s", notWant, view)
 		}
 	}
 }
