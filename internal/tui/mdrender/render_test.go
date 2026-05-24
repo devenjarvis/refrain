@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/tui/mdrender/testutil"
 	"github.com/muesli/termenv"
 )
@@ -34,26 +35,99 @@ func TestRenderLines_HeadingsLevels1To6(t *testing.T) {
 	r := New("monokai")
 	plan := "# h1\n## h2\n### h3\n#### h4\n##### h5\n###### h6\n"
 	got := r.RenderLines(plan, 80)
-	if len(got) < 6 {
-		t.Fatalf("got %d display lines, want >= 6\n%v", len(got), got)
+	// H1 and H2 each get an underline line, so total ≥ 8 (6 headings + 2 underlines).
+	if len(got) < 8 {
+		t.Fatalf("got %d display lines, want >= 8\n%v", len(got), got)
 	}
-	// Each heading line must contain CSI styling and the plain text.
-	plainLines := []string{"# h1", "## h2", "### h3", "#### h4", "##### h5", "###### h6"}
-	for i, want := range plainLines {
-		line := got[i]
+	// H1 underline at got[1], H2 underline at got[3]; headings at got[0,2,4,5,6,7].
+	type headingCheck struct {
+		idx  int
+		want string
+	}
+	checks := []headingCheck{
+		{0, "# h1"},
+		{2, "## h2"},
+		{4, "### h3"},
+		{5, "#### h4"},
+		{6, "##### h5"},
+		{7, "###### h6"},
+	}
+	for _, c := range checks {
+		line := got[c.idx]
 		if !containsCSI(line) {
-			t.Errorf("line %d: missing ANSI styling: %q", i, line)
+			t.Errorf("got[%d]: missing ANSI styling: %q", c.idx, line)
 		}
-		if testutil.StripANSI(line) != want {
-			t.Errorf("line %d: stripped = %q, want %q", i, testutil.StripANSI(line), want)
+		if testutil.StripANSI(line) != c.want {
+			t.Errorf("got[%d]: stripped = %q, want %q", c.idx, testutil.StripANSI(line), c.want)
 		}
 	}
-	// Different heading levels should produce different SGR sequences.
-	if got[0] == got[1] {
+	// H1 underline: all ━ characters.
+	h1Under := testutil.StripANSI(got[1])
+	for _, ch := range h1Under {
+		if ch != '━' {
+			t.Errorf("H1 underline got[1] contains non-━ rune %q: %q", string(ch), h1Under)
+			break
+		}
+	}
+	// H2 underline: all ─ characters.
+	h2Under := testutil.StripANSI(got[3])
+	for _, ch := range h2Under {
+		if ch != '─' {
+			t.Errorf("H2 underline got[3] contains non-─ rune %q: %q", string(ch), h2Under)
+			break
+		}
+	}
+	// H1 and H2 heading lines should have distinct foregrounds (different levels).
+	if got[0] == got[2] {
 		t.Errorf("h1 and h2 styled identically; expected distinct foregrounds")
 	}
-	if got[2] == got[3] {
+	if got[4] == got[5] {
 		t.Errorf("h3 and h4 styled identically; expected distinct foregrounds")
+	}
+}
+
+func TestRenderLines_H1UnderlineDecoration(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("# Title\nbody\n", 80)
+	if len(got) < 3 {
+		t.Fatalf("got %d lines, want >= 3 (heading + underline + body)", len(got))
+	}
+	under := testutil.StripANSI(got[1])
+	if len(under) == 0 {
+		t.Fatal("H1 underline line is empty")
+	}
+	for _, ch := range under {
+		if ch != '━' {
+			t.Errorf("H1 underline contains non-━ rune %q: %q", string(ch), under)
+			break
+		}
+	}
+	if !containsCSI(got[1]) {
+		t.Errorf("H1 underline has no ANSI styling: %q", got[1])
+	}
+}
+
+func TestRenderLines_H2UnderlineDecoration(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("## Sub\nbody\n", 80)
+	if len(got) < 3 {
+		t.Fatalf("got %d lines, want >= 3 (heading + underline + body)", len(got))
+	}
+	under := testutil.StripANSI(got[1])
+	if len(under) == 0 {
+		t.Fatal("H2 underline line is empty")
+	}
+	for _, ch := range under {
+		if ch != '─' {
+			t.Errorf("H2 underline contains non-─ rune %q: %q", string(ch), under)
+			break
+		}
+	}
+	// H2 underline should not exceed the heading text width.
+	headingWidth := ansi.StringWidth("## Sub")
+	underWidth := ansi.StringWidth(under)
+	if underWidth > headingWidth {
+		t.Errorf("H2 underline width %d > heading width %d", underWidth, headingWidth)
 	}
 }
 
@@ -95,22 +169,20 @@ func TestRenderLines_FenceGoLexed(t *testing.T) {
 	if !containsCSI(got[0]) {
 		t.Errorf("fence open not styled: %q", got[0])
 	}
-	// Content lines should carry chroma-injected SGR (multiple sequences) for
-	// keywords like `package`, `func`. We don't pin exact codes; we just
-	// require *some* styling beyond the leading reset.
+	// Content lines carry a │ bar prefix and chroma-injected SGR for keywords.
 	pkgLine := got[1]
 	if !containsCSI(pkgLine) {
 		t.Errorf("package line not styled: %q", pkgLine)
 	}
-	if testutil.StripANSI(pkgLine) != "package main" {
-		t.Errorf("package line stripped = %q, want %q", testutil.StripANSI(pkgLine), "package main")
+	if testutil.StripANSI(pkgLine) != "│ package main" {
+		t.Errorf("package line stripped = %q, want %q", testutil.StripANSI(pkgLine), "│ package main")
 	}
 	funcLine := got[3]
 	if !containsCSI(funcLine) {
 		t.Errorf("func line not styled: %q", funcLine)
 	}
-	if testutil.StripANSI(funcLine) != "func main() {}" {
-		t.Errorf("func line stripped = %q, want %q", testutil.StripANSI(funcLine), "func main() {}")
+	if testutil.StripANSI(funcLine) != "│ func main() {}" {
+		t.Errorf("func line stripped = %q, want %q", testutil.StripANSI(funcLine), "│ func main() {}")
 	}
 }
 
@@ -124,8 +196,8 @@ func TestRenderLines_FenceBashLexed(t *testing.T) {
 	if !containsCSI(got[1]) {
 		t.Errorf("bash content not styled: %q", got[1])
 	}
-	if testutil.StripANSI(got[1]) != "echo hello" {
-		t.Errorf("bash line stripped = %q, want %q", testutil.StripANSI(got[1]), "echo hello")
+	if testutil.StripANSI(got[1]) != "│ echo hello" {
+		t.Errorf("bash line stripped = %q, want %q", testutil.StripANSI(got[1]), "│ echo hello")
 	}
 }
 
@@ -136,12 +208,9 @@ func TestRenderLines_FenceNoLangFallsBackToPlaintext(t *testing.T) {
 	if len(got) < 3 {
 		t.Fatalf("got %d display lines, want >= 3", len(got))
 	}
-	// Plaintext lexer doesn't add color tokens, but our wrapper still wraps
-	// the line in the styleFenceContent fallback when the pre-lexed line is
-	// empty *or* the line passes through unstyled. Just assert plain text is
-	// preserved verbatim under StripANSI.
-	if testutil.StripANSI(got[1]) != "some text" {
-		t.Errorf("plaintext stripped = %q, want %q", testutil.StripANSI(got[1]), "some text")
+	// Content line has │ bar prefix; plain text is preserved after it.
+	if testutil.StripANSI(got[1]) != "│ some text" {
+		t.Errorf("plaintext stripped = %q, want %q", testutil.StripANSI(got[1]), "│ some text")
 	}
 }
 
@@ -149,17 +218,18 @@ func TestRenderLines_FenceUnknownLangDoesNotPanic(t *testing.T) {
 	r := New("monokai")
 	plan := "```not-a-real-lang-xyzzy\nfoo bar\n```\n"
 	got := r.RenderLines(plan, 80)
-	// chroma falls through to a generic lexer; we just assert it doesn't crash
-	// and the plain text survives.
+	// chroma falls through to a generic lexer; we assert it doesn't crash
+	// and the plain text survives (with bar prefix).
 	found := false
 	for _, line := range got {
-		if testutil.StripANSI(line) == "foo bar" {
+		stripped := testutil.StripANSI(line)
+		if stripped == "│ foo bar" || strings.HasPrefix(stripped, "│ ") && strings.Contains(stripped, "foo bar") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("no output line contained the plain content; got:\n%v", got)
+		t.Errorf("no output line contained '│ foo bar'; got:\n%v", got)
 	}
 }
 
@@ -277,6 +347,125 @@ func TestStyleLine_FenceContentMultiSegmentColumnTracking(t *testing.T) {
 	}
 }
 
+func TestRenderLines_HRRendersCleanLine(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("---\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	stripped := testutil.StripANSI(got[0])
+	if stripped == "---" {
+		t.Errorf("HR still renders as raw '---'; expected ─ characters")
+	}
+	for _, ch := range stripped {
+		if ch != '─' {
+			t.Errorf("HR line contains non-─ rune %q: %q", string(ch), stripped)
+			break
+		}
+	}
+}
+
+func TestRenderLines_ParagraphTextIsStyled(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("plain paragraph\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	if !containsCSI(got[0]) {
+		t.Errorf("paragraph line has no ANSI styling: %q", got[0])
+	}
+	// Plain text without any inline spans should carry paragraph foreground color.
+	stripped := testutil.StripANSI(got[0])
+	if stripped != "plain paragraph" {
+		t.Errorf("stripped = %q, want %q", stripped, "plain paragraph")
+	}
+}
+
+func TestStyleInline_InlineCodeHasBackground(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("see `code` here\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output")
+	}
+	// Background SGR is 48;2;R;G;B in TrueColor mode (forced by TestMain).
+	// Lipgloss may combine foreground and background in one escape sequence.
+	if !strings.Contains(got[0], "48;2;") {
+		t.Errorf("no background-color SGR in inline code span; line: %q", got[0])
+	}
+}
+
+func TestRenderLines_BlockquoteLeftBar(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("> quoted text\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	stripped := testutil.StripANSI(got[0])
+	if !strings.HasPrefix(stripped, "│ ") {
+		t.Errorf("blockquote line does not start with '│ ': %q", stripped)
+	}
+	if strings.Contains(stripped, ">") {
+		t.Errorf("blockquote line still contains '>': %q", stripped)
+	}
+}
+
+func TestRenderLines_FenceContentHasLeftBar(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("```go\nfunc X() {}\n```\n", 80)
+	// Lines: [0]=open, [1]=content, [2]=close, [3]=trailing empty
+	if len(got) < 3 {
+		t.Fatalf("got %d lines, want >= 3", len(got))
+	}
+	// Fence content line must start with "│ " and carry the background tint.
+	contentStripped := testutil.StripANSI(got[1])
+	if !strings.HasPrefix(contentStripped, "│ ") {
+		t.Errorf("fence content line[1] does not start with '│ ': %q", contentStripped)
+	}
+	if !strings.Contains(got[1], "48;2;") {
+		t.Errorf("fence content line[1] missing background-color SGR: %q", got[1])
+	}
+	// Fence open and close marker lines must NOT have the bar — they are
+	// delimiters, not code content, and the bar would be visual noise.
+	openStripped := testutil.StripANSI(got[0])
+	if strings.HasPrefix(openStripped, "│") {
+		t.Errorf("fence open line[0] unexpectedly has '│' prefix: %q", openStripped)
+	}
+	closeStripped := testutil.StripANSI(got[2])
+	if strings.HasPrefix(closeStripped, "│") {
+		t.Errorf("fence close line[2] unexpectedly has '│' prefix: %q", closeStripped)
+	}
+}
+
+func TestRenderLines_CheckboxUncheckedRendersGlyph(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("- [ ] task\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	stripped := testutil.StripANSI(got[0])
+	if strings.Contains(stripped, "[ ]") {
+		t.Errorf("unchecked checkbox still shows [ ] in %q", stripped)
+	}
+	if !strings.Contains(stripped, "☐") {
+		t.Errorf("unchecked checkbox missing ☐ glyph in %q", stripped)
+	}
+}
+
+func TestRenderLines_CheckboxCheckedRendersGlyph(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("- [x] done\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	stripped := testutil.StripANSI(got[0])
+	if strings.Contains(stripped, "[x]") {
+		t.Errorf("checked checkbox still shows [x] in %q", stripped)
+	}
+	if !strings.Contains(stripped, "✓") {
+		t.Errorf("checked checkbox missing ✓ glyph in %q", stripped)
+	}
+}
+
 func TestRenderLines_ListContinuationIndents(t *testing.T) {
 	r := New("monokai")
 	plan := "- this is a list item that is long enough to wrap somewhere\n"
@@ -330,5 +519,22 @@ func TestStyleName_Roundtrip(t *testing.T) {
 	r := New("monokai")
 	if r.StyleName() != "monokai" {
 		t.Errorf("StyleName() = %q, want monokai", r.StyleName())
+	}
+}
+
+func TestContentMeasure_CapsAtMaxAndCenters(t *testing.T) {
+	tests := []struct {
+		termWidth, maxMeasure, wantMeasure, wantPad int
+	}{
+		{120, 72, 72, 24},
+		{60, 72, 60, 0},
+		{72, 72, 72, 0},
+	}
+	for _, tt := range tests {
+		m, p := ContentMeasure(tt.termWidth, tt.maxMeasure)
+		if m != tt.wantMeasure || p != tt.wantPad {
+			t.Errorf("ContentMeasure(%d, %d) = (%d, %d), want (%d, %d)",
+				tt.termWidth, tt.maxMeasure, m, p, tt.wantMeasure, tt.wantPad)
+		}
 	}
 }

@@ -67,6 +67,8 @@ type LineCtx struct {
 	BlockquoteDepth int    // count of leading `>` markers
 	ListBullet      string // "-", "*", "+", or "1." (the literal marker token)
 	ListIndent      int    // visible-width of the bullet+space prefix
+	IsCheckbox      bool   // true when list item starts with "[ ] " or "[x] "
+	CheckboxChecked bool   // true when IsCheckbox and the box is checked
 	// fencedStyledLine is the chroma-formatted ANSI output for this source
 	// line when Kind == LineFenceContent. Empty for everything else.
 	fencedStyledLine string
@@ -95,6 +97,17 @@ type fenceKey struct {
 	bodyHash [32]byte
 }
 
+// ContentMeasure returns the effective content width and left-margin padding
+// for centering content within a terminal. When termWidth > maxMeasure the
+// content is capped at maxMeasure and centered with equal left/right margins;
+// otherwise no margin is applied and the full termWidth is used.
+func ContentMeasure(termWidth, maxMeasure int) (measure, leftPad int) {
+	if termWidth > maxMeasure {
+		return maxMeasure, (termWidth - maxMeasure) / 2
+	}
+	return termWidth, 0
+}
+
 // New constructs a renderer that uses the given chroma style id for fence
 // highlighting. Unknown style names fall through to chroma's Fallback so
 // rendering never panics; callers that want strict validation should
@@ -118,6 +131,25 @@ func New(styleName string) *Renderer {
 
 // StyleName returns the chroma style id this renderer was constructed with.
 func (r *Renderer) StyleName() string { return r.styleName }
+
+// HeadingUnderline returns a synthetic underline display line for H1/H2
+// headings. H1 uses a heavy ━ rule spanning maxWidth; H2 uses a thin ─ rule
+// spanning min(headingWidth, maxWidth) in a muted color.
+func (r *Renderer) HeadingUnderline(level, headingWidth, maxWidth int) string {
+	if level == 1 {
+		color := styleH1.GetForeground()
+		return lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("━", maxWidth))
+	}
+	// H2: thin rule no wider than the heading text.
+	w := headingWidth
+	if w > maxWidth {
+		w = maxWidth
+	}
+	if w < 1 {
+		w = 1
+	}
+	return lipgloss.NewStyle().Foreground(colMuted).Render(strings.Repeat("─", w))
+}
 
 // RenderLines is the full-buffer pass: parse, wrap, style, and return the
 // post-wrap ANSI display lines for scroll mode. Result is cached by
@@ -146,16 +178,36 @@ func (r *Renderer) RenderLines(plan string, width int) []string {
 		if i < len(ctxs) {
 			ctx = ctxs[i]
 		}
-		segments := wrapPlain(line, width)
-		if len(segments) == 0 {
-			out = append(out, r.StyleSegment("", ctx, false))
-			continue
+		// Content lines inside fenced blocks get a │ bar prefix (2 chars wide),
+		// so wrap at width-2 to keep the total within the content measure.
+		// Open and close fence markers (```go, ```) do not get the bar.
+		isFenceContent := ctx.Kind == LineFenceContent
+		wrapWidth := width
+		if isFenceContent && width > 2 {
+			wrapWidth = width - 2
 		}
-		col := 0
-		for j, seg := range segments {
-			styled := r.styleSegmentWithFence(seg, ctx, j > 0, col)
+		segments := wrapPlain(line, wrapWidth)
+		fenceBar := styleFenceBar.Render("│") + " "
+		if len(segments) == 0 {
+			styled := r.styleSegmentWithFence("", ctx, false, 0, wrapWidth)
+			if isFenceContent {
+				styled = fenceBar + styled
+			}
 			out = append(out, styled)
-			col += ansi.StringWidth(seg)
+		} else {
+			col := 0
+			for j, seg := range segments {
+				styled := r.styleSegmentWithFence(seg, ctx, j > 0, col, wrapWidth)
+				if isFenceContent {
+					styled = fenceBar + styled
+				}
+				out = append(out, styled)
+				col += ansi.StringWidth(seg)
+			}
+		}
+		// Inject underline decoration after H1/H2 heading lines.
+		if ctx.Kind == LineHeading && ctx.HeadingLevel <= 2 {
+			out = append(out, r.HeadingUnderline(ctx.HeadingLevel, ansi.StringWidth(line), width))
 		}
 	}
 
@@ -246,7 +298,7 @@ func (r *Renderer) LineContexts(plan string) []LineCtx {
 // pre-lexed line; callers that wrap a fence line into multiple segments
 // should use StyleLine, which tracks the cumulative column for each segment.
 func (r *Renderer) StyleSegment(segment string, parent LineCtx, isContinuation bool) string {
-	return r.styleSegmentWithFence(segment, parent, isContinuation, 0)
+	return r.styleSegmentWithFence(segment, parent, isContinuation, 0, ansi.StringWidth(segment))
 }
 
 // StyleLine wraps and styles one source line into width-respecting display
@@ -256,18 +308,24 @@ func (r *Renderer) StyleSegment(segment string, parent LineCtx, isContinuation b
 func (r *Renderer) StyleLine(line string, ctx LineCtx, width int) []string {
 	segments := wrapPlain(line, width)
 	if len(segments) == 0 {
-		return []string{r.styleSegmentWithFence("", ctx, false, 0)}
+		return []string{r.styleSegmentWithFence("", ctx, false, 0, width)}
 	}
 	out := make([]string, 0, len(segments))
 	col := 0
 	for j, seg := range segments {
-		out = append(out, r.styleSegmentWithFence(seg, ctx, j > 0, col))
+		out = append(out, r.styleSegmentWithFence(seg, ctx, j > 0, col, width))
 		col += ansi.StringWidth(seg)
 	}
 	return out
 }
 
-func (r *Renderer) styleSegmentWithFence(segment string, parent LineCtx, isContinuation bool, fenceCol int) string {
+func (r *Renderer) styleSegmentWithFence(
+	segment string,
+	parent LineCtx,
+	isContinuation bool,
+	fenceCol int,
+	lineWidth int,
+) string {
 	switch parent.Kind {
 	case LineFenceContent:
 		// Use the pre-lexed styled line if we have it; slice it at fenceCol
@@ -277,28 +335,40 @@ func (r *Renderer) styleSegmentWithFence(segment string, parent LineCtx, isConti
 		}
 		segWidth := ansi.StringWidth(segment)
 		styled := ansi.Cut(parent.fencedStyledLine, fenceCol, fenceCol+segWidth)
-		// chroma may not paint a background; the leading whitespace of an
-		// indented code line should still feel like code, but we keep it
-		// understated to avoid overpowering the plan body.
-		return styled
+		// Apply the code-block background tint so chroma-highlighted lines
+		// share the same subtle background as the plaintext fallback path.
+		return lipgloss.NewStyle().Background(colCodeBg).Render(styled)
 	case LineFenceOpen, LineFenceClose:
 		return styleFenceMarker.Render(segment)
 	case LineHeading:
 		return styleHeading(parent.HeadingLevel).Render(segment)
 	case LineHR:
-		return styleHR.Render(segment)
+		w := lineWidth
+		if w < 1 {
+			w = ansi.StringWidth(segment)
+		}
+		return styleHR.Render(strings.Repeat("─", w))
 	case LineBlockquote:
-		// Blockquotes get a subtle marker treatment over the whole line; we
-		// don't try to style the `>` glyph differently from the body since
-		// the wrap can split between marker and content.
-		return styleBlockquote.Render(segment)
+		depth := parent.BlockquoteDepth
+		if depth < 1 {
+			depth = 1
+		}
+		barStyle := lipgloss.NewStyle().Foreground(colQuote)
+		bar := barStyle.Render(strings.Repeat("│", depth)) + " "
+		if isContinuation {
+			// Align continuation text under the body column.
+			indent := strings.Repeat(" ", depth+1)
+			return indent + styleItalic.Render(segment)
+		}
+		body := stripBlockquotePrefix(segment, depth)
+		return bar + styleItalic.Render(body)
 	case LineList:
 		styled := styleListSegment(segment, parent, isContinuation)
 		return styled
 	case LineBlank:
 		return segment
 	default:
-		return styleInline(segment)
+		return styleParagraph.Render(styleInline(segment))
 	}
 }
 
@@ -370,7 +440,18 @@ func classifyLine(line string) LineCtx {
 		return LineCtx{Kind: LineBlockquote, BlockquoteDepth: depth}
 	}
 	if bullet, indent, ok := listMarker(line); ok {
-		return LineCtx{Kind: LineList, ListBullet: bullet, ListIndent: indent}
+		ctx := LineCtx{Kind: LineList, ListBullet: bullet, ListIndent: indent}
+		// Detect GFM-style checkbox syntax after the bullet+space.
+		body := line[indent:]
+		switch {
+		case strings.HasPrefix(body, "[ ] ") || body == "[ ]":
+			ctx.IsCheckbox = true
+		case strings.HasPrefix(body, "[x] ") || body == "[x]" ||
+			strings.HasPrefix(body, "[X] ") || body == "[X]":
+			ctx.IsCheckbox = true
+			ctx.CheckboxChecked = true
+		}
+		return ctx
 	}
 	return LineCtx{Kind: LineParagraph}
 }
@@ -457,6 +538,19 @@ func blockquoteDepth(trimmed string) int {
 	return depth
 }
 
+// stripBlockquotePrefix strips depth `>` markers and their adjacent spaces
+// from the start of a blockquote segment, returning the body text.
+func stripBlockquotePrefix(segment string, depth int) string {
+	s := strings.TrimLeft(segment, " \t")
+	for i := 0; i < depth && len(s) > 0; i++ {
+		if s[0] == '>' {
+			s = s[1:]
+			s = strings.TrimLeft(s, " \t")
+		}
+	}
+	return s
+}
+
 // listMarker detects unordered (-, *, +) and simple ordered (1.) bullets.
 // Returns the bullet token and the visible-width indent of the bullet+space
 // prefix (used for continuation alignment).
@@ -520,13 +614,16 @@ var (
 	colHeading5 = lipgloss.Color("#A78BFA") // light purple
 	colHeading6 = lipgloss.Color("#9CA3AF") // light gray
 
-	colMuted   = lipgloss.Color("#6B7280")
-	colCodeFG  = lipgloss.Color("#FBBF24") // amber for inline code
-	colLink    = lipgloss.Color("#06B6D4")
-	colQuote   = lipgloss.Color("#9CA3AF")
-	colHR      = lipgloss.Color("#374151")
-	colBullet  = lipgloss.Color("#A78BFA")
-	colListNum = lipgloss.Color("#A78BFA")
+	colMuted        = lipgloss.Color("#6B7280")
+	colCodeFG       = lipgloss.Color("#FBBF24") // amber for inline code
+	colCodeBg       = lipgloss.Color("#1A1D23") // subtle dark background for code blocks
+	colLink         = lipgloss.Color("#06B6D4")
+	colQuote        = lipgloss.Color("#9CA3AF")
+	colHR           = lipgloss.Color("#374151")
+	colBullet       = lipgloss.Color("#A78BFA")
+	colListNum      = lipgloss.Color("#A78BFA")
+	colCheckboxDone = lipgloss.Color("#10B981") // success green
+	colParagraph    = lipgloss.Color("#D1D5DB") // softer white for prose
 
 	styleH1 = lipgloss.NewStyle().Foreground(colHeading1).Bold(true)
 	styleH2 = lipgloss.NewStyle().Foreground(colHeading2).Bold(true)
@@ -537,17 +634,21 @@ var (
 
 	styleBold       = lipgloss.NewStyle().Bold(true)
 	styleItalic     = lipgloss.NewStyle().Italic(true)
-	styleInlineCode = lipgloss.NewStyle().Foreground(colCodeFG)
+	styleInlineCode = lipgloss.NewStyle().Foreground(colCodeFG).Background(lipgloss.AdaptiveColor{Dark: "#2D2D2D", Light: "#E8E8E8"})
 	styleLink       = lipgloss.NewStyle().Foreground(colLink).Underline(true)
-	styleBlockquote = lipgloss.NewStyle().Foreground(colQuote).Italic(true)
 	styleHR         = lipgloss.NewStyle().Foreground(colHR)
 	styleBullet     = lipgloss.NewStyle().Foreground(colBullet).Bold(true)
 	styleListOrdNum = lipgloss.NewStyle().Foreground(colListNum).Bold(true)
 
+	// Paragraph prose: softer white to reduce glare for extended reading.
+	styleParagraph = lipgloss.NewStyle().Foreground(colParagraph)
+
 	// Fence-marker line ("```go", "```"): muted to keep attention on content.
 	styleFenceMarker = lipgloss.NewStyle().Foreground(colMuted)
-	// Fallback for fence content when chroma fails.
-	styleFenceContent = lipgloss.NewStyle().Foreground(colCodeFG)
+	// Fallback for fence content when chroma fails; includes background tint.
+	styleFenceContent = lipgloss.NewStyle().Foreground(colCodeFG).Background(colCodeBg)
+	// Bar glyph prepended to fence lines in scroll mode.
+	styleFenceBar = lipgloss.NewStyle().Foreground(colMuted)
 )
 
 func styleHeading(level int) lipgloss.Style {
@@ -618,6 +719,22 @@ func styleListSegment(segment string, ctx LineCtx, isContinuation bool) string {
 	}
 	prefix := segment[:leading] + bulletStyle.Render(segment[leading:tailStart])
 	body := segment[tailStart:]
+
+	// Render checkbox glyphs for task-list items on the first segment.
+	if ctx.IsCheckbox {
+		if ctx.CheckboxChecked {
+			for _, pfx := range []string{"[x] ", "[X] "} {
+				if strings.HasPrefix(body, pfx) {
+					glyph := lipgloss.NewStyle().Foreground(colCheckboxDone).Render("✓")
+					return prefix + glyph + " " + styleInline(body[4:])
+				}
+			}
+		} else if strings.HasPrefix(body, "[ ] ") {
+			glyph := lipgloss.NewStyle().Foreground(colMuted).Render("☐")
+			return prefix + glyph + " " + styleInline(body[4:])
+		}
+	}
+
 	return prefix + styleInline(body)
 }
 

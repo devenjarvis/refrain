@@ -20,6 +20,10 @@ import (
 // Hardcoded for now — a follow-up will plumb this through config.Settings.
 const planEditorChromaStyle = "monokai"
 
+// planEditorMaxMeasure is the maximum content column width for plan text.
+// On wider terminals the plan is centered with equal left/right margins.
+const planEditorMaxMeasure = 72
+
 // planSection represents one H1 or H2 ATX section in the plan. headingLine is
 // the 0-based source-line index of the `#`/`##` line; nextLine is the index of
 // the next sibling-or-ancestor heading (or end-of-lines). level is 1 or 2.
@@ -819,7 +823,7 @@ func (m *planEditorModel) displayLines() []string {
 		if i < len(ctxs) {
 			ctx = ctxs[i]
 		}
-		out = append(out, m.renderer.StyleLine(srcLines[i], ctx, w)...)
+		out = append(out, m.styledScrollLines(srcLines[i], ctx, w)...)
 	}
 
 	// Sections.
@@ -857,6 +861,13 @@ func (m *planEditorModel) displayLines() []string {
 		// Additional wrapped heading segments (rare but possible on narrow terminals).
 		out = append(out, headingSegs[1:]...)
 
+		// Inject underline decoration for H1/H2 headings when expanded, matching
+		// what RenderLines produces so scroll-mode line counts stay in sync.
+		if !folded && headingCtx.HeadingLevel >= 1 && headingCtx.HeadingLevel <= 2 {
+			headingTextWidth := ansi.StringWidth(srcLines[s.headingLine])
+			out = append(out, m.renderer.HeadingUnderline(headingCtx.HeadingLevel, headingTextWidth, w))
+		}
+
 		if folded {
 			continue
 		}
@@ -867,7 +878,16 @@ func (m *planEditorModel) displayLines() []string {
 			if i < len(ctxs) {
 				ctx = ctxs[i]
 			}
-			out = append(out, m.renderer.StyleLine(srcLines[i], ctx, w)...)
+			out = append(out, m.styledScrollLines(srcLines[i], ctx, w)...)
+		}
+	}
+
+	// Apply centering: prepend left-margin padding after all fold glyphs so
+	// the glyph stays at the content edge, not pushed into the margin.
+	if leftPad := m.displayLeftPad(); leftPad > 0 {
+		pad := strings.Repeat(" ", leftPad)
+		for i, line := range out {
+			out[i] = pad + line
 		}
 	}
 
@@ -877,10 +897,36 @@ func (m *planEditorModel) displayLines() []string {
 	return out
 }
 
-// contentWidth is the column width used for both wrap and styling. Match
-// textareaWidth so scroll-mode wraps line up with edit-mode wraps.
+// contentWidth returns the effective column width for wrap and styling.
+// Capped at planEditorMaxMeasure so wide terminals produce comfortable margins.
 func (m *planEditorModel) contentWidth() int {
-	return textareaWidth(m.width)
+	measure, _ := mdrender.ContentMeasure(textareaWidth(m.width), planEditorMaxMeasure)
+	return measure
+}
+
+// displayLeftPad returns the left-margin padding to center content on wide terminals.
+func (m *planEditorModel) displayLeftPad() int {
+	_, pad := mdrender.ContentMeasure(textareaWidth(m.width), planEditorMaxMeasure)
+	return pad
+}
+
+// styledScrollLines wraps and styles a source line for scroll-mode display,
+// applying fence-block bar prefixes that are omitted in edit mode to keep
+// mdtextarea cursor-splice math unaffected.
+func (m *planEditorModel) styledScrollLines(src string, ctx mdrender.LineCtx, width int) []string {
+	isFenceLine := ctx.Kind == mdrender.LineFenceContent || ctx.Kind == mdrender.LineFenceOpen || ctx.Kind == mdrender.LineFenceClose
+	lineWidth := width
+	if isFenceLine && width > 2 {
+		lineWidth = width - 2
+	}
+	lines := m.renderer.StyleLine(src, ctx, lineWidth)
+	if isFenceLine {
+		bar := StyleSubtle.Render("│") + " "
+		for i, l := range lines {
+			lines[i] = bar + l
+		}
+	}
+	return lines
 }
 
 // bodyHeight is the number of lines available for plan content.
