@@ -95,6 +95,17 @@ type fenceKey struct {
 	bodyHash [32]byte
 }
 
+// ContentMeasure returns the effective content width and left-margin padding
+// for centering content within a terminal. When termWidth > maxMeasure the
+// content is capped at maxMeasure and centered with equal left/right margins;
+// otherwise no margin is applied and the full termWidth is used.
+func ContentMeasure(termWidth, maxMeasure int) (measure, leftPad int) {
+	if termWidth > maxMeasure {
+		return maxMeasure, (termWidth - maxMeasure) / 2
+	}
+	return termWidth, 0
+}
+
 // New constructs a renderer that uses the given chroma style id for fence
 // highlighting. Unknown style names fall through to chroma's Fallback so
 // rendering never panics; callers that want strict validation should

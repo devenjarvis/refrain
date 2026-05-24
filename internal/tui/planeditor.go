@@ -20,6 +20,10 @@ import (
 // Hardcoded for now — a follow-up will plumb this through config.Settings.
 const planEditorChromaStyle = "monokai"
 
+// planEditorMaxMeasure is the maximum content column width for plan text.
+// On wider terminals the plan is centered with equal left/right margins.
+const planEditorMaxMeasure = 72
+
 // planSection represents one H1 or H2 ATX section in the plan. headingLine is
 // the 0-based source-line index of the `#`/`##` line; nextLine is the index of
 // the next sibling-or-ancestor heading (or end-of-lines). level is 1 or 2.
@@ -871,16 +875,32 @@ func (m *planEditorModel) displayLines() []string {
 		}
 	}
 
+	// Apply centering: prepend left-margin padding after all fold glyphs so
+	// the glyph stays at the content edge, not pushed into the margin.
+	if leftPad := m.displayLeftPad(); leftPad > 0 {
+		pad := strings.Repeat(" ", leftPad)
+		for i, line := range out {
+			out[i] = pad + line
+		}
+	}
+
 	m.displayCache = out
 	m.displayCacheKey = key
 	m.sectionDisplayStart = sectionStarts
 	return out
 }
 
-// contentWidth is the column width used for both wrap and styling. Match
-// textareaWidth so scroll-mode wraps line up with edit-mode wraps.
+// contentWidth returns the effective column width for wrap and styling.
+// Capped at planEditorMaxMeasure so wide terminals produce comfortable margins.
 func (m *planEditorModel) contentWidth() int {
-	return textareaWidth(m.width)
+	measure, _ := mdrender.ContentMeasure(textareaWidth(m.width), planEditorMaxMeasure)
+	return measure
+}
+
+// displayLeftPad returns the left-margin padding to center content on wide terminals.
+func (m *planEditorModel) displayLeftPad() int {
+	_, pad := mdrender.ContentMeasure(textareaWidth(m.width), planEditorMaxMeasure)
+	return pad
 }
 
 // bodyHeight is the number of lines available for plan content.

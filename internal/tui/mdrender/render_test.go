@@ -332,3 +332,20 @@ func TestStyleName_Roundtrip(t *testing.T) {
 		t.Errorf("StyleName() = %q, want monokai", r.StyleName())
 	}
 }
+
+func TestContentMeasure_CapsAtMaxAndCenters(t *testing.T) {
+	tests := []struct {
+		termWidth, maxMeasure, wantMeasure, wantPad int
+	}{
+		{120, 72, 72, 24},
+		{60, 72, 60, 0},
+		{72, 72, 72, 0},
+	}
+	for _, tt := range tests {
+		m, p := ContentMeasure(tt.termWidth, tt.maxMeasure)
+		if m != tt.wantMeasure || p != tt.wantPad {
+			t.Errorf("ContentMeasure(%d, %d) = (%d, %d), want (%d, %d)",
+				tt.termWidth, tt.maxMeasure, m, p, tt.wantMeasure, tt.wantPad)
+		}
+	}
+}
