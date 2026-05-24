@@ -904,6 +904,69 @@ func TestPlanEditor_R_NoopWhenDrafting(t *testing.T) {
 	}
 }
 
+// TestPlanEditor_JK_MoveSectionCursor verifies j/k/down/up move sectionCursor
+// through sections and auto-scroll so the selected heading is in the viewport.
+func TestPlanEditor_JK_MoveSectionCursor(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n\n## Tasks\ntasks\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	// height=8 → bodyHeight=3, small enough to force scrolling.
+	editor := newPlanEditor(sess, "", 80, 8)
+	// Expand all so sections have real display lines between them.
+	for k := range editor.folds {
+		editor.folds[k] = false
+	}
+	editor.invalidateDisplayCache()
+	if len(editor.sections) != 4 {
+		t.Fatalf("expected 4 sections, got %d", len(editor.sections))
+	}
+
+	// j three times: 0→1→2→3.
+	for want := 1; want <= 3; want++ {
+		editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		if editor.sectionCursor != want {
+			t.Errorf("after j: sectionCursor=%d, want %d", editor.sectionCursor, want)
+		}
+	}
+
+	// j at last section → still 3 (clamped).
+	editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if editor.sectionCursor != 3 {
+		t.Errorf("j at last section: sectionCursor=%d, want 3", editor.sectionCursor)
+	}
+
+	// k twice: 3→2→1.
+	for want := 2; want >= 1; want-- {
+		editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		if editor.sectionCursor != want {
+			t.Errorf("after k: sectionCursor=%d, want %d", editor.sectionCursor, want)
+		}
+	}
+
+	// down/up are aliases.
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if editor.sectionCursor != 2 {
+		t.Errorf("after down: sectionCursor=%d, want 2", editor.sectionCursor)
+	}
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if editor.sectionCursor != 1 {
+		t.Errorf("after up: sectionCursor=%d, want 1", editor.sectionCursor)
+	}
+
+	// Verify auto-scroll: sectionDisplayStart[sectionCursor] must be within
+	// [scrollOff, scrollOff+bodyHeight).
+	editor.displayLines()
+	cursor := editor.sectionCursor
+	headingLine := editor.sectionDisplayStart[cursor]
+	body := editor.bodyHeight()
+	if headingLine < editor.scrollOff || headingLine >= editor.scrollOff+body {
+		t.Errorf("heading line %d not in viewport [%d, %d)",
+			headingLine, editor.scrollOff, editor.scrollOff+body)
+	}
+}
+
 // TestPlanEditor_CursorHighlightsSelectedSection verifies that displayLines
 // renders the cursor-selected section heading glyph in ColorSecondary (cyan)
 // while the other headings use the muted gray of StyleSubtle.

@@ -509,12 +509,17 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 	case "q":
 		return m.emitAbandon()
 	case "j", "down":
-		m.scrollOff++
-		m.clampScroll()
+		if len(m.sections) > 0 {
+			m.sectionCursor++
+			m.clampCursor()
+			m.scrollToCursor()
+		}
 		return nil
 	case "k", "up":
-		if m.scrollOff > 0 {
-			m.scrollOff--
+		if len(m.sections) > 0 {
+			m.sectionCursor--
+			m.clampCursor()
+			m.scrollToCursor()
 		}
 		return nil
 	case "ctrl+d", "pgdown":
@@ -958,6 +963,26 @@ func (m *planEditorModel) clampScroll() {
 	if m.scrollOff < 0 {
 		m.scrollOff = 0
 	}
+}
+
+// scrollToCursor adjusts scrollOff so the heading of sectionCursor's section
+// is visible within the body viewport. Scrolls up if the heading is above the
+// current viewport; scrolls down if it's below.
+func (m *planEditorModel) scrollToCursor() {
+	if len(m.sectionDisplayStart) == 0 {
+		m.displayLines()
+	}
+	if m.sectionCursor < 0 || m.sectionCursor >= len(m.sectionDisplayStart) {
+		return
+	}
+	headingLine := m.sectionDisplayStart[m.sectionCursor]
+	body := m.bodyHeight()
+	if headingLine < m.scrollOff {
+		m.scrollOff = headingLine
+	} else if headingLine >= m.scrollOff+body {
+		m.scrollOff = headingLine - body + 1
+	}
+	m.clampScroll()
 }
 
 func (m *planEditorModel) clampCursor() {
