@@ -15,24 +15,21 @@ import (
 const emptyPipelineMarker = "BUILDING"
 
 // TestSessionCreation verifies that pressing "n" on the dashboard creates a
-// new session, auto-focuses focusLaunch with a bash prompt, and that pressing
-// Escape returns to the pipeline where a session card is now visible.
+// new session, auto-focuses focusLaunch, and that pressing Escape returns to
+// the pipeline where a session card is now visible.
 func TestSessionCreation(t *testing.T) {
-	s := newSession(t)
+	s := newScrimSession(t)
 	s.Start()
 
 	s.WaitForText("FOCUS", 10000)
 
-	// Sanity: no SESSIONS section before any sessions exist.
 	if countSessionCards(s.Screenshot()) != 0 {
 		t.Fatalf("expected 0 session cards before create\n%s", s.Screenshot())
 	}
 
-	// Press "n" to create a new session — auto-opens focusLaunch.
 	s.Press("n")
-	s.WaitForText(`\$`, 10000)
+	s.WaitForText("back", 10000)
 
-	// Return to pipeline view.
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
@@ -45,14 +42,13 @@ func TestSessionCreation(t *testing.T) {
 // TestAgentAddition verifies that pressing "c" on a session in the pipeline
 // adds a second agent to the cursor-selected session.
 func TestAgentAddition(t *testing.T) {
-	s := newSession(t)
+	s := newScrimSession(t)
 	s.Start()
 
 	s.WaitForText("FOCUS", 10000)
 
-	// Create the first session/agent.
 	s.Press("n")
-	s.WaitForText(`\$`, 10000)
+	s.WaitForText("back", 10000)
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
@@ -60,13 +56,11 @@ func TestAgentAddition(t *testing.T) {
 		t.Fatalf("expected at least 1 session card before adding agent\n%s", s.Screenshot())
 	}
 
-	// Add a second agent to the cursor-selected session via "c".
 	s.Press("c")
-	s.WaitForText(`\$`, 10000)
+	s.WaitForText("back", 10000)
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
-	// Session count remains 1 (c adds an agent to the existing session, not a new session).
 	if got := countSessionCards(s.Screenshot()); got != 1 {
 		t.Errorf("expected exactly 1 session card after adding agent, got %d\n%s",
 			got, s.Screenshot())
@@ -77,13 +71,13 @@ func TestAgentAddition(t *testing.T) {
 // primary agent. With one agent in the session, killing it removes the whole
 // session.
 func TestAgentKill(t *testing.T) {
-	s := newSession(t)
+	s := newScrimSession(t)
 	s.Start()
 
 	s.WaitForText("FOCUS", 10000)
 
 	s.Press("n")
-	s.WaitForText(`\$`, 10000)
+	s.WaitForText("back", 10000)
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
@@ -93,7 +87,6 @@ func TestAgentKill(t *testing.T) {
 
 	s.Press("x")
 
-	// Wait for the session card to disappear.
 	if !waitForSessionCount(s, 0, 10000) {
 		t.Errorf("expected 0 session cards after kill, got %d\n%s",
 			countSessionCards(s.Screenshot()), s.Screenshot())
@@ -103,13 +96,13 @@ func TestAgentKill(t *testing.T) {
 // TestSessionKill verifies that pressing "X" kills the entire session and
 // removes its card from the pipeline.
 func TestSessionKill(t *testing.T) {
-	s := newSession(t)
+	s := newScrimSession(t)
 	s.Start()
 
 	s.WaitForText("FOCUS", 10000)
 
 	s.Press("n")
-	s.WaitForText(`\$`, 10000)
+	s.WaitForText("back", 10000)
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
@@ -125,8 +118,8 @@ func TestSessionKill(t *testing.T) {
 	}
 }
 
-// waitForSessionCount polls until the session card count reaches at least
-// (or matches exactly when min==0) `min` or the timeout elapses.
+// waitForSessionCount polls until the session card count matches `want`
+// or the timeout elapses.
 func waitForSessionCount(s *Session, want, timeoutMs int) bool {
 	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
 	for time.Now().Before(deadline) {

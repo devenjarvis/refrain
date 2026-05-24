@@ -28,7 +28,7 @@ func TestArtifactsOnPlanReview(t *testing.T) {
 
 	// Create a session; "n" auto-focuses the terminal and launches bash.
 	s.Press("n")
-	s.WaitForText(`\$`, 10000)
+	s.WaitForText("back", 10000)
 
 	// Frame 1: alt-screen enter + clear + home, 4 rows, then a long
 	// GHOST_ARTIFACT marker on row 5. The marker is longer than frame 2's

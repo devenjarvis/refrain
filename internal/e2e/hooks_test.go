@@ -3,126 +3,124 @@
 package e2e
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-// claudeStubScript is a bash stub installed as `<dir>/claude`. Refrain's
-// supportsHooks check keys off filepath.Base(agent_program), so the file must
-// be named `claude`. The stub ignores any args (refrain passes
-// `--settings <path>`), inherits REFRAIN_HOOK_SOCKET / REFRAIN_AGENT_ID from
-// refrain's env wiring, and drives the pipeline by invoking
-// `$REFRAIN_E2E_BINARY hook <event>` at scripted intervals.
-//
-// Sequence (seconds since start):
-//
-//	0.3  session-start   → Active
-//	1.5  notification    → Waiting
-//	3.5  stop            → Idle
-//	5.5  user-prompt-submit → Active (re-armed)
-//	7.5  stop            → Idle
-//	then sleep 3600 so refrain keeps it alive until test teardown kills it.
-const claudeStubScript = `#!/bin/bash
-echo "claude-e2e-stub ready"
-sleep 0.3
-"$REFRAIN_E2E_BINARY" hook session-start <<< '{"session_id":"e2e-sess-1","cwd":"/tmp"}'
-sleep 1.2
-"$REFRAIN_E2E_BINARY" hook notification <<< '{"session_id":"e2e-sess-1","message":"Claude needs permission"}'
-sleep 2
-"$REFRAIN_E2E_BINARY" hook stop <<< '{"session_id":"e2e-sess-1"}'
-sleep 2
-"$REFRAIN_E2E_BINARY" hook user-prompt-submit <<< '{"session_id":"e2e-sess-1"}'
-sleep 2
-"$REFRAIN_E2E_BINARY" hook stop <<< '{"session_id":"e2e-sess-1"}'
-sleep 3600
-`
+// hookStartScenario fires a notification mid-replay, giving the test a
+// session-start → notification → stop sequence via scrim's hook pipeline.
+var hookStartScenario = scenarioFile{
+	name: "hook_start.yaml",
+	content: `name: hook_start
+match:
+  prompt: "start"
+session:
+  id: "e2e-hook-pipeline"
+  model: "claude-sonnet-4-6"
+turns:
+  - delay: "1s"
+    notification:
+      message: "Claude needs permission"
+    assistant:
+      - type: text
+        text: "Waiting for permission..."
+  - delay: "3s"
+    assistant:
+      - type: text
+        text: "Done with first task."
+`,
+}
 
-// TestHookPipeline drives refrain through a scripted bash "claude" stub that
-// emits each hook kind in turn, and asserts the dashboard bubble transitions
-// Active → Waiting → Idle → Active → Idle. This is the end-to-end check that
-// the plan calls for: hooks file wiring, socket forwarding, agent status
-// transitions, and dashboard rendering all working in concert.
+// hookContinueScenario is a clean scenario (no notification) for the re-arm
+// test. The 2s delay gives the test enough polling time to observe the Active
+// badge from UserPromptSubmit before Stop fires.
+var hookContinueScenario = scenarioFile{
+	name: "hook_continue.yaml",
+	content: `name: hook_continue
+match:
+  prompt: "continue"
+session:
+  id: "e2e-hook-pipeline"
+  model: "claude-sonnet-4-6"
+turns:
+  - delay: "2s"
+    assistant:
+      - type: text
+        text: "Done with second task."
+`,
+}
+
+// TestHookPipeline drives refrain through scrim's scenario replay engine and
+// asserts the dashboard transitions Active → Waiting → Idle → Active → Idle.
+// This is the end-to-end check that hooks-file wiring, socket forwarding,
+// agent status transitions, and dashboard rendering all work in concert.
+//
+// Scrim fires hook events through the same settings-file mechanism as real
+// Claude Code: refrain writes hooks.json, passes --settings to scrim, and
+// scrim executes `refrain hook <event>` at each lifecycle point.
+//
+// Both inputs ("start" and "continue") are typed while in focusLaunch, before
+// the session auto-promotes to REVIEWING. Scrim buffers the second line in
+// stdin and reads it after the first scenario completes. This avoids the need
+// to navigate back to the agent terminal from the REVIEWING state (where
+// Enter opens the review panel, not focusLaunch).
 func TestHookPipeline(t *testing.T) {
-	// Install the stub as a file named `claude` in a short-path temp dir.
-	// The basename must be exactly "claude" so refrain's supportsHooks check
-	// fires and the agent gets --settings + socket env wired up.
-	stubDir, err := os.MkdirTemp("", "bs")
-	if err != nil {
-		t.Fatalf("mkdir stub dir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(stubDir) })
-	stubPath := filepath.Join(stubDir, "claude")
-	if err := os.WriteFile(stubPath, []byte(claudeStubScript), 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
-	}
-
-	s := newSession(t)
-	// Point both global and repo config at the stub so whichever refrain reads
-	// wins, and pass REFRAIN_E2E_BINARY through tu so the stub can invoke the
-	// hook CLI without needing to know the binary path itself.
-	// plan_first_enabled is pinned off here for the same reason as in
-	// helpers_test.go: this test exercises the hook pipeline via `n` →
-	// immediate spawn, not the plan-first prompt-modal flow. Re-stating
-	// the override is necessary because this writeJSON overwrites the
-	// helper's config rather than merging with it.
-	writeJSON(t, filepath.Join(s.home, ".refrain", "config.json"), map[string]any{
-		"agent_program":      stubPath,
-		"bypass_permissions": false,
-		"plan_first_enabled": false,
-	})
-	writeJSON(t, filepath.Join(s.repoDir, ".refrain", "config.json"), map[string]any{
-		"agent_program":      stubPath,
-		"bypass_permissions": false,
-		"plan_first_enabled": false,
-	})
-	s.extraEnv = append(s.extraEnv, "REFRAIN_E2E_BINARY="+refrainBin)
+	s := newScrimSession(t, hookStartScenario, hookContinueScenario)
 	s.Start()
 
 	s.WaitForText("FOCUS", 10000)
+
+	// Create a session. Scrim starts in interactive mode and fires
+	// SessionStart immediately → agent marked Active.
 	s.Press("n")
-	// After "n", refrain spawns the stub and auto-focuses its PTY. The stub
-	// prints a greeting; wait for it so we know the process is live before
-	// bouncing back to the dashboard to read status symbols.
-	s.WaitForText("claude-e2e-stub ready", 10000)
+	s.WaitForText("back", 10000)
+
+	// Type both inputs while in focusLaunch. Scrim reads "start" first,
+	// fires UserPromptSubmit, matches hook_start, and replays two turns:
+	// turn 1 (1s delay → notification → text) then turn 2 (3s delay → text
+	// → stop). "continue" buffers in stdin. After hook_start completes,
+	// scrim reads "continue", fires UserPromptSubmit (re-arm → Active),
+	// matches hook_continue, and replays (2s delay → text → stop).
+	s.Type("start\n")
+	s.Type("continue\n")
+
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
-	// Active — session-start fires at t≈0.3s. The pipeline session card
-	// surfaces this as "%d active, %d idle".
+	// Active — SessionStart hook has fired.
 	if !waitForBadgeText(s, "active", 5000) {
 		t.Fatalf("never observed Active badge text\nScreen:\n%s", s.Screenshot())
 	}
-	// Waiting — notification fires at t≈1.5s. The session card surfaces
-	// this as "%d waiting".
-	if !waitForBadgeText(s, "waiting", 5000) {
+
+	// Waiting — Notification hook fires during first scenario replay.
+	// The 3s delay on turn 2 keeps the agent in Waiting long enough to poll.
+	if !waitForBadgeText(s, "waiting", 10000) {
 		t.Fatalf("never observed Waiting badge text\nScreen:\n%s", s.Screenshot())
 	}
-	// Idle — stop fires at t≈3.5s. Auto-promotion moves the session from
-	// BUILDING to REVIEWING immediately on the idle event, so the session
-	// card now lives in the REVIEWING section of the pipeline.
-	if !waitForBadgeText(s, "REVIEWING", 5000) {
-		t.Fatalf("never observed REVIEWING section after Stop (auto-promotion did not fire)\nScreen:\n%s", s.Screenshot())
+
+	// Idle — Stop fires at end of first scenario. Auto-promotion moves the
+	// session from BUILDING to REVIEWING.
+	if !waitForBadgeText(s, "REVIEWING", 10000) {
+		t.Fatalf("never observed REVIEWING section after Stop\nScreen:\n%s", s.Screenshot())
 	}
-	// Active again — user-prompt-submit fires at t≈5.5s and re-arms the
-	// status indicator. The session remains in REVIEWING (auto-promotion is
-	// idempotent for already-promoted sessions), but the agent badge should
-	// briefly show "active".
-	if !waitForBadgeText(s, "active", 5000) {
+
+	// Active again — scrim reads buffered "continue", fires UserPromptSubmit
+	// which re-arms the status indicator. The 2s delay in hook_continue gives
+	// enough time for the test to poll and observe the Active badge.
+	if !waitForBadgeText(s, "active", 10000) {
 		t.Fatalf("never observed re-armed Active badge after UserPromptSubmit\nScreen:\n%s", s.Screenshot())
 	}
-	// Idle again — stop fires at t≈7.5s. Session stays in REVIEWING (the
-	// phase gate suppresses a second promotion). This doubles as a re-arm
-	// check: no intermediate Active would mean UserPromptSubmit didn't re-arm.
-	if !waitForBadgeText(s, "REVIEWING", 5000) {
+
+	// Idle again — Stop fires at end of second scenario. Session stays in
+	// REVIEWING.
+	if !waitForBadgeText(s, "REVIEWING", 10000) {
 		t.Fatalf("never observed REVIEWING section after second Stop\nScreen:\n%s", s.Screenshot())
 	}
 }
 
-// waitForBadgeText polls Screenshot until the SESSIONS section's status badge
-// contains the given substring, or timeoutMs elapses.
+// waitForBadgeText polls Screenshot until the screen contains the given
+// substring, or timeoutMs elapses.
 func waitForBadgeText(s *Session, needle string, timeoutMs int) bool {
 	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
 	for time.Now().Before(deadline) {
