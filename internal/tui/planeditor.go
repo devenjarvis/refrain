@@ -155,9 +155,10 @@ type planEditorModel struct {
 // content; foldsHash captures the current fold state so toggling a fold
 // invalidates the cache even when the plan content is unchanged.
 type displayCacheKey struct {
-	width     int
-	valueHash [32]byte
-	foldsHash [32]byte
+	width         int
+	valueHash     [32]byte
+	foldsHash     [32]byte
+	sectionCursor int
 }
 
 // planEditorApproveMsg is emitted when the user approves the plan (`a`).
@@ -795,9 +796,10 @@ func (m *planEditorModel) displayLines() []string {
 	}
 	w := m.contentWidth()
 	key := displayCacheKey{
-		width:     w,
-		valueHash: sha256.Sum256([]byte(v)),
-		foldsHash: m.foldsHashFor(),
+		width:         w,
+		valueHash:     sha256.Sum256([]byte(v)),
+		foldsHash:     m.foldsHashFor(),
+		sectionCursor: m.sectionCursor,
 	}
 	if m.displayCache != nil && m.displayCacheKey == key {
 		return m.displayCache
