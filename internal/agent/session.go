@@ -884,6 +884,7 @@ type PlanTask struct {
 	Index int    // 1-based, counting all "- [ ]" and "- [x]" lines top-to-bottom
 	Text  string // task description without the leading "- [ ] " or "- [x] "
 	Done  bool   // true if marked [x] or [X]
+	Body  string // raw sub-bullet lines that follow the checkbox, preserving indentation
 }
 
 // ParsePlanTasks extracts ordered task items from plan markdown using the same
@@ -899,17 +900,22 @@ func ParsePlanTasks(plan string) []PlanTask {
 	idx := 0
 	for _, raw := range ScanTaskLines(plan) {
 		line := strings.TrimLeft(raw, " \t")
-		if !strings.HasPrefix(line, "- [") {
-			continue
+		isCheckbox := strings.HasPrefix(line, "- [") && len(line) >= 6 && line[4] == ']'
+		if isCheckbox {
+			if len(tasks) > 0 {
+				tasks[len(tasks)-1].Body = strings.TrimRight(tasks[len(tasks)-1].Body, " \t\n")
+			}
+			idx++
+			marker := line[3]
+			done := marker == 'x' || marker == 'X'
+			text := strings.TrimSpace(line[5:])
+			tasks = append(tasks, PlanTask{Index: idx, Text: text, Done: done})
+		} else if len(tasks) > 0 {
+			tasks[len(tasks)-1].Body += raw + "\n"
 		}
-		if len(line) < 6 || line[4] != ']' {
-			continue
-		}
-		idx++
-		marker := line[3]
-		done := marker == 'x' || marker == 'X'
-		text := strings.TrimSpace(line[5:])
-		tasks = append(tasks, PlanTask{Index: idx, Text: text, Done: done})
+	}
+	if len(tasks) > 0 {
+		tasks[len(tasks)-1].Body = strings.TrimRight(tasks[len(tasks)-1].Body, " \t\n")
 	}
 	return tasks
 }

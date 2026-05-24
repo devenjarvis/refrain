@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/devenjarvis/refrain/internal/git"
@@ -97,6 +98,60 @@ func TestParsePlanTasks_NoTasksHeadingFallback(t *testing.T) {
 	}
 }
 
+// TestParsePlanTasks_WithSubBullets verifies that sub-bullet lines following
+// each checkbox are collected into Body, and the checkbox line itself is not
+// included in Body.
+func TestParsePlanTasks_WithSubBullets(t *testing.T) {
+	plan := `# Goal
+Test sub-bullets.
+
+## Tasks
+- [ ] First task
+  - Files: internal/agent/session.go
+  - Implement: add the field
+- [ ] Second task
+  - Test first: write TestFoo
+  - Implement: do the thing
+  - Verify: go test ./...
+
+## Not in scope
+Nothing.
+`
+	tasks := ParsePlanTasks(plan)
+	if len(tasks) != 2 {
+		t.Fatalf("want 2 tasks, got %d", len(tasks))
+	}
+
+	if tasks[0].Body == "" {
+		t.Error("tasks[0].Body is empty, want sub-bullet content")
+	}
+	if !strings.Contains(tasks[0].Body, "Files: internal/agent/session.go") {
+		t.Errorf("tasks[0].Body missing Files line, got: %q", tasks[0].Body)
+	}
+	if !strings.Contains(tasks[0].Body, "Implement: add the field") {
+		t.Errorf("tasks[0].Body missing Implement line, got: %q", tasks[0].Body)
+	}
+	if strings.Contains(tasks[0].Body, "- [ ]") || strings.Contains(tasks[0].Body, "First task") {
+		t.Errorf("tasks[0].Body must not include the checkbox line, got: %q", tasks[0].Body)
+	}
+
+	if tasks[1].Body == "" {
+		t.Error("tasks[1].Body is empty, want sub-bullet content")
+	}
+	if !strings.Contains(tasks[1].Body, "Test first: write TestFoo") {
+		t.Errorf("tasks[1].Body missing Test first line, got: %q", tasks[1].Body)
+	}
+	if !strings.Contains(tasks[1].Body, "Implement: do the thing") {
+		t.Errorf("tasks[1].Body missing Implement line, got: %q", tasks[1].Body)
+	}
+	if !strings.Contains(tasks[1].Body, "Verify: go test ./...") {
+		t.Errorf("tasks[1].Body missing Verify line, got: %q", tasks[1].Body)
+	}
+	if strings.Contains(tasks[1].Body, "- [ ]") || strings.Contains(tasks[1].Body, "Second task") {
+		t.Errorf("tasks[1].Body must not include the checkbox line, got: %q", tasks[1].Body)
+	}
+}
+
 // TestGroupCommitsByTask verifies that commits are bucketed correctly by
 // [task N] prefix, with the "other" bucket receiving untagged commits.
 func TestGroupCommitsByTask(t *testing.T) {
@@ -151,6 +206,116 @@ func TestGroupCommitsByTask_NoOtherBucket(t *testing.T) {
 		if g.TaskIndex == 0 {
 			t.Errorf("unexpected 'other' group: %v", g.Commits)
 		}
+	}
+}
+
+// TestBuildReviewPrompt verifies the reviewer prompt is assembled correctly
+// depending on which optional fields are populated.
+func TestBuildReviewPrompt(t *testing.T) {
+	base := ReviewRequest{
+		TaskIndex:      2,
+		TaskText:       "Add widget",
+		TaskDiff:       "diff --git a/widget.go\n+func NewWidget() {}",
+		OriginalPrompt: "Build a widget system",
+	}
+
+	tests := []struct {
+		name             string
+		req              ReviewRequest
+		wantTaskDetail   bool
+		wantChangedFiles bool
+		detailSnippet    string
+		filesSnippet     string
+	}{
+		{
+			name: "all fields populated",
+			req: func() ReviewRequest {
+				r := base
+				r.TaskDetail = "  - Files: internal/widget.go\n  - Implement: add NewWidget"
+				r.ChangedFiles = []string{"internal/widget.go", "internal/widget_test.go"}
+				return r
+			}(),
+			wantTaskDetail:   true,
+			wantChangedFiles: true,
+			detailSnippet:    "Files: internal/widget.go",
+			filesSnippet:     "internal/widget_test.go",
+		},
+		{
+			name: "empty TaskDetail omits section",
+			req: func() ReviewRequest {
+				r := base
+				r.TaskDetail = ""
+				r.ChangedFiles = []string{"internal/widget.go"}
+				return r
+			}(),
+			wantTaskDetail:   false,
+			wantChangedFiles: true,
+			filesSnippet:     "internal/widget.go",
+		},
+		{
+			name: "empty ChangedFiles omits section",
+			req: func() ReviewRequest {
+				r := base
+				r.TaskDetail = "  - Files: internal/widget.go"
+				r.ChangedFiles = nil
+				return r
+			}(),
+			wantTaskDetail:   true,
+			wantChangedFiles: false,
+			detailSnippet:    "Files: internal/widget.go",
+		},
+		{
+			name:             "both empty - plain format",
+			req:              base,
+			wantTaskDetail:   false,
+			wantChangedFiles: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildReviewPrompt(tt.req)
+
+			if tt.wantTaskDetail {
+				if !strings.Contains(got, "TASK DETAIL:") {
+					t.Error("expected TASK DETAIL section, not found")
+				}
+				if tt.detailSnippet != "" && !strings.Contains(got, tt.detailSnippet) {
+					t.Errorf("expected detail snippet %q in prompt, got:\n%s", tt.detailSnippet, got)
+				}
+			} else {
+				if strings.Contains(got, "TASK DETAIL:") {
+					t.Error("TASK DETAIL section must be absent when TaskDetail is empty")
+				}
+			}
+
+			if tt.wantChangedFiles {
+				if !strings.Contains(got, "CHANGED FILES:") {
+					t.Error("expected CHANGED FILES section, not found")
+				}
+				if tt.filesSnippet != "" && !strings.Contains(got, tt.filesSnippet) {
+					t.Errorf("expected files snippet %q in prompt, got:\n%s", tt.filesSnippet, got)
+				}
+			} else {
+				if strings.Contains(got, "CHANGED FILES:") {
+					t.Error("CHANGED FILES section must be absent when ChangedFiles is empty")
+				}
+			}
+
+			// Core sections always present.
+			if !strings.Contains(got, "ORIGINAL INTENT:") {
+				t.Error("ORIGINAL INTENT section missing")
+			}
+			if !strings.Contains(got, "TASK #2:") {
+				t.Error("TASK #N section missing")
+			}
+			if !strings.Contains(got, "Add widget") {
+				t.Error("task text missing")
+			}
+			if !strings.Contains(got, "DIFF:") {
+				t.Error("DIFF section missing")
+			}
+		})
 	}
 }
 

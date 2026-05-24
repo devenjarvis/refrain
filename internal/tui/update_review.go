@@ -644,17 +644,24 @@ func (a App) reviewTaskCmd(sess *agent.Session, repoPath string, group taskRevie
 	taskIndex := group.taskIndex
 	rawDiff := group.rawDiff
 
-	// Find task text from the entry if available.
+	// Find task text and sub-bullet body from the entry if available.
 	taskText := fmt.Sprintf("Task %d", taskIndex)
+	var taskDetail string
 	if taskIndex == 0 {
 		taskText = "Other changes"
 	} else if entry := a.reviewDiffCache[cacheKey(repoPath, sessID)]; entry != nil {
 		for _, t := range entry.tasks {
 			if t.Index == taskIndex {
 				taskText = t.Text
+				taskDetail = t.Body
 				break
 			}
 		}
+	}
+
+	changedFiles := make([]string, 0, len(group.files))
+	for _, f := range group.files {
+		changedFiles = append(changedFiles, f.Path)
 	}
 
 	return func() tea.Msg {
@@ -665,6 +672,8 @@ func (a App) reviewTaskCmd(sess *agent.Session, repoPath string, group taskRevie
 			TaskText:       taskText,
 			TaskDiff:       rawDiff,
 			OriginalPrompt: originalPrompt,
+			TaskDetail:     taskDetail,
+			ChangedFiles:   changedFiles,
 		})
 		return reviewVerdictMsg{sessionID: sessID, repoPath: repoPath, taskIndex: taskIndex, verdict: verdict, err: err}
 	}
