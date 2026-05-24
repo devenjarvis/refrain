@@ -220,12 +220,13 @@ type App struct {
 	diffStatsCache      map[string]*diffStatsEntry // keyed by cacheKey(repoPath, sessionID)
 	diffRefreshInFlight bool
 
-	ghClient         *github.Client
-	prCache          map[string]*prCacheEntry   // keyed by cacheKey(repoPath, sessionID)
-	prPollStates     map[string]*prSessionState // keyed by cacheKey(repoPath, sessionID)
-	prPollsInFlight  int                        // count of concurrent in-flight polls
-	prDraftInFlight  bool                       // true while startPRDraftCmd is running; prevents double-trigger
-	prDraftSessionID string                     // ID of the session whose PR draft is in flight; "" when idle
+	ghClient        *github.Client
+	prCache         map[string]*prCacheEntry   // keyed by cacheKey(repoPath, sessionID)
+	prPollStates    map[string]*prSessionState // keyed by cacheKey(repoPath, sessionID)
+	prPollsInFlight int                        // count of concurrent in-flight polls
+
+	prDraftInFlight  bool   // true while startPRDraftCmd is running; prevents double-trigger
+	prDraftSessionID string // ID of the session whose PR draft is in flight; "" when idle
 
 	// keys holds the dashboard action→key bindings. Stored on App so tests
 	// and future rebinding flows can swap a non-default map.
