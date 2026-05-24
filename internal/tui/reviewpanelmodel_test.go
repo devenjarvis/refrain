@@ -54,7 +54,7 @@ func newTestSvc() (PanelServices, *testServiceState) {
 		},
 		SetFeedbackVerdict: func(string, string, string, feedbackVerdict) {},
 		SetFeedbackNote:    func(string, string, string, string) {},
-		prDraftInFlightFor: func(string) bool { return false },
+		prDraftInFlightFor: func(string, string) bool { return false },
 	}
 	return svc, state
 }

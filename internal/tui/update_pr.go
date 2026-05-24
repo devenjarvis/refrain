@@ -18,6 +18,7 @@ import (
 func (a App) handlePRDraftReady(msg prDraftReadyMsg) (tea.Model, tea.Cmd) {
 	a.prDraftInFlight = false
 	a.prDraftSessionID = ""
+	a.prDraftRepoPath = ""
 	if msg.err != nil {
 		a.setError("PR draft failed: " + msg.err.Error())
 		return a, nil
