@@ -16,7 +16,7 @@ func TestDashboardRendersOnStartup(t *testing.T) {
 	s.AssertScreenContains("FOCUS")
 
 	s.AssertScreenContains("navigate")
-	s.AssertScreenContains("new session")
+	s.AssertScreenContains("n session")
 	s.AssertScreenContains("quit")
 
 	s.AssertScreenContains(filepath.Base(s.repoDir))

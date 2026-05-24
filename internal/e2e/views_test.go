@@ -10,8 +10,8 @@ import "testing"
 //     overlay's hint set, all of which use "navigate" too).
 //   - listFocusAnchor: dashboard text shown only when focus is on the list.
 const (
-	dashboardAnchor = "new session"
-	listFocusAnchor = "new session"
+	dashboardAnchor = "n session"
+	listFocusAnchor = "n session"
 )
 
 func TestSettingsOverlay(t *testing.T) {
@@ -38,7 +38,7 @@ func TestDiffView(t *testing.T) {
 	s.WaitForText("FOCUS", 10000)
 
 	s.Press("n")
-	s.WaitForText(`\$`, 10000)
+	s.WaitForText("back", 10000)
 
 	s.Type("echo test > file.txt && git add file.txt && git commit -m 'add file' && echo COMMIT_DONE\n")
 	s.WaitForText("COMMIT_DONE", 10000)
