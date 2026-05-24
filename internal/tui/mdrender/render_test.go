@@ -351,6 +351,36 @@ func TestStyleLine_FenceContentMultiSegmentColumnTracking(t *testing.T) {
 	}
 }
 
+func TestRenderLines_CheckboxUncheckedRendersGlyph(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("- [ ] task\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	stripped := testutil.StripANSI(got[0])
+	if strings.Contains(stripped, "[ ]") {
+		t.Errorf("unchecked checkbox still shows [ ] in %q", stripped)
+	}
+	if !strings.Contains(stripped, "☐") {
+		t.Errorf("unchecked checkbox missing ☐ glyph in %q", stripped)
+	}
+}
+
+func TestRenderLines_CheckboxCheckedRendersGlyph(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("- [x] done\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	stripped := testutil.StripANSI(got[0])
+	if strings.Contains(stripped, "[x]") {
+		t.Errorf("checked checkbox still shows [x] in %q", stripped)
+	}
+	if !strings.Contains(stripped, "✓") {
+		t.Errorf("checked checkbox missing ✓ glyph in %q", stripped)
+	}
+}
+
 func TestRenderLines_ListContinuationIndents(t *testing.T) {
 	r := New("monokai")
 	plan := "- this is a list item that is long enough to wrap somewhere\n"

@@ -61,12 +61,14 @@ const (
 // Index correspondence: LineContexts returns one entry per `\n`-separated
 // source line of the input plan. Callers must use the same split convention.
 type LineCtx struct {
-	Kind            LineKind
-	HeadingLevel    int    // 1..6 when Kind == LineHeading; 0 otherwise
-	FenceLang       string // language tag from the opening ``` (empty for plaintext)
-	BlockquoteDepth int    // count of leading `>` markers
-	ListBullet      string // "-", "*", "+", or "1." (the literal marker token)
-	ListIndent      int    // visible-width of the bullet+space prefix
+	Kind             LineKind
+	HeadingLevel     int    // 1..6 when Kind == LineHeading; 0 otherwise
+	FenceLang        string // language tag from the opening ``` (empty for plaintext)
+	BlockquoteDepth  int    // count of leading `>` markers
+	ListBullet       string // "-", "*", "+", or "1." (the literal marker token)
+	ListIndent       int    // visible-width of the bullet+space prefix
+	IsCheckbox       bool   // true when list item starts with "[ ] " or "[x] "
+	CheckboxChecked  bool   // true when IsCheckbox and the box is checked
 	// fencedStyledLine is the chroma-formatted ANSI output for this source
 	// line when Kind == LineFenceContent. Empty for everything else.
 	fencedStyledLine string
@@ -404,7 +406,18 @@ func classifyLine(line string) LineCtx {
 		return LineCtx{Kind: LineBlockquote, BlockquoteDepth: depth}
 	}
 	if bullet, indent, ok := listMarker(line); ok {
-		return LineCtx{Kind: LineList, ListBullet: bullet, ListIndent: indent}
+		ctx := LineCtx{Kind: LineList, ListBullet: bullet, ListIndent: indent}
+		// Detect GFM-style checkbox syntax after the bullet+space.
+		body := line[indent:]
+		switch {
+		case strings.HasPrefix(body, "[ ] ") || body == "[ ]":
+			ctx.IsCheckbox = true
+		case strings.HasPrefix(body, "[x] ") || body == "[x]" ||
+			strings.HasPrefix(body, "[X] ") || body == "[X]":
+			ctx.IsCheckbox = true
+			ctx.CheckboxChecked = true
+		}
+		return ctx
 	}
 	return LineCtx{Kind: LineParagraph}
 }
@@ -554,13 +567,14 @@ var (
 	colHeading5 = lipgloss.Color("#A78BFA") // light purple
 	colHeading6 = lipgloss.Color("#9CA3AF") // light gray
 
-	colMuted   = lipgloss.Color("#6B7280")
-	colCodeFG  = lipgloss.Color("#FBBF24") // amber for inline code
-	colLink    = lipgloss.Color("#06B6D4")
-	colQuote   = lipgloss.Color("#9CA3AF")
-	colHR      = lipgloss.Color("#374151")
-	colBullet  = lipgloss.Color("#A78BFA")
-	colListNum = lipgloss.Color("#A78BFA")
+	colMuted          = lipgloss.Color("#6B7280")
+	colCodeFG         = lipgloss.Color("#FBBF24") // amber for inline code
+	colLink           = lipgloss.Color("#06B6D4")
+	colQuote          = lipgloss.Color("#9CA3AF")
+	colHR             = lipgloss.Color("#374151")
+	colBullet         = lipgloss.Color("#A78BFA")
+	colListNum        = lipgloss.Color("#A78BFA")
+	colCheckboxDone   = lipgloss.Color("#10B981") // success green
 
 	styleH1 = lipgloss.NewStyle().Foreground(colHeading1).Bold(true)
 	styleH2 = lipgloss.NewStyle().Foreground(colHeading2).Bold(true)
@@ -652,6 +666,22 @@ func styleListSegment(segment string, ctx LineCtx, isContinuation bool) string {
 	}
 	prefix := segment[:leading] + bulletStyle.Render(segment[leading:tailStart])
 	body := segment[tailStart:]
+
+	// Render checkbox glyphs for task-list items on the first segment.
+	if ctx.IsCheckbox {
+		if ctx.CheckboxChecked {
+			for _, pfx := range []string{"[x] ", "[X] "} {
+				if strings.HasPrefix(body, pfx) {
+					glyph := lipgloss.NewStyle().Foreground(colCheckboxDone).Render("✓")
+					return prefix + glyph + " " + styleInline(body[4:])
+				}
+			}
+		} else if strings.HasPrefix(body, "[ ] ") {
+			glyph := lipgloss.NewStyle().Foreground(colMuted).Render("☐")
+			return prefix + glyph + " " + styleInline(body[4:])
+		}
+	}
+
 	return prefix + styleInline(body)
 }
 
