@@ -188,7 +188,7 @@ func (r *Renderer) RenderLines(plan string, width int) []string {
 		segments := wrapPlain(line, wrapWidth)
 		fenceBar := styleFenceBar.Render("│") + " "
 		if len(segments) == 0 {
-			styled := r.StyleSegment("", ctx, false)
+			styled := r.styleSegmentWithFence("", ctx, false, 0, wrapWidth)
 			if isFenceLine {
 				styled = fenceBar + styled
 			}
@@ -196,7 +196,7 @@ func (r *Renderer) RenderLines(plan string, width int) []string {
 		} else {
 			col := 0
 			for j, seg := range segments {
-				styled := r.styleSegmentWithFence(seg, ctx, j > 0, col)
+				styled := r.styleSegmentWithFence(seg, ctx, j > 0, col, wrapWidth)
 				if isFenceLine {
 					styled = fenceBar + styled
 				}
@@ -297,7 +297,7 @@ func (r *Renderer) LineContexts(plan string) []LineCtx {
 // pre-lexed line; callers that wrap a fence line into multiple segments
 // should use StyleLine, which tracks the cumulative column for each segment.
 func (r *Renderer) StyleSegment(segment string, parent LineCtx, isContinuation bool) string {
-	return r.styleSegmentWithFence(segment, parent, isContinuation, 0)
+	return r.styleSegmentWithFence(segment, parent, isContinuation, 0, ansi.StringWidth(segment))
 }
 
 // StyleLine wraps and styles one source line into width-respecting display
@@ -307,18 +307,18 @@ func (r *Renderer) StyleSegment(segment string, parent LineCtx, isContinuation b
 func (r *Renderer) StyleLine(line string, ctx LineCtx, width int) []string {
 	segments := wrapPlain(line, width)
 	if len(segments) == 0 {
-		return []string{r.styleSegmentWithFence("", ctx, false, 0)}
+		return []string{r.styleSegmentWithFence("", ctx, false, 0, width)}
 	}
 	out := make([]string, 0, len(segments))
 	col := 0
 	for j, seg := range segments {
-		out = append(out, r.styleSegmentWithFence(seg, ctx, j > 0, col))
+		out = append(out, r.styleSegmentWithFence(seg, ctx, j > 0, col, width))
 		col += ansi.StringWidth(seg)
 	}
 	return out
 }
 
-func (r *Renderer) styleSegmentWithFence(segment string, parent LineCtx, isContinuation bool, fenceCol int) string {
+func (r *Renderer) styleSegmentWithFence(segment string, parent LineCtx, isContinuation bool, fenceCol int, lineWidth int) string {
 	switch parent.Kind {
 	case LineFenceContent:
 		// Use the pre-lexed styled line if we have it; slice it at fenceCol
@@ -337,7 +337,11 @@ func (r *Renderer) styleSegmentWithFence(segment string, parent LineCtx, isConti
 	case LineHeading:
 		return styleHeading(parent.HeadingLevel).Render(segment)
 	case LineHR:
-		return styleHR.Render(segment)
+		w := lineWidth
+		if w < 1 {
+			w = ansi.StringWidth(segment)
+		}
+		return styleHR.Render(strings.Repeat("─", w))
 	case LineBlockquote:
 		depth := parent.BlockquoteDepth
 		if depth < 1 {

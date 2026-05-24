@@ -347,6 +347,24 @@ func TestStyleLine_FenceContentMultiSegmentColumnTracking(t *testing.T) {
 	}
 }
 
+func TestRenderLines_HRRendersCleanLine(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("---\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	stripped := testutil.StripANSI(got[0])
+	if stripped == "---" {
+		t.Errorf("HR still renders as raw '---'; expected ─ characters")
+	}
+	for _, ch := range stripped {
+		if ch != '─' {
+			t.Errorf("HR line contains non-─ rune %q: %q", string(ch), stripped)
+			break
+		}
+	}
+}
+
 func TestRenderLines_ParagraphTextIsStyled(t *testing.T) {
 	r := New("monokai")
 	got := r.RenderLines("plain paragraph\n", 80)
