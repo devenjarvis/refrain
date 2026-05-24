@@ -540,12 +540,12 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 		m.clampScroll()
 		return nil
 	case "tab":
-		idx := m.activeSectionIndex()
-		if idx >= 0 {
+		idx := m.sectionCursor
+		if idx >= 0 && idx < len(m.sections) {
 			heading := m.sections[idx].heading
 			m.folds[heading] = !m.folds[heading]
 			m.invalidateDisplayCache()
-			m.clampScroll()
+			m.scrollToCursor()
 		}
 		return nil
 	case "]":

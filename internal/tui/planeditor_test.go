@@ -904,6 +904,41 @@ func TestPlanEditor_R_NoopWhenDrafting(t *testing.T) {
 	}
 }
 
+// TestPlanEditor_TabFoldsCursorSection verifies that tab toggles the fold of
+// the section at sectionCursor, not the section at the viewport top.
+func TestPlanEditor_TabFoldsCursorSection(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	// Defaults: Goal expanded, Spec expanded, Context collapsed (index 2).
+	if editor.folds["Goal"] {
+		t.Fatal("Goal should be expanded initially")
+	}
+	if editor.folds["Spec"] {
+		t.Fatal("Spec should be expanded initially")
+	}
+	if !editor.folds["Context"] {
+		t.Fatal("Context should be collapsed initially")
+	}
+
+	// Move cursor to Context (index 2), press tab → Context expands.
+	editor.sectionCursor = 2
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if editor.folds["Context"] {
+		t.Error("after tab at Context (cursor=2), Context should be expanded")
+	}
+
+	// Move cursor back to Goal (index 0), press tab → Goal collapses.
+	editor.sectionCursor = 0
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if !editor.folds["Goal"] {
+		t.Error("after tab at Goal (cursor=0), Goal should be collapsed")
+	}
+}
+
 // TestPlanEditor_JK_MoveSectionCursor verifies j/k/down/up move sectionCursor
 // through sections and auto-scroll so the selected heading is in the viewport.
 func TestPlanEditor_JK_MoveSectionCursor(t *testing.T) {
