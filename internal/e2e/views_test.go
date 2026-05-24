@@ -29,10 +29,24 @@ func TestSettingsOverlay(t *testing.T) {
 	s.AssertScreenContains("FOCUS")
 }
 
+var diffScenario = scenarioFile{
+	name: "diff.yaml",
+	content: `name: diff
+match:
+  prompt: "go"
+session:
+  id: "e2e-diff"
+  model: "claude-sonnet-4-6"
+turns:
+  - exec: "echo test > file.txt && git add file.txt && git commit -m 'add file'"
+    assistant:
+      - type: text
+        text: "COMMIT_DONE"
+`,
+}
+
 func TestDiffView(t *testing.T) {
-	// This test requires real bash commands to create files and git commits
-	// in the worktree. Scrim can't execute real commands, so bash stays.
-	s := newSession(t)
+	s := newScrimSession(t, diffScenario)
 	s.Start()
 
 	s.WaitForText("FOCUS", 10000)
@@ -40,7 +54,7 @@ func TestDiffView(t *testing.T) {
 	s.Press("n")
 	s.WaitForText("back", 10000)
 
-	s.Type("echo test > file.txt && git add file.txt && git commit -m 'add file' && echo COMMIT_DONE\n")
+	s.Type("go\n")
 	s.WaitForText("COMMIT_DONE", 10000)
 
 	s.Press("Escape")
