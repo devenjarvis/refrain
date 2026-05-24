@@ -6,12 +6,12 @@ import "testing"
 
 // Anchor strings used to wait for specific TUI views to render.
 //
-//   - dashboardAnchor: only appears in the dashboard status bar (not in any
-//     overlay's hint set, all of which use "navigate" too).
+//   - dashboardAnchor: "n session" only appears in the dashboard status bar
+//     (no overlay hint set contains "session").
 //   - listFocusAnchor: dashboard text shown only when focus is on the list.
 const (
-	dashboardAnchor = "new session"
-	listFocusAnchor = "new session"
+	dashboardAnchor = "n session"
+	listFocusAnchor = "n session"
 )
 
 func TestSettingsOverlay(t *testing.T) {

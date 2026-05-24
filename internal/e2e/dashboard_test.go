@@ -19,7 +19,7 @@ func TestDashboardRendersOnStartup(t *testing.T) {
 
 	// Verify: status bar hints render.
 	s.AssertScreenContains("navigate")
-	s.AssertScreenContains("new session")
+	s.AssertScreenContains("n session")
 	s.AssertScreenContains("quit")
 
 	// Verify: the repo basename appears on screen. The directory is named
