@@ -861,6 +861,13 @@ func (m *planEditorModel) displayLines() []string {
 		// Additional wrapped heading segments (rare but possible on narrow terminals).
 		out = append(out, headingSegs[1:]...)
 
+		// Inject underline decoration for H1/H2 headings when expanded, matching
+		// what RenderLines produces so scroll-mode line counts stay in sync.
+		if !folded && headingCtx.HeadingLevel >= 1 && headingCtx.HeadingLevel <= 2 {
+			headingTextWidth := ansi.StringWidth(srcLines[s.headingLine])
+			out = append(out, m.renderer.HeadingUnderline(headingCtx.HeadingLevel, headingTextWidth, w))
+		}
+
 		if folded {
 			continue
 		}

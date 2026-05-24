@@ -254,17 +254,18 @@ func TestPlanEditor_ReviseInputEmitsCritique(t *testing.T) {
 	}
 }
 
-// TestPlanEditor_ScrollAndEditModeUseSameWidth pins the wiring contract that
-// scroll-mode wrap (via mdrender.RenderLines) and edit-mode wrap (via the
-// embedded mdtextarea) operate at the same column width. Without this, the
-// `i`/`esc` mode toggle would visually reflow content — exactly the
-// regression Task 5's display-line agreement test is meant to catch.
+// TestPlanEditor_ScrollAndEditModeUseSameWidth pins that on terminals narrower
+// than planEditorMaxMeasure, scroll-mode and edit-mode wrap at the same column.
+// On wide terminals scroll-mode intentionally caps at planEditorMaxMeasure for
+// centering; edit-mode keeps the full textarea width so cursor math is unaffected.
 func TestPlanEditor_ScrollAndEditModeUseSameWidth(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("# H\nshort\n")
-	editor := newPlanEditor(sess, "", 80, 30)
+	// textareaWidth(70) = 68, which is below planEditorMaxMeasure (72).
+	// On such terminals contentWidth() must equal textarea.Width().
+	editor := newPlanEditor(sess, "", 70, 30)
 	if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
-		t.Errorf("contentWidth=%d, textarea.Width()=%d; both modes must wrap at the same column", got, want)
+		t.Errorf("contentWidth=%d, textarea.Width()=%d; on narrow terminals both modes must wrap at the same column", got, want)
 	}
 }
 

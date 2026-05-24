@@ -61,14 +61,14 @@ const (
 // Index correspondence: LineContexts returns one entry per `\n`-separated
 // source line of the input plan. Callers must use the same split convention.
 type LineCtx struct {
-	Kind             LineKind
-	HeadingLevel     int    // 1..6 when Kind == LineHeading; 0 otherwise
-	FenceLang        string // language tag from the opening ``` (empty for plaintext)
-	BlockquoteDepth  int    // count of leading `>` markers
-	ListBullet       string // "-", "*", "+", or "1." (the literal marker token)
-	ListIndent       int    // visible-width of the bullet+space prefix
-	IsCheckbox       bool   // true when list item starts with "[ ] " or "[x] "
-	CheckboxChecked  bool   // true when IsCheckbox and the box is checked
+	Kind            LineKind
+	HeadingLevel    int    // 1..6 when Kind == LineHeading; 0 otherwise
+	FenceLang       string // language tag from the opening ``` (empty for plaintext)
+	BlockquoteDepth int    // count of leading `>` markers
+	ListBullet      string // "-", "*", "+", or "1." (the literal marker token)
+	ListIndent      int    // visible-width of the bullet+space prefix
+	IsCheckbox      bool   // true when list item starts with "[ ] " or "[x] "
+	CheckboxChecked bool   // true when IsCheckbox and the box is checked
 	// fencedStyledLine is the chroma-formatted ANSI output for this source
 	// line when Kind == LineFenceContent. Empty for everything else.
 	fencedStyledLine string
@@ -132,10 +132,10 @@ func New(styleName string) *Renderer {
 // StyleName returns the chroma style id this renderer was constructed with.
 func (r *Renderer) StyleName() string { return r.styleName }
 
-// headingUnderline returns a synthetic underline display line for H1/H2
+// HeadingUnderline returns a synthetic underline display line for H1/H2
 // headings. H1 uses a heavy ━ rule spanning maxWidth; H2 uses a thin ─ rule
 // spanning min(headingWidth, maxWidth) in a muted color.
-func (r *Renderer) headingUnderline(level, headingWidth, maxWidth int) string {
+func (r *Renderer) HeadingUnderline(level, headingWidth, maxWidth int) string {
 	if level == 1 {
 		color := styleH1.GetForeground()
 		return lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("━", maxWidth))
@@ -206,7 +206,7 @@ func (r *Renderer) RenderLines(plan string, width int) []string {
 		}
 		// Inject underline decoration after H1/H2 heading lines.
 		if ctx.Kind == LineHeading && ctx.HeadingLevel <= 2 {
-			out = append(out, r.headingUnderline(ctx.HeadingLevel, ansi.StringWidth(line), width))
+			out = append(out, r.HeadingUnderline(ctx.HeadingLevel, ansi.StringWidth(line), width))
 		}
 	}
 
@@ -318,7 +318,13 @@ func (r *Renderer) StyleLine(line string, ctx LineCtx, width int) []string {
 	return out
 }
 
-func (r *Renderer) styleSegmentWithFence(segment string, parent LineCtx, isContinuation bool, fenceCol int, lineWidth int) string {
+func (r *Renderer) styleSegmentWithFence(
+	segment string,
+	parent LineCtx,
+	isContinuation bool,
+	fenceCol int,
+	lineWidth int,
+) string {
 	switch parent.Kind {
 	case LineFenceContent:
 		// Use the pre-lexed styled line if we have it; slice it at fenceCol
@@ -608,16 +614,16 @@ var (
 	colHeading5 = lipgloss.Color("#A78BFA") // light purple
 	colHeading6 = lipgloss.Color("#9CA3AF") // light gray
 
-	colMuted          = lipgloss.Color("#6B7280")
-	colCodeFG         = lipgloss.Color("#FBBF24") // amber for inline code
-	colCodeBg         = lipgloss.Color("#1A1D23") // subtle dark background for code blocks
-	colLink           = lipgloss.Color("#06B6D4")
-	colQuote          = lipgloss.Color("#9CA3AF")
-	colHR             = lipgloss.Color("#374151")
-	colBullet         = lipgloss.Color("#A78BFA")
-	colListNum        = lipgloss.Color("#A78BFA")
-	colCheckboxDone   = lipgloss.Color("#10B981") // success green
-	colParagraph      = lipgloss.Color("#D1D5DB") // softer white for prose
+	colMuted        = lipgloss.Color("#6B7280")
+	colCodeFG       = lipgloss.Color("#FBBF24") // amber for inline code
+	colCodeBg       = lipgloss.Color("#1A1D23") // subtle dark background for code blocks
+	colLink         = lipgloss.Color("#06B6D4")
+	colQuote        = lipgloss.Color("#9CA3AF")
+	colHR           = lipgloss.Color("#374151")
+	colBullet       = lipgloss.Color("#A78BFA")
+	colListNum      = lipgloss.Color("#A78BFA")
+	colCheckboxDone = lipgloss.Color("#10B981") // success green
+	colParagraph    = lipgloss.Color("#D1D5DB") // softer white for prose
 
 	styleH1 = lipgloss.NewStyle().Foreground(colHeading1).Bold(true)
 	styleH2 = lipgloss.NewStyle().Foreground(colHeading2).Bold(true)
@@ -630,7 +636,6 @@ var (
 	styleItalic     = lipgloss.NewStyle().Italic(true)
 	styleInlineCode = lipgloss.NewStyle().Foreground(colCodeFG).Background(lipgloss.Color("#2D2D2D"))
 	styleLink       = lipgloss.NewStyle().Foreground(colLink).Underline(true)
-	styleBlockquote = lipgloss.NewStyle().Foreground(colQuote).Italic(true)
 	styleHR         = lipgloss.NewStyle().Foreground(colHR)
 	styleBullet     = lipgloss.NewStyle().Foreground(colBullet).Bold(true)
 	styleListOrdNum = lipgloss.NewStyle().Foreground(colListNum).Bold(true)
