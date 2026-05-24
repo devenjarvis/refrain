@@ -220,12 +220,12 @@ func TestBuildReviewPrompt(t *testing.T) {
 	}
 
 	tests := []struct {
-		name              string
-		req               ReviewRequest
-		wantTaskDetail    bool
-		wantChangedFiles  bool
-		detailSnippet     string
-		filesSnippet      string
+		name             string
+		req              ReviewRequest
+		wantTaskDetail   bool
+		wantChangedFiles bool
+		detailSnippet    string
+		filesSnippet     string
 	}{
 		{
 			name: "all fields populated",
