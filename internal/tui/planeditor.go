@@ -119,8 +119,9 @@ type planEditorModel struct {
 	// plan. folds maps section heading name to its current fold state (true =
 	// collapsed). Both are repopulated by reload() and preserved across Reload()
 	// for headings that survive the edit.
-	sections []planSection
-	folds    map[string]bool
+	sections      []planSection
+	folds         map[string]bool
+	sectionCursor int // index into sections of the cursor-selected section
 
 	// displayCache memoises the post-wrap, post-style display lines for the
 	// current textarea value at the current width. Invalidated by content
@@ -154,9 +155,10 @@ type planEditorModel struct {
 // content; foldsHash captures the current fold state so toggling a fold
 // invalidates the cache even when the plan content is unchanged.
 type displayCacheKey struct {
-	width     int
-	valueHash [32]byte
-	foldsHash [32]byte
+	width         int
+	valueHash     [32]byte
+	foldsHash     [32]byte
+	sectionCursor int
 }
 
 // planEditorApproveMsg is emitted when the user approves the plan (`a`).
@@ -386,6 +388,7 @@ func (m *planEditorModel) rebuildSections() {
 	}
 	m.sections = newSections
 	m.folds = newFolds
+	m.clampCursor()
 }
 
 // rebuildSectionsPreservingFolds rebuilds section boundaries from the current
@@ -468,25 +471,6 @@ func (m *planEditorModel) Update(msg tea.Msg) tea.Cmd {
 	}
 }
 
-// activeSectionIndex returns the index into m.sections of the section that
-// contains the current viewport top (m.scrollOff). Returns -1 if there are no
-// sections or if scrollOff is in the preamble before any section heading.
-func (m *planEditorModel) activeSectionIndex() int {
-	// Ensure sectionDisplayStart is populated.
-	m.displayLines()
-	if len(m.sectionDisplayStart) == 0 {
-		return -1
-	}
-	// Walk backward to find the last section whose display start <= scrollOff.
-	result := -1
-	for i, start := range m.sectionDisplayStart {
-		if start <= m.scrollOff {
-			result = i
-		}
-	}
-	return result
-}
-
 func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 	if m.drafting {
 		// Only esc/q work during drafting; everything else is a no-op so the
@@ -506,12 +490,17 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 	case "q":
 		return m.emitAbandon()
 	case "j", "down":
-		m.scrollOff++
-		m.clampScroll()
+		if len(m.sections) > 0 {
+			m.sectionCursor++
+			m.clampCursor()
+			m.scrollToCursor()
+		}
 		return nil
 	case "k", "up":
-		if m.scrollOff > 0 {
-			m.scrollOff--
+		if len(m.sections) > 0 {
+			m.sectionCursor--
+			m.clampCursor()
+			m.scrollToCursor()
 		}
 		return nil
 	case "ctrl+d", "pgdown":
@@ -532,38 +521,26 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 		m.clampScroll()
 		return nil
 	case "tab":
-		idx := m.activeSectionIndex()
-		if idx >= 0 {
+		idx := m.sectionCursor
+		if idx >= 0 && idx < len(m.sections) {
 			heading := m.sections[idx].heading
 			m.folds[heading] = !m.folds[heading]
 			m.invalidateDisplayCache()
-			m.clampScroll()
+			m.scrollToCursor()
 		}
 		return nil
 	case "]":
-		m.displayLines() // ensure sectionDisplayStart is populated
-		for _, start := range m.sectionDisplayStart {
-			// Strict > so that pressing ] from exactly on a heading advances
-			// to the *next* heading. Two presses from the same heading are a
-			// no-op on the second press, which is intentional.
-			if start > m.scrollOff {
-				m.scrollOff = start
-				m.clampScroll()
-				return nil
-			}
+		if len(m.sections) > 0 {
+			m.sectionCursor++
+			m.clampCursor()
+			m.scrollToCursor()
 		}
 		return nil
 	case "[":
-		m.displayLines() // ensure sectionDisplayStart is populated
-		best := -1
-		for _, start := range m.sectionDisplayStart {
-			if start < m.scrollOff {
-				best = start
-			}
-		}
-		if best >= 0 {
-			m.scrollOff = best
-			m.clampScroll()
+		if len(m.sections) > 0 {
+			m.sectionCursor--
+			m.clampCursor()
+			m.scrollToCursor()
 		}
 		return nil
 	case "Z":
@@ -793,9 +770,10 @@ func (m *planEditorModel) displayLines() []string {
 	}
 	w := m.contentWidth()
 	key := displayCacheKey{
-		width:     w,
-		valueHash: sha256.Sum256([]byte(v)),
-		foldsHash: m.foldsHashFor(),
+		width:         w,
+		valueHash:     sha256.Sum256([]byte(v)),
+		foldsHash:     m.foldsHashFor(),
+		sectionCursor: m.sectionCursor,
 	}
 	if m.displayCache != nil && m.displayCacheKey == key {
 		return m.displayCache
@@ -840,9 +818,13 @@ func (m *planEditorModel) displayLines() []string {
 		if len(headingSegs) == 0 {
 			headingSegs = []string{""}
 		}
-		glyph := StyleSubtle.Render("▼ ")
+		glyphStyle := StyleSubtle
+		if si == m.sectionCursor {
+			glyphStyle = StyleActive
+		}
+		glyph := glyphStyle.Render("▼ ")
 		if folded {
-			glyph = StyleSubtle.Render("▶ ")
+			glyph = glyphStyle.Render("▶ ")
 		}
 		headingLine := glyph + headingSegs[0]
 		if folded {
@@ -949,6 +931,40 @@ func (m *planEditorModel) clampScroll() {
 	}
 	if m.scrollOff < 0 {
 		m.scrollOff = 0
+	}
+}
+
+// scrollToCursor adjusts scrollOff so the heading of sectionCursor's section
+// is visible within the body viewport. Scrolls up if the heading is above the
+// current viewport; scrolls down if it's below.
+func (m *planEditorModel) scrollToCursor() {
+	if len(m.sectionDisplayStart) == 0 {
+		m.displayLines()
+	}
+	if m.sectionCursor < 0 || m.sectionCursor >= len(m.sectionDisplayStart) {
+		return
+	}
+	headingLine := m.sectionDisplayStart[m.sectionCursor]
+	body := m.bodyHeight()
+	if headingLine < m.scrollOff {
+		m.scrollOff = headingLine
+	} else if headingLine >= m.scrollOff+body {
+		m.scrollOff = headingLine - body + 1
+	}
+	m.clampScroll()
+}
+
+func (m *planEditorModel) clampCursor() {
+	if len(m.sections) == 0 {
+		m.sectionCursor = 0
+		return
+	}
+	last := len(m.sections) - 1
+	if m.sectionCursor > last {
+		m.sectionCursor = last
+	}
+	if m.sectionCursor < 0 {
+		m.sectionCursor = 0
 	}
 }
 
@@ -1100,8 +1116,8 @@ func (m *planEditorModel) renderFooter() string {
 		hints = StyleActive.Render("enter") + StyleSubtle.Render(" answer  ") +
 			StyleActive.Render("esc") + StyleSubtle.Render(" skip")
 	default:
-		hints = StyleActive.Render("tab") + StyleSubtle.Render(" fold  ") +
-			StyleActive.Render("[ ]") + StyleSubtle.Render(" sections  ") +
+		hints = StyleActive.Render("j/k") + StyleSubtle.Render(" navigate  ") +
+			StyleActive.Render("tab") + StyleSubtle.Render(" fold  ") +
 			StyleActive.Render("Z") + StyleSubtle.Render(" toggle all  ") +
 			StyleActive.Render("i") + StyleSubtle.Render(" edit  ") +
 			StyleActive.Render("r") + StyleSubtle.Render(" revise  ")

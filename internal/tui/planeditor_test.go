@@ -406,7 +406,7 @@ func TestPlanEditor_FoldedSectionMidPlanCountsBlankLine(t *testing.T) {
 }
 
 // TestPlanEditor_TabTogglesFoldAtViewportTop verifies that pressing tab in
-// scroll mode toggles the fold of whichever section contains the viewport top.
+// scroll mode toggles the fold of the section at sectionCursor.
 func TestPlanEditor_TabTogglesFoldAtViewportTop(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	const plan = "# Goal\nGoal body\n\n## Spec\nspec body\n\n## Context\nctx body\n"
@@ -426,98 +426,60 @@ func TestPlanEditor_TabTogglesFoldAtViewportTop(t *testing.T) {
 		t.Fatal("Context should be collapsed by default")
 	}
 
-	// Viewport top is at scrollOff=0 → Goal section; pressing tab collapses it.
+	// Cursor at 0 (Goal); pressing tab collapses it.
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if !editor.folds["Goal"] {
-		t.Errorf("after tab at Goal, folds[Goal] = false, want true (collapsed)")
+		t.Errorf("after tab at Goal (cursor=0), folds[Goal] = false, want true (collapsed)")
 	}
 
-	// Move viewport to Spec's heading display line, then tab toggles Spec.
-	lines := editor.displayLines()
-	specDisplayLine := -1
-	for i, l := range lines {
-		stripped := testutil.StripANSI(l)
-		if strings.Contains(stripped, "Spec") && !strings.Contains(stripped, "Goal") {
-			specDisplayLine = i
-			break
-		}
-	}
-	if specDisplayLine < 0 {
-		t.Fatal("could not find Spec heading in displayLines")
-	}
-	editor.scrollOff = specDisplayLine
+	// Move cursor to Spec (index 1), then tab toggles Spec.
+	editor.sectionCursor = 1
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if !editor.folds["Spec"] {
-		t.Errorf("after tab at Spec, folds[Spec] = false, want true (collapsed)")
+		t.Errorf("after tab at Spec (cursor=1), folds[Spec] = false, want true (collapsed)")
 	}
 }
 
-// TestPlanEditor_BracketsJumpBetweenSections verifies that ] and [ step the
-// viewport to the next and previous section headings respectively, clamping at
+// TestPlanEditor_BracketsJumpBetweenSections verifies that ] and [ step
+// sectionCursor to the next and previous sections respectively, clamping at
 // the ends.
 func TestPlanEditor_BracketsJumpBetweenSections(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
-	// Use non-default folds: all expanded so we get display lines between sections.
 	const plan = "# Goal\nGoal body\n\n## Spec\nspec body\n\n## Tasks\ntask body\n"
 	if err := sess.WritePlan(plan); err != nil {
 		t.Fatalf("WritePlan: %v", err)
 	}
-	// height=8 gives bodyHeight=3, so clampScroll allows scrolling (content > viewport).
 	editor := newPlanEditor(sess, "", 80, 8)
-	// Expand all sections so navigation has multiple display lines to cross.
-	for k := range editor.folds {
-		editor.folds[k] = false
-	}
-	editor.invalidateDisplayCache()
-	editor.scrollOff = 0
-
-	lines := editor.displayLines()
-	if len(lines) == 0 {
-		t.Fatal("no display lines")
+	if len(editor.sections) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(editor.sections))
 	}
 
-	// Find display-line indices for ## Spec and ## Tasks headings.
-	specLine, tasksLine := -1, -1
-	for i, l := range lines {
-		stripped := testutil.StripANSI(l)
-		if strings.Contains(stripped, "## Spec") && specLine < 0 {
-			specLine = i
-		}
-		if strings.Contains(stripped, "## Tasks") && tasksLine < 0 {
-			tasksLine = i
-		}
-	}
-	if specLine < 0 || tasksLine < 0 {
-		t.Fatalf("couldn't find section headings; specLine=%d tasksLine=%d\nlines:\n%s",
-			specLine, tasksLine, strings.Join(lines, "\n"))
-	}
-
-	// ] from top → Spec heading.
+	// ] from 0 → cursor 1 (Spec).
 	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
-	if editor.scrollOff != specLine {
-		t.Errorf("] from 0: scrollOff = %d, want %d (Spec)", editor.scrollOff, specLine)
+	if editor.sectionCursor != 1 {
+		t.Errorf("] from 0: sectionCursor = %d, want 1 (Spec)", editor.sectionCursor)
 	}
 
-	// ] again → Tasks heading.
+	// ] again → cursor 2 (Tasks).
 	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
-	if editor.scrollOff != tasksLine {
-		t.Errorf("] from Spec: scrollOff = %d, want %d (Tasks)", editor.scrollOff, tasksLine)
+	if editor.sectionCursor != 2 {
+		t.Errorf("] from Spec: sectionCursor = %d, want 2 (Tasks)", editor.sectionCursor)
 	}
 
-	// ] at last section → no change.
+	// ] at last section → still 2 (clamped).
 	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
-	if editor.scrollOff != tasksLine {
-		t.Errorf("] at last section: scrollOff = %d, want %d (clamp)", editor.scrollOff, tasksLine)
+	if editor.sectionCursor != 2 {
+		t.Errorf("] at last section: sectionCursor = %d, want 2 (clamp)", editor.sectionCursor)
 	}
 
-	// [ twice → back to top (Goal heading).
+	// [ twice → back to 0 (Goal).
 	editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
-	if editor.scrollOff != specLine {
-		t.Errorf("[ from Tasks: scrollOff = %d, want %d (Spec)", editor.scrollOff, specLine)
+	if editor.sectionCursor != 1 {
+		t.Errorf("[ from Tasks: sectionCursor = %d, want 1 (Spec)", editor.sectionCursor)
 	}
 	editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
-	if editor.scrollOff != 0 {
-		t.Errorf("[ from Spec: scrollOff = %d, want 0 (Goal)", editor.scrollOff)
+	if editor.sectionCursor != 0 {
+		t.Errorf("[ from Spec: sectionCursor = %d, want 0 (Goal)", editor.sectionCursor)
 	}
 }
 
@@ -593,9 +555,15 @@ func TestPlanEditor_ScrollFooterIncludesFoldHints(t *testing.T) {
 	}
 	editor := newPlanEditor(sess, "", 80, 30)
 	view := testutil.StripANSI(editor.View())
-	for _, want := range []string{"tab", "fold", "[", "]", "Z", "toggle all"} {
+	for _, want := range []string{"j/k", "navigate", "tab", "fold", "Z", "toggle all"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("footer hint %q missing from view:\n%s", want, view)
+		}
+	}
+	// Brackets are now just aliases for j/k; they should not appear in the footer.
+	for _, notWant := range []string{"[ ]", "sections"} {
+		if strings.Contains(view, notWant) {
+			t.Errorf("footer hint %q should no longer appear in view:\n%s", notWant, view)
 		}
 	}
 }
@@ -674,49 +642,35 @@ func TestPlanEditor_R_NoopWhenNoOriginalPrompt(t *testing.T) {
 
 func TestPlanEditor_JK_ScrollLines(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
-	// Long plan so we have scroll travel.
-	var sb strings.Builder
-	sb.WriteString("# Goal\nDo X\n\n## Spec\n")
-	for i := 0; i < 60; i++ {
-		sb.WriteString("line ")
-		sb.WriteString(strings.Repeat(".", 5))
-		sb.WriteString("\n")
-	}
-	if err := sess.WritePlan(sb.String()); err != nil {
+	const plan = "# Goal\nDo X\n\n## Spec\nspec body\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
 		t.Fatal(err)
 	}
 	editor := newPlanEditor(sess, "", 80, 20)
-	if editor.scrollOff != 0 {
-		t.Fatalf("scrollOff = %d, want 0 initially", editor.scrollOff)
+	if editor.sectionCursor != 0 {
+		t.Fatalf("sectionCursor = %d, want 0 initially", editor.sectionCursor)
 	}
 	editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	if editor.scrollOff != 1 {
-		t.Errorf("after j, scrollOff = %d, want 1", editor.scrollOff)
+	if editor.sectionCursor != 1 {
+		t.Errorf("after j, sectionCursor = %d, want 1", editor.sectionCursor)
 	}
 	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	if editor.scrollOff != 0 {
-		t.Errorf("after k, scrollOff = %d, want 0", editor.scrollOff)
+	if editor.sectionCursor != 0 {
+		t.Errorf("after k, sectionCursor = %d, want 0", editor.sectionCursor)
+	}
+	// k at first section → stays 0 (clamped).
+	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	if editor.sectionCursor != 0 {
+		t.Errorf("k at first section: sectionCursor = %d, want 0", editor.sectionCursor)
 	}
 	// down/up are aliases for j/k.
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if editor.scrollOff != 1 {
-		t.Errorf("after down, scrollOff = %d, want 1", editor.scrollOff)
+	if editor.sectionCursor != 1 {
+		t.Errorf("after down, sectionCursor = %d, want 1", editor.sectionCursor)
 	}
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-	if editor.scrollOff != 0 {
-		t.Errorf("after up, scrollOff = %d, want 0", editor.scrollOff)
-	}
-}
-
-func TestPlanEditor_K_AtTop_ClampedToZero(t *testing.T) {
-	sess, _ := newEditorTestSession(t)
-	if err := sess.WritePlan("# Goal\n\n## Spec\nbody\n"); err != nil {
-		t.Fatal(err)
-	}
-	editor := newPlanEditor(sess, "", 80, 20)
-	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	if editor.scrollOff != 0 {
-		t.Errorf("k at top moved scroll, got %d, want 0", editor.scrollOff)
+	if editor.sectionCursor != 0 {
+		t.Errorf("after up, sectionCursor = %d, want 0", editor.sectionCursor)
 	}
 }
 
@@ -815,6 +769,9 @@ func TestPlanEditor_DraftingState_BlocksAllExceptEscAndQ(t *testing.T) {
 	if editor.scrollOff != 0 {
 		t.Errorf("scroll changed during drafting, got %d", editor.scrollOff)
 	}
+	if editor.sectionCursor != 0 {
+		t.Errorf("sectionCursor changed during drafting, got %d", editor.sectionCursor)
+	}
 	if editor.mode != planEditorModeScroll {
 		t.Errorf("mode changed during drafting to %v", editor.mode)
 	}
@@ -901,5 +858,233 @@ func TestPlanEditor_R_NoopWhenDrafting(t *testing.T) {
 	cmd := editor.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	if cmd != nil {
 		t.Errorf("R while drafting should be a no-op, got cmd that returns %T", cmd())
+	}
+}
+
+// TestPlanEditor_Brackets_MoveCursor verifies that ] and [ step sectionCursor
+// forward and backward through sections respectively.
+func TestPlanEditor_Brackets_MoveCursor(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	if len(editor.sections) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(editor.sections))
+	}
+
+	// ] twice: 0→1→2.
+	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	if editor.sectionCursor != 1 {
+		t.Errorf("] once: sectionCursor=%d, want 1", editor.sectionCursor)
+	}
+	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	if editor.sectionCursor != 2 {
+		t.Errorf("] twice: sectionCursor=%d, want 2", editor.sectionCursor)
+	}
+
+	// ] at last section → still 2 (clamped).
+	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	if editor.sectionCursor != 2 {
+		t.Errorf("] at last: sectionCursor=%d, want 2", editor.sectionCursor)
+	}
+
+	// [ once: 2→1.
+	editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
+	if editor.sectionCursor != 1 {
+		t.Errorf("[ once: sectionCursor=%d, want 1", editor.sectionCursor)
+	}
+}
+
+// TestPlanEditor_TabFoldsCursorSection verifies that tab toggles the fold of
+// the section at sectionCursor, not the section at the viewport top.
+func TestPlanEditor_TabFoldsCursorSection(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	// Defaults: Goal expanded, Spec expanded, Context collapsed (index 2).
+	if editor.folds["Goal"] {
+		t.Fatal("Goal should be expanded initially")
+	}
+	if editor.folds["Spec"] {
+		t.Fatal("Spec should be expanded initially")
+	}
+	if !editor.folds["Context"] {
+		t.Fatal("Context should be collapsed initially")
+	}
+
+	// Move cursor to Context (index 2), press tab → Context expands.
+	editor.sectionCursor = 2
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if editor.folds["Context"] {
+		t.Error("after tab at Context (cursor=2), Context should be expanded")
+	}
+
+	// Move cursor back to Goal (index 0), press tab → Goal collapses.
+	editor.sectionCursor = 0
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if !editor.folds["Goal"] {
+		t.Error("after tab at Goal (cursor=0), Goal should be collapsed")
+	}
+}
+
+// TestPlanEditor_JK_MoveSectionCursor verifies j/k/down/up move sectionCursor
+// through sections and auto-scroll so the selected heading is in the viewport.
+func TestPlanEditor_JK_MoveSectionCursor(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n\n## Tasks\ntasks\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	// height=8 → bodyHeight=3, small enough to force scrolling.
+	editor := newPlanEditor(sess, "", 80, 8)
+	// Expand all so sections have real display lines between them.
+	for k := range editor.folds {
+		editor.folds[k] = false
+	}
+	editor.invalidateDisplayCache()
+	if len(editor.sections) != 4 {
+		t.Fatalf("expected 4 sections, got %d", len(editor.sections))
+	}
+
+	// j three times: 0→1→2→3.
+	for want := 1; want <= 3; want++ {
+		editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		if editor.sectionCursor != want {
+			t.Errorf("after j: sectionCursor=%d, want %d", editor.sectionCursor, want)
+		}
+	}
+
+	// j at last section → still 3 (clamped).
+	editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if editor.sectionCursor != 3 {
+		t.Errorf("j at last section: sectionCursor=%d, want 3", editor.sectionCursor)
+	}
+
+	// k twice: 3→2→1.
+	for want := 2; want >= 1; want-- {
+		editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		if editor.sectionCursor != want {
+			t.Errorf("after k: sectionCursor=%d, want %d", editor.sectionCursor, want)
+		}
+	}
+
+	// down/up are aliases.
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if editor.sectionCursor != 2 {
+		t.Errorf("after down: sectionCursor=%d, want 2", editor.sectionCursor)
+	}
+	editor.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if editor.sectionCursor != 1 {
+		t.Errorf("after up: sectionCursor=%d, want 1", editor.sectionCursor)
+	}
+
+	// Verify auto-scroll: sectionDisplayStart[sectionCursor] must be within
+	// [scrollOff, scrollOff+bodyHeight).
+	editor.displayLines()
+	cursor := editor.sectionCursor
+	headingLine := editor.sectionDisplayStart[cursor]
+	body := editor.bodyHeight()
+	if headingLine < editor.scrollOff || headingLine >= editor.scrollOff+body {
+		t.Errorf("heading line %d not in viewport [%d, %d)",
+			headingLine, editor.scrollOff, editor.scrollOff+body)
+	}
+}
+
+// TestPlanEditor_CursorHighlightsSelectedSection verifies that displayLines
+// renders the cursor-selected section heading glyph in ColorSecondary (cyan)
+// while the other headings use the muted gray of StyleSubtle.
+func TestPlanEditor_CursorHighlightsSelectedSection(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	if len(editor.sections) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(editor.sections))
+	}
+	editor.sectionCursor = 1
+	editor.invalidateDisplayCache()
+
+	lines := editor.displayLines()
+	// sectionDisplayStart[i] is the display line index of section i's heading.
+	if len(editor.sectionDisplayStart) < 3 {
+		t.Fatalf("sectionDisplayStart has %d entries, want ≥3", len(editor.sectionDisplayStart))
+	}
+
+	// ColorSecondary #06B6D4 renders as ANSI decimal RGB 6;182;211.
+	// We check that the glyph character (▼/▶) is directly preceded by the
+	// cyan color escape on the cursor section and not on the others.
+	// The gray StyleSubtle uses 107;113;128 in TrueColor mode.
+	const cyanGlyph = "6;182;211m▼ "
+	const grayGlyphExpanded = "107;113;128m▼ "
+	const grayGlyphFolded = "107;113;128m▶ "
+
+	for i := 0; i < 3; i++ {
+		lineIdx := editor.sectionDisplayStart[i]
+		if lineIdx >= len(lines) {
+			t.Fatalf("sectionDisplayStart[%d]=%d out of range (len=%d)", i, lineIdx, len(lines))
+		}
+		raw := lines[lineIdx]
+		hasCyanGlyph := strings.Contains(raw, cyanGlyph)
+		hasGrayGlyph := strings.Contains(raw, grayGlyphExpanded) || strings.Contains(raw, grayGlyphFolded)
+		if i == 1 {
+			if !hasCyanGlyph {
+				t.Errorf("cursor section (index 1) heading line missing cyan glyph:\n%s", raw)
+			}
+		} else {
+			if !hasGrayGlyph {
+				t.Errorf("non-cursor section (index %d) heading line missing gray glyph:\n%s", i, raw)
+			}
+			if hasCyanGlyph {
+				t.Errorf("non-cursor section (index %d) heading line unexpectedly has cyan glyph:\n%s", i, raw)
+			}
+		}
+	}
+}
+
+// TestPlanEditor_ClampCursor verifies that clampCursor keeps sectionCursor
+// within [0, len(sections)-1], including when sections is empty.
+func TestPlanEditor_ClampCursor(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	if len(editor.sections) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(editor.sections))
+	}
+
+	// Cursor above max → clamp to last index.
+	editor.sectionCursor = 5
+	editor.clampCursor()
+	if editor.sectionCursor != 2 {
+		t.Errorf("clampCursor with cursor=5/len=3: got %d, want 2", editor.sectionCursor)
+	}
+
+	// Cursor below 0 → clamp to 0.
+	editor.sectionCursor = -3
+	editor.clampCursor()
+	if editor.sectionCursor != 0 {
+		t.Errorf("clampCursor with cursor=-3: got %d, want 0", editor.sectionCursor)
+	}
+
+	// Empty sections → cursor stays 0 without panic.
+	editor2 := newPlanEditor(sess, "", 80, 30)
+	editor2.sections = nil
+	editor2.sectionCursor = 3
+	editor2.clampCursor()
+	if editor2.sectionCursor != 0 {
+		t.Errorf("clampCursor with empty sections: got %d, want 0", editor2.sectionCursor)
 	}
 }
