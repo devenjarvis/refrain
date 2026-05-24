@@ -153,10 +153,12 @@ func TestRenderTaskDetailPane_FullRationaleNoTruncation(t *testing.T) {
 		t.Error("rationale must not be truncated with …")
 	}
 
-	// No individual rendered line exceeds width-2 visible cells.
+	// No individual rendered line exceeds width visible cells.
+	// Rationale is now rendered at measure=width (when width<reviewDetailMaxMeasure),
+	// so lines may be up to width wide rather than the old width-2.
 	for i, l := range lines {
-		if vw := ansi.StringWidth(l); vw > width-2 {
-			t.Errorf("line %d visible width %d exceeds %d: %q", i, vw, width-2, l)
+		if vw := ansi.StringWidth(l); vw > width {
+			t.Errorf("line %d visible width %d exceeds %d: %q", i, vw, width, l)
 		}
 	}
 }
@@ -1083,6 +1085,170 @@ func TestReviewPanel_CursorMoveSwapsDiff(t *testing.T) {
 	}
 	if strings.Contains(out1, "task-one-marker") {
 		t.Errorf("cursor=1: must not contain task-one-marker; got:\n%s", out1)
+	}
+}
+
+// TestRenderTaskDetailPane_ContentWidthCapped asserts that on a wide pane, content
+// is capped at reviewDetailMaxMeasure rather than filling the full pane width.
+func TestRenderTaskDetailPane_ContentWidthCapped(t *testing.T) {
+	rationale := strings.Repeat("This is a long rationale that should be wrapped correctly. ", 5)
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
+			files:     []git.FileStat{{Path: "internal/auth.go", Insertions: 5, Deletions: 1}},
+			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
+		}},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: rationale}},
+		},
+	}
+
+	const width = 120
+	lines := renderTaskDetailPane(entry, 0, width, 30)
+
+	for i, l := range lines {
+		if l == "" {
+			continue
+		}
+		// Strip centering padding (leading spaces added for centering) then check
+		// that no content line exceeds the max measure.
+		stripped := strings.TrimLeft(l, " ")
+		cw := ansi.StringWidth(stripped)
+		if cw > reviewDetailMaxMeasure {
+			t.Errorf("line %d content width %d exceeds reviewDetailMaxMeasure %d: %q",
+				i, cw, reviewDetailMaxMeasure, l)
+		}
+	}
+}
+
+// TestRenderTaskDetailPane_RationaleHasANSIStyling asserts that rationale text is
+// rendered via reviewRenderer.RenderLines(measure=72) rather than wrapText(maxW=70).
+// A 72-char string that fits in measure=72 but not maxW=70 is used as the probe:
+// wrapText(70) would split "token refresh!!" across lines, while RenderLines(72)
+// keeps it on one line. This test works in no-color environments.
+func TestRenderTaskDetailPane_RationaleHasANSIStyling(t *testing.T) {
+	// Exactly 72 chars — fits in measure=72, does NOT fit in maxW=70.
+	rationale := "This implementation is correct and handles auth redirect token refresh!!"
+	if len(rationale) != 72 {
+		t.Fatalf("test string must be 72 chars, got %d", len(rationale))
+	}
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
+			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
+		}},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: rationale}},
+		},
+	}
+
+	// width=80 → measure=72 (capped), maxW=70. If wrapText(70) were used, "refresh!!"
+	// would land on its own line; RenderLines(72) keeps "token refresh!!" together.
+	lines := renderTaskDetailPane(entry, 0, 80, 30)
+	out := strings.Join(lines, "\n")
+
+	if !strings.Contains(ansi.Strip(out), "token refresh!!") {
+		t.Error("72-char rationale must not be split: 'token refresh!!' should appear on one line " +
+			"(verifies RenderLines(measure=72) is used, not wrapText(maxW=70))")
+	}
+}
+
+// TestRenderTaskDetailPane_HeadingHasUnderline asserts that the line immediately
+// following the "Task N:" heading contains the ─ underline character.
+func TestRenderTaskDetailPane_HeadingHasUnderline(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
+			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
+		}},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}},
+		},
+	}
+
+	lines := renderTaskDetailPane(entry, 0, 80, 20)
+
+	headingIdx := -1
+	for i, l := range lines {
+		if strings.Contains(ansi.Strip(l), "Task 1:") {
+			headingIdx = i
+			break
+		}
+	}
+	if headingIdx < 0 {
+		t.Fatal("heading line 'Task 1:' not found")
+	}
+	if headingIdx+1 >= len(lines) {
+		t.Fatal("no line after heading")
+	}
+	if !strings.Contains(lines[headingIdx+1], "─") {
+		t.Errorf("line after heading must contain '─' underline; got: %q", lines[headingIdx+1])
+	}
+}
+
+// TestRenderReviewPanel_FooterUsesThemeStyles asserts that footer key names use
+// StyleActive. In environments with color output the ANSI-coded styled key must
+// appear; in no-color environments the test verifies structural completeness.
+func TestRenderReviewPanel_FooterUsesThemeStyles(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-1", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, "")
+
+	// StyleActive.Render("p") — carries ANSI codes in color mode, is "p" otherwise.
+	// In both cases the rendered footer must contain it.
+	styledP := StyleActive.Render("p")
+	if !strings.Contains(output, styledP) {
+		t.Errorf("footer must use StyleActive for 'p' key; %q not found in output", styledP)
+	}
+
+	// In color mode, verify the 't' key is also styled via StyleActive (not the old
+	// ad-hoc lighter-cyan #7ec8e3).
+	styledT := StyleActive.Render("t")
+	if !strings.Contains(output, styledT) {
+		t.Errorf("footer must use StyleActive for 't' key; %q not found in output", styledT)
+	}
+}
+
+// TestRenderTaskListPane_HeaderUsesHeadingColor asserts that "PLAN TASKS" is
+// followed by a ─ underline (structural change from the old blank-line separator).
+func TestRenderTaskListPane_HeaderUsesHeadingColor(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks:  []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
+		groups: []taskReviewGroup{},
+	}
+
+	lines := renderTaskListPane(entry, 40, 10, 0)
+	out := strings.Join(lines, "\n")
+
+	if !strings.Contains(out, "PLAN TASKS") {
+		t.Error("header must contain PLAN TASKS")
+	}
+
+	headerIdx := -1
+	for i, l := range lines {
+		if strings.Contains(l, "PLAN TASKS") {
+			headerIdx = i
+			break
+		}
+	}
+	if headerIdx < 0 {
+		t.Fatal("no line containing PLAN TASKS found")
+	}
+
+	// The line immediately after PLAN TASKS must be the ─ underline (not a blank line).
+	if headerIdx+1 >= len(lines) {
+		t.Fatal("no line after PLAN TASKS header")
+	}
+	if !strings.Contains(lines[headerIdx+1], "─") {
+		t.Errorf("line after PLAN TASKS must contain '─' underline; got: %q", lines[headerIdx+1])
 	}
 }
 

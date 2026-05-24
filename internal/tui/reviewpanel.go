@@ -16,6 +16,19 @@ import (
 	"github.com/devenjarvis/refrain/internal/tui/mdrender"
 )
 
+// reviewDetailMaxMeasure is the maximum content column width for the right detail
+// pane. Matches planEditorMaxMeasure so typography is consistent across panels.
+const reviewDetailMaxMeasure = 72
+
+// reviewRenderer is the markdown renderer used for rationale text in the detail pane.
+var reviewRenderer = mdrender.New(planEditorChromaStyle)
+
+// detailContentMeasure returns the effective content width and left-margin padding
+// for centering the detail pane content. Thin wrapper around mdrender.ContentMeasure.
+func detailContentMeasure(paneWidth, maxMeasure int) (measure, leftPad int) {
+	return mdrender.ContentMeasure(paneWidth, maxMeasure)
+}
+
 // spinnerFrames is the braille spinner sequence used while a verdict is running.
 var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
 
@@ -224,19 +237,19 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	if prDraftInFlight {
 		pHint = StyleSubtle.Render("p — (in progress…)")
 	} else {
-		pHint = lipgloss.NewStyle().Foreground(lipgloss.Color("#5ab58a")).Render("p") + StyleSubtle.Render(" — create or open PR")
+		pHint = StyleActive.Render("p") + StyleSubtle.Render(" — create or open PR")
 	}
 	hints := "  " +
 		pHint +
-		"   " + lipgloss.NewStyle().Foreground(lipgloss.Color("#7ec8e3")).Render("t") + StyleSubtle.Render(" — open agent terminal") +
-		"   " + lipgloss.NewStyle().Foreground(ColorWarning).Render("b") + StyleSubtle.Render(" — back to build") +
-		"   " + StyleSubtle.Render("f — flag task") +
-		"   " + StyleSubtle.Render("c — mark complete") +
-		"   " + StyleSubtle.Render("e — open in editor") +
-		"   " + StyleSubtle.Render("d — defer") +
-		"   " + StyleSubtle.Render("pgdn") + StyleSubtle.Render("/pgup") + StyleSubtle.Render(" — scroll diff") +
-		"   " + lipgloss.NewStyle().Foreground(lipgloss.Color("#f0c060")).Render("?") + StyleSubtle.Render(" — spec") +
-		"   " + StyleSubtle.Render("ESC — back to focus")
+		"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
+		"  " + StyleWarning.Render("b") + StyleSubtle.Render(" — back to build") +
+		"  " + StyleActive.Render("f") + StyleSubtle.Render(" — flag task") +
+		"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
+		"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
+		"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
+		"  " + StyleActive.Render("pgdn") + StyleSubtle.Render("/") + StyleActive.Render("pgup") + StyleSubtle.Render(" — scroll diff") +
+		"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
+		"  " + StyleSubtle.Render("ESC — back to focus")
 	lines = append(lines, hints)
 
 	return strings.Join(lines, "\n")
@@ -267,7 +280,11 @@ func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLe
 // Row format: <icon> [N] <truncated text>  +X -Y
 func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int) []string {
 	const headerLines = 2
-	header := []string{StyleSubtle.Render("PLAN TASKS"), ""}
+	planTasksStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true)
+	header := []string{
+		planTasksStyle.Render("PLAN TASKS"),
+		StyleSubtle.Render(strings.Repeat("─", ansi.StringWidth("PLAN TASKS"))),
+	}
 
 	type row struct {
 		taskIndex int
@@ -410,6 +427,23 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 		return []string{StyleSubtle.Render("loading…")}
 	}
 
+	measure, leftPad := detailContentMeasure(width, reviewDetailMaxMeasure)
+
+	// capAndCenter caps lines to height then prepends centering padding to each
+	// non-empty line. Applied at every return point in the function.
+	capAndCenter := func(lines []string) []string {
+		capped := capLines(lines, height)
+		if leftPad > 0 {
+			pad := strings.Repeat(" ", leftPad)
+			for i, l := range capped {
+				if l != "" {
+					capped[i] = pad + l
+				}
+			}
+		}
+		return capped
+	}
+
 	// No-plan overview path.
 	if len(entry.tasks) == 0 && len(entry.groups) == 0 {
 		var lines []string
@@ -429,7 +463,7 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 				top = sorted[:8]
 			}
 			for _, f := range top {
-				name := truncateVisible(f.Path, width-14)
+				name := truncateVisible(f.Path, measure-14)
 				stat := subtleGreen.Render(fmt.Sprintf("+%d", f.Insertions)) +
 					" " + subtleRed.Render(fmt.Sprintf("-%d", f.Deletions))
 				lines = append(lines, "  "+name+"  "+stat)
@@ -438,7 +472,7 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 				lines = append(lines, StyleSubtle.Render(fmt.Sprintf("  … %d more files", len(sorted)-8)))
 			}
 		}
-		return capLines(lines, height)
+		return capAndCenter(lines)
 	}
 
 	// Resolve selected task and group using same row order as renderTaskListPane.
@@ -467,9 +501,12 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 	}
 
 	var lines []string
-	maxW := width - 2
+	maxW := measure - 2
 
-	// (1) Task heading.
+	// H2 heading style: matches colHeading2 / styleH2 in mdrender.
+	headingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true)
+
+	// (1) Task heading with H2 color and thin underline.
 	heading := ""
 	if selectedTask != nil {
 		heading = fmt.Sprintf("Task %d: %s", selectedTask.Index, selectedTask.Text)
@@ -477,7 +514,9 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 		heading = "Other changes"
 	}
 	if heading != "" {
-		lines = append(lines, wrapText(heading, maxW)...)
+		displayHeading := truncateVisible(heading, maxW)
+		lines = append(lines, headingStyle.Render(displayHeading))
+		lines = append(lines, reviewRenderer.HeadingUnderline(2, ansi.StringWidth(displayHeading), measure))
 		lines = append(lines, "")
 	}
 
@@ -491,15 +530,15 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 	icon, label, style := verdictBadge(rec)
 	lines = append(lines, style.Render(icon+" "+label))
 
-	// (3) Rationale.
+	// (3) Rationale rendered through mdrender for inline bold/italic/code styling.
 	if rec != nil && rec.state == verdictDone && rec.verdict.Rationale != "" {
 		lines = append(lines, "")
-		lines = append(lines, wrapText(rec.verdict.Rationale, maxW)...)
+		lines = append(lines, reviewRenderer.RenderLines(rec.verdict.Rationale, measure)...)
 	}
 
 	if group == nil {
 		lines = append(lines, "", StyleSubtle.Render("(no commits matched this task)"))
-		return capLines(lines, height)
+		return capAndCenter(lines)
 	}
 
 	// (4) Changed files.
@@ -544,7 +583,7 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 		}
 	}
 
-	return capLines(lines, height)
+	return capAndCenter(lines)
 }
 
 // renderTaskSummaryPane renders the summary portion of the right pane (verdict,
@@ -739,9 +778,9 @@ func renderReviewSpecOverlay(sess *agent.Session, plan string, scrollOffset, wid
 
 	// Footer hint.
 	footer := "\n" + StyleSubtle.Render(strings.Repeat("─", width-2)) + "\n" +
-		"  " + StyleSubtle.Render("pgdn/pgup") + " scroll  " +
-		StyleSubtle.Render("g/G") + " top/bottom  " +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#f0c060")).Render("esc") + StyleSubtle.Render(" — back to review")
+		"  " + StyleActive.Render("pgdn") + StyleSubtle.Render("/") + StyleActive.Render("pgup") + StyleSubtle.Render(" — scroll") +
+		"  " + StyleActive.Render("g") + StyleSubtle.Render("/") + StyleActive.Render("G") + StyleSubtle.Render(" — top/bottom") +
+		"  " + StyleActive.Render("esc") + StyleSubtle.Render(" — back to review")
 
 	return header + "\n" + body + footer
 }
