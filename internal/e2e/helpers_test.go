@@ -16,7 +16,10 @@ import (
 	"time"
 )
 
-var refrainBin string
+var (
+	refrainBin string
+	scrimBin   string
+)
 
 func TestMain(m *testing.M) {
 	tmp, err := os.MkdirTemp("", "refrain-e2e-bin-*")
@@ -37,6 +40,24 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	refrainBin = bin
+
+	// Build scrim and name it "claude" so supportsHooks() recognises it.
+	scrimCmd := exec.Command("go", "install", "github.com/devenjarvis/scrim/cmd/scrim@latest")
+	scrimCmd.Dir = repoRoot()
+	scrimCmd.Env = append(os.Environ(), "GOBIN="+tmp)
+	scrimCmd.Stdout = os.Stdout
+	scrimCmd.Stderr = os.Stderr
+	if err := scrimCmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "e2e: failed to install scrim: %v\n", err)
+		os.Exit(1)
+	}
+	claudePath := filepath.Join(tmp, "claude")
+	if err := os.Rename(filepath.Join(tmp, "scrim"), claudePath); err != nil {
+		fmt.Fprintf(os.Stderr, "e2e: failed to rename scrim to claude: %v\n", err)
+		os.Exit(1)
+	}
+	scrimBin = claudePath
+
 	os.Exit(m.Run())
 }
 
@@ -142,6 +163,106 @@ func newSession(t *testing.T) *Session {
 		tempDir: tempDir,
 		home:    home,
 		repoDir: repoDir,
+	}
+
+	t.Cleanup(func() { s.Kill() })
+	return s
+}
+
+// scenarioFile is a YAML scenario file written to the scrim scenarios directory.
+type scenarioFile struct {
+	name    string // filename, e.g. "default.yaml"
+	content string // YAML content
+}
+
+// defaultScenario is a catch-all scenario that matches any typed input.
+// Scrim stays alive in interactive mode; this fires SessionStart immediately
+// and responds with "Ready." when the user types anything.
+var defaultScenario = scenarioFile{
+	name: "default.yaml",
+	content: `name: default
+match:
+  prompt: ""
+session:
+  id: "e2e-default"
+  model: "claude-sonnet-4-6"
+turns:
+  - assistant:
+      - type: text
+        text: "Ready."
+`,
+}
+
+// newScrimSession creates an isolated test environment configured to use scrim
+// (named "claude") as the agent program instead of bash. Scrim fires hook events
+// through the same settings-file mechanism as real Claude Code, giving tests
+// deterministic lifecycle events without a bespoke bash stub.
+//
+// scenarios are written to a temp directory and SCRIM_SCENARIOS_DIR is passed
+// through the tu → refrain → scrim env chain. If no scenarios are provided,
+// defaultScenario is used.
+func newScrimSession(t *testing.T, scenarios ...scenarioFile) *Session {
+	t.Helper()
+
+	suffix := randomSuffix()
+	name := sanitizeName(t.Name()) + "-" + suffix
+
+	tempDir := t.TempDir()
+	home := filepath.Join(tempDir, "home")
+	repoDir := filepath.Join(tempDir, "e2erepo-"+suffix)
+
+	for _, d := range []string{
+		home,
+		filepath.Join(home, ".refrain"),
+		repoDir,
+		filepath.Join(repoDir, ".refrain"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("e2e: mkdir %s: %v", d, err)
+		}
+	}
+
+	writeFile(
+		t, filepath.Join(home, ".gitconfig"),
+		"[user]\n\tname = e2e-test\n\temail = e2e@test.local\n[init]\n\tdefaultBranch = main\n",
+	)
+
+	cfg := map[string]any{
+		"agent_program":      scrimBin,
+		"bypass_permissions": false,
+		"plan_first_enabled": false,
+	}
+	writeJSON(t, filepath.Join(home, ".refrain", "config.json"), cfg)
+	writeJSON(t, filepath.Join(repoDir, ".refrain", "config.json"), cfg)
+
+	runGit(t, repoDir, home, "init")
+	runGit(t, repoDir, home, "config", "user.name", "Test")
+	runGit(t, repoDir, home, "config", "user.email", "test@test.com")
+	writeFile(t, filepath.Join(repoDir, "README.md"), "# test repo\n")
+	runGit(t, repoDir, home, "add", ".")
+	runGit(t, repoDir, home, "commit", "-m", "initial commit")
+
+	// Write scrim scenario files.
+	scenariosDir := filepath.Join(tempDir, "scenarios")
+	if err := os.MkdirAll(scenariosDir, 0o755); err != nil {
+		t.Fatalf("e2e: mkdir scenarios: %v", err)
+	}
+	if len(scenarios) == 0 {
+		scenarios = []scenarioFile{defaultScenario}
+	}
+	for _, sc := range scenarios {
+		writeFile(t, filepath.Join(scenariosDir, sc.name), sc.content)
+	}
+
+	s := &Session{
+		t:       t,
+		name:    name,
+		tempDir: tempDir,
+		home:    home,
+		repoDir: repoDir,
+		extraEnv: []string{
+			"SCRIM_SCENARIOS_DIR=" + scenariosDir,
+		},
 	}
 
 	t.Cleanup(func() { s.Kill() })
