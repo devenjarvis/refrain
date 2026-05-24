@@ -246,7 +246,9 @@ func TestSessionRepoProp_DetachResumePreservesRepoPaths(t *testing.T) {
 		t.Fatalf("saved WorktreePath = %q, want %q", saved.WorktreePath, origWorktreePath)
 	}
 
-	mgr2 := NewManager(repo, defaultTestSettings())
+	resumeSettings := defaultTestSettings()
+	resumeSettings.AgentProgram = "bash"
+	mgr2 := NewManager(repo, resumeSettings)
 	defer mgr2.Shutdown()
 	mgr2.SetBranchNamer(nil)
 	mgr2.SetTaskSummarizer(nil)
