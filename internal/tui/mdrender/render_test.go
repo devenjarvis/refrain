@@ -169,22 +169,20 @@ func TestRenderLines_FenceGoLexed(t *testing.T) {
 	if !containsCSI(got[0]) {
 		t.Errorf("fence open not styled: %q", got[0])
 	}
-	// Content lines should carry chroma-injected SGR (multiple sequences) for
-	// keywords like `package`, `func`. We don't pin exact codes; we just
-	// require *some* styling beyond the leading reset.
+	// Content lines carry a │ bar prefix and chroma-injected SGR for keywords.
 	pkgLine := got[1]
 	if !containsCSI(pkgLine) {
 		t.Errorf("package line not styled: %q", pkgLine)
 	}
-	if testutil.StripANSI(pkgLine) != "package main" {
-		t.Errorf("package line stripped = %q, want %q", testutil.StripANSI(pkgLine), "package main")
+	if testutil.StripANSI(pkgLine) != "│ package main" {
+		t.Errorf("package line stripped = %q, want %q", testutil.StripANSI(pkgLine), "│ package main")
 	}
 	funcLine := got[3]
 	if !containsCSI(funcLine) {
 		t.Errorf("func line not styled: %q", funcLine)
 	}
-	if testutil.StripANSI(funcLine) != "func main() {}" {
-		t.Errorf("func line stripped = %q, want %q", testutil.StripANSI(funcLine), "func main() {}")
+	if testutil.StripANSI(funcLine) != "│ func main() {}" {
+		t.Errorf("func line stripped = %q, want %q", testutil.StripANSI(funcLine), "│ func main() {}")
 	}
 }
 
@@ -198,8 +196,8 @@ func TestRenderLines_FenceBashLexed(t *testing.T) {
 	if !containsCSI(got[1]) {
 		t.Errorf("bash content not styled: %q", got[1])
 	}
-	if testutil.StripANSI(got[1]) != "echo hello" {
-		t.Errorf("bash line stripped = %q, want %q", testutil.StripANSI(got[1]), "echo hello")
+	if testutil.StripANSI(got[1]) != "│ echo hello" {
+		t.Errorf("bash line stripped = %q, want %q", testutil.StripANSI(got[1]), "│ echo hello")
 	}
 }
 
@@ -210,12 +208,9 @@ func TestRenderLines_FenceNoLangFallsBackToPlaintext(t *testing.T) {
 	if len(got) < 3 {
 		t.Fatalf("got %d display lines, want >= 3", len(got))
 	}
-	// Plaintext lexer doesn't add color tokens, but our wrapper still wraps
-	// the line in the styleFenceContent fallback when the pre-lexed line is
-	// empty *or* the line passes through unstyled. Just assert plain text is
-	// preserved verbatim under StripANSI.
-	if testutil.StripANSI(got[1]) != "some text" {
-		t.Errorf("plaintext stripped = %q, want %q", testutil.StripANSI(got[1]), "some text")
+	// Content line has │ bar prefix; plain text is preserved after it.
+	if testutil.StripANSI(got[1]) != "│ some text" {
+		t.Errorf("plaintext stripped = %q, want %q", testutil.StripANSI(got[1]), "│ some text")
 	}
 }
 
@@ -223,17 +218,18 @@ func TestRenderLines_FenceUnknownLangDoesNotPanic(t *testing.T) {
 	r := New("monokai")
 	plan := "```not-a-real-lang-xyzzy\nfoo bar\n```\n"
 	got := r.RenderLines(plan, 80)
-	// chroma falls through to a generic lexer; we just assert it doesn't crash
-	// and the plain text survives.
+	// chroma falls through to a generic lexer; we assert it doesn't crash
+	// and the plain text survives (with bar prefix).
 	found := false
 	for _, line := range got {
-		if testutil.StripANSI(line) == "foo bar" {
+		stripped := testutil.StripANSI(line)
+		if stripped == "│ foo bar" || strings.HasPrefix(stripped, "│ ") && strings.Contains(stripped, "foo bar") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("no output line contained the plain content; got:\n%v", got)
+		t.Errorf("no output line contained '│ foo bar'; got:\n%v", got)
 	}
 }
 
@@ -348,6 +344,25 @@ func TestStyleLine_FenceContentMultiSegmentColumnTracking(t *testing.T) {
 	}
 	if !strings.Contains(rebuilt.String(), "func foo") {
 		t.Errorf("rebuilt = %q; expected to contain %q", rebuilt.String(), "func foo")
+	}
+}
+
+func TestRenderLines_FenceContentHasLeftBar(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("```go\nfunc X() {}\n```\n", 80)
+	// Lines: [0]=open, [1]=content, [2]=close, [3]=trailing empty
+	if len(got) < 3 {
+		t.Fatalf("got %d lines, want >= 3", len(got))
+	}
+	// Fence content line must start with "│ ".
+	contentStripped := testutil.StripANSI(got[1])
+	if !strings.HasPrefix(contentStripped, "│ ") {
+		t.Errorf("fence content line[1] does not start with '│ ': %q", contentStripped)
+	}
+	// Fence open line must also have the bar.
+	openStripped := testutil.StripANSI(got[0])
+	if !strings.HasPrefix(openStripped, "│ ") {
+		t.Errorf("fence open line[0] does not start with '│ ': %q", openStripped)
 	}
 }
 

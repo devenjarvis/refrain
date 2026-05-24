@@ -178,13 +178,28 @@ func (r *Renderer) RenderLines(plan string, width int) []string {
 		if i < len(ctxs) {
 			ctx = ctxs[i]
 		}
-		segments := wrapPlain(line, width)
+		// Fence lines get a │ bar prefix in scroll mode (2 chars wide), so
+		// wrap at width-2 to keep the total within the content measure.
+		isFenceLine := ctx.Kind == LineFenceContent || ctx.Kind == LineFenceOpen || ctx.Kind == LineFenceClose
+		wrapWidth := width
+		if isFenceLine && width > 2 {
+			wrapWidth = width - 2
+		}
+		segments := wrapPlain(line, wrapWidth)
+		fenceBar := styleFenceBar.Render("│") + " "
 		if len(segments) == 0 {
-			out = append(out, r.StyleSegment("", ctx, false))
+			styled := r.StyleSegment("", ctx, false)
+			if isFenceLine {
+				styled = fenceBar + styled
+			}
+			out = append(out, styled)
 		} else {
 			col := 0
 			for j, seg := range segments {
 				styled := r.styleSegmentWithFence(seg, ctx, j > 0, col)
+				if isFenceLine {
+					styled = fenceBar + styled
+				}
 				out = append(out, styled)
 				col += ansi.StringWidth(seg)
 			}
@@ -569,6 +584,7 @@ var (
 
 	colMuted          = lipgloss.Color("#6B7280")
 	colCodeFG         = lipgloss.Color("#FBBF24") // amber for inline code
+	colCodeBg         = lipgloss.Color("#1A1D23") // subtle dark background for code blocks
 	colLink           = lipgloss.Color("#06B6D4")
 	colQuote          = lipgloss.Color("#9CA3AF")
 	colHR             = lipgloss.Color("#374151")
@@ -594,8 +610,10 @@ var (
 
 	// Fence-marker line ("```go", "```"): muted to keep attention on content.
 	styleFenceMarker = lipgloss.NewStyle().Foreground(colMuted)
-	// Fallback for fence content when chroma fails.
-	styleFenceContent = lipgloss.NewStyle().Foreground(colCodeFG)
+	// Fallback for fence content when chroma fails; includes background tint.
+	styleFenceContent = lipgloss.NewStyle().Foreground(colCodeFG).Background(colCodeBg)
+	// Bar glyph prepended to fence lines in scroll mode.
+	styleFenceBar = lipgloss.NewStyle().Foreground(colMuted)
 )
 
 func styleHeading(level int) lipgloss.Style {

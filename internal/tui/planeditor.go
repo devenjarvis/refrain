@@ -823,7 +823,7 @@ func (m *planEditorModel) displayLines() []string {
 		if i < len(ctxs) {
 			ctx = ctxs[i]
 		}
-		out = append(out, m.renderer.StyleLine(srcLines[i], ctx, w)...)
+		out = append(out, m.styledScrollLines(srcLines[i], ctx, w)...)
 	}
 
 	// Sections.
@@ -871,7 +871,7 @@ func (m *planEditorModel) displayLines() []string {
 			if i < len(ctxs) {
 				ctx = ctxs[i]
 			}
-			out = append(out, m.renderer.StyleLine(srcLines[i], ctx, w)...)
+			out = append(out, m.styledScrollLines(srcLines[i], ctx, w)...)
 		}
 	}
 
@@ -901,6 +901,25 @@ func (m *planEditorModel) contentWidth() int {
 func (m *planEditorModel) displayLeftPad() int {
 	_, pad := mdrender.ContentMeasure(textareaWidth(m.width), planEditorMaxMeasure)
 	return pad
+}
+
+// styledScrollLines wraps and styles a source line for scroll-mode display,
+// applying fence-block bar prefixes that are omitted in edit mode to keep
+// mdtextarea cursor-splice math unaffected.
+func (m *planEditorModel) styledScrollLines(src string, ctx mdrender.LineCtx, width int) []string {
+	isFenceLine := ctx.Kind == mdrender.LineFenceContent || ctx.Kind == mdrender.LineFenceOpen || ctx.Kind == mdrender.LineFenceClose
+	lineWidth := width
+	if isFenceLine && width > 2 {
+		lineWidth = width - 2
+	}
+	lines := m.renderer.StyleLine(src, ctx, lineWidth)
+	if isFenceLine {
+		bar := StyleSubtle.Render("│") + " "
+		for i, l := range lines {
+			lines[i] = bar + l
+		}
+	}
+	return lines
 }
 
 // bodyHeight is the number of lines available for plan content.
