@@ -844,9 +844,13 @@ func (m *planEditorModel) displayLines() []string {
 		if len(headingSegs) == 0 {
 			headingSegs = []string{""}
 		}
-		glyph := StyleSubtle.Render("▼ ")
+		glyphStyle := StyleSubtle
+		if si == m.sectionCursor {
+			glyphStyle = StyleActive
+		}
+		glyph := glyphStyle.Render("▼ ")
 		if folded {
-			glyph = StyleSubtle.Render("▶ ")
+			glyph = glyphStyle.Render("▶ ")
 		}
 		headingLine := glyph + headingSegs[0]
 		if folded {

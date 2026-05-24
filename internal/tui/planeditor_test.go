@@ -904,6 +904,63 @@ func TestPlanEditor_R_NoopWhenDrafting(t *testing.T) {
 	}
 }
 
+// TestPlanEditor_CursorHighlightsSelectedSection verifies that displayLines
+// renders the cursor-selected section heading glyph in ColorSecondary (cyan)
+// while the other headings use the muted gray of StyleSubtle.
+func TestPlanEditor_CursorHighlightsSelectedSection(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	if len(editor.sections) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(editor.sections))
+	}
+	editor.sectionCursor = 1
+	editor.invalidateDisplayCache()
+
+	lines := editor.displayLines()
+	// sectionDisplayStart[i] is the display line index of section i's heading.
+	if len(editor.sectionDisplayStart) < 3 {
+		t.Fatalf("sectionDisplayStart has %d entries, want ≥3", len(editor.sectionDisplayStart))
+	}
+
+	// ColorSecondary #06B6D4 renders as ANSI decimal RGB 6;182;211.
+	// We check that the glyph character (▼/▶) is directly preceded by the
+	// cyan color escape on the cursor section and not on the others.
+	// The gray StyleSubtle uses 107;113;128 in TrueColor mode.
+	const cyanGlyph = "6;182;211m▼ "
+	const grayGlyphExpanded = "107;113;128m▼ "
+	const grayGlyphFolded = "107;113;128m▶ "
+
+	for i := 0; i < 3; i++ {
+		lineIdx := editor.sectionDisplayStart[i]
+		if lineIdx >= len(lines) {
+			t.Fatalf("sectionDisplayStart[%d]=%d out of range (len=%d)", i, lineIdx, len(lines))
+		}
+		raw := lines[lineIdx]
+		hasCyanGlyph := strings.Contains(raw, cyanGlyph)
+		hasGrayGlyph := strings.Contains(raw, grayGlyphExpanded) || strings.Contains(raw, grayGlyphFolded)
+		if i == 1 {
+			if !hasCyanGlyph {
+				t.Errorf("cursor section (index 1) heading line missing cyan glyph:\n%s", raw)
+			}
+		} else {
+			if !hasGrayGlyph {
+				t.Errorf("non-cursor section (index %d) heading line missing gray glyph:\n%s", i, raw)
+			}
+			if hasCyanGlyph {
+				t.Errorf("non-cursor section (index %d) heading line unexpectedly has cyan glyph:\n%s", i, raw)
+			}
+		}
+	}
+}
+
 // TestPlanEditor_ClampCursor verifies that clampCursor keeps sectionCursor
 // within [0, len(sections)-1], including when sections is empty.
 func TestPlanEditor_ClampCursor(t *testing.T) {
