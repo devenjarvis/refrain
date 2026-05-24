@@ -347,6 +347,19 @@ func TestStyleLine_FenceContentMultiSegmentColumnTracking(t *testing.T) {
 	}
 }
 
+func TestStyleInline_InlineCodeHasBackground(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("see `code` here\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output")
+	}
+	// Background SGR is 48;2;R;G;B in TrueColor mode (forced by TestMain).
+	// Lipgloss may combine foreground and background in one escape sequence.
+	if !strings.Contains(got[0], "48;2;") {
+		t.Errorf("no background-color SGR in inline code span; line: %q", got[0])
+	}
+}
+
 func TestRenderLines_BlockquoteLeftBar(t *testing.T) {
 	r := New("monokai")
 	got := r.RenderLines("> quoted text\n", 80)

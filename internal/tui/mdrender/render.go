@@ -623,7 +623,7 @@ var (
 
 	styleBold       = lipgloss.NewStyle().Bold(true)
 	styleItalic     = lipgloss.NewStyle().Italic(true)
-	styleInlineCode = lipgloss.NewStyle().Foreground(colCodeFG)
+	styleInlineCode = lipgloss.NewStyle().Foreground(colCodeFG).Background(lipgloss.Color("#2D2D2D"))
 	styleLink       = lipgloss.NewStyle().Foreground(colLink).Underline(true)
 	styleBlockquote = lipgloss.NewStyle().Foreground(colQuote).Italic(true)
 	styleHR         = lipgloss.NewStyle().Foreground(colHR)
