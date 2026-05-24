@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -1110,5 +1111,77 @@ func TestRenderReviewPanel_NoDiffPlaceholder(t *testing.T) {
 	output := renderReviewPanel(sess, entry, 140, 40, 0, false, "")
 	if !strings.Contains(output, "(no diff for this task)") {
 		t.Errorf("must show '(no diff for this task)' placeholder; got:\n%s", output)
+	}
+}
+
+// capturingReviewer captures the ReviewRequest passed to Review for assertion.
+type capturingReviewer struct {
+	captured agent.ReviewRequest
+}
+
+func (c *capturingReviewer) Review(_ context.Context, req agent.ReviewRequest) (agent.ReviewVerdict, error) {
+	c.captured = req
+	return agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: "stub"}, nil
+}
+
+// TestReviewTaskCmd_PassesTaskDetail verifies that reviewTaskCmd populates
+// TaskDetail from PlanTask.Body and ChangedFiles from the group's file list.
+func TestReviewTaskCmd_PassesTaskDetail(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-1", "add-widget")
+
+	app := NewApp()
+	const repoPath = "/test/repo"
+	const taskIndex = 2
+
+	// Pre-populate the cache with tasks that have Body set.
+	app.reviewDiffCache[cacheKey(repoPath, sess.ID)] = &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "First task", Body: "  - Files: internal/other.go"},
+			{Index: 2, Text: "Add widget", Body: "  - Files: internal/widget.go\n  - Implement: add NewWidget"},
+		},
+	}
+
+	group := taskReviewGroup{
+		taskIndex: taskIndex,
+		rawDiff:   "diff --git a/widget.go b/widget.go\n+func NewWidget() {}",
+		files: []git.FileStat{
+			{Path: "internal/widget.go", Insertions: 10, Deletions: 0},
+			{Path: "internal/widget_test.go", Insertions: 20, Deletions: 0},
+		},
+	}
+
+	reviewer := &capturingReviewer{}
+	cmd := app.reviewTaskCmd(sess, repoPath, group, reviewer)
+	cmd() // execute synchronously; reviewer.Review is called inline
+
+	req := reviewer.captured
+	if req.TaskDetail == "" {
+		t.Error("TaskDetail must be populated from PlanTask.Body, got empty")
+	}
+	if !strings.Contains(req.TaskDetail, "Files: internal/widget.go") {
+		t.Errorf("TaskDetail must contain Files sub-bullet, got: %q", req.TaskDetail)
+	}
+	if !strings.Contains(req.TaskDetail, "Implement: add NewWidget") {
+		t.Errorf("TaskDetail must contain Implement sub-bullet, got: %q", req.TaskDetail)
+	}
+
+	if len(req.ChangedFiles) != 2 {
+		t.Fatalf("ChangedFiles must have 2 entries, got %d: %v", len(req.ChangedFiles), req.ChangedFiles)
+	}
+	foundWidget := false
+	foundTest := false
+	for _, f := range req.ChangedFiles {
+		if f == "internal/widget.go" {
+			foundWidget = true
+		}
+		if f == "internal/widget_test.go" {
+			foundTest = true
+		}
+	}
+	if !foundWidget {
+		t.Errorf("ChangedFiles must include internal/widget.go, got: %v", req.ChangedFiles)
+	}
+	if !foundTest {
+		t.Errorf("ChangedFiles must include internal/widget_test.go, got: %v", req.ChangedFiles)
 	}
 }
