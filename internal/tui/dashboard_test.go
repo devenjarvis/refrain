@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/hook"
+	"pgregory.net/rapid"
 )
 
 func TestSelectionRect_Inactive(t *testing.T) {
@@ -711,9 +713,11 @@ func TestRenderQueueRow_PRDraftBadge(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	// With prDraftSessionID matching the session: badge should appear.
-	d := dashboardModel{prDraftSessionID: sess.ID}
-	rows := d.renderQueueRow(sess, "", "", false, ColorWarning, 80)
+	repo := "/repo/a"
+
+	// With prDraftSessionID+prDraftRepoPath matching the session: badge should appear.
+	d := dashboardModel{prDraftSessionID: sess.ID, prDraftRepoPath: repo}
+	rows := d.renderQueueRow(sess, "", repo, false, ColorWarning, 80)
 	if len(rows) < 2 {
 		t.Fatalf("renderQueueRow returned %d lines, want 2", len(rows))
 	}
@@ -723,11 +727,65 @@ func TestRenderQueueRow_PRDraftBadge(t *testing.T) {
 
 	// With prDraftSessionID cleared: normal prompt should appear.
 	d.prDraftSessionID = ""
-	rows = d.renderQueueRow(sess, "", "", false, ColorWarning, 80)
+	d.prDraftRepoPath = ""
+	rows = d.renderQueueRow(sess, "", repo, false, ColorWarning, 80)
 	if strings.Contains(ansi.Strip(rows[1]), "drafting PR") {
 		t.Error("cleared state must not show badge; got 'drafting PR' on line 2")
 	}
 	if !strings.Contains(ansi.Strip(rows[1]), "Fix the auth bug") {
 		t.Errorf("cleared state line 2 = %q, want original prompt", rows[1])
 	}
+}
+
+// TestRenderQueueRow_PRDraftBadge_OnlyTargetSession is a property test that
+// verifies the "drafting PR…" indicator appears exclusively on the session
+// whose PR draft is in flight, never leaking to other sessions — even when
+// session IDs collide across different repos.
+func TestRenderQueueRow_PRDraftBadge_OnlyTargetSession(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		nRepos := rapid.IntRange(1, 4).Draw(t, "nRepos")
+		sessPerRepo := rapid.IntRange(1, 4).Draw(t, "sessPerRepo")
+
+		type repoSession struct {
+			sess     *agent.Session
+			repoPath string
+		}
+		var all []repoSession
+		for r := range nRepos {
+			repoPath := fmt.Sprintf("/repo/%d", r)
+			for s := range sessPerRepo {
+				id := fmt.Sprintf("session-%d", s+1)
+				sess := agent.NewSessionForTest(id, fmt.Sprintf("s%d", s))
+				sess.SetOriginalPrompt(fmt.Sprintf("task for %s in %s", id, repoPath))
+				sess.MarkDone()
+				all = append(all, repoSession{sess: sess, repoPath: repoPath})
+			}
+		}
+
+		targetIdx := rapid.IntRange(0, len(all)-1).Draw(t, "target")
+		target := all[targetIdx]
+
+		d := dashboardModel{
+			prDraftSessionID: target.sess.ID,
+			prDraftRepoPath:  target.repoPath,
+		}
+
+		for i, rs := range all {
+			rows := d.renderQueueRow(rs.sess, "", rs.repoPath, false, ColorWarning, 80)
+			if len(rows) < 2 {
+				t.Fatalf("renderQueueRow for item %d returned %d lines, want 2", i, len(rows))
+			}
+			line := ansi.Strip(rows[1])
+			hasBadge := strings.Contains(line, "drafting PR")
+
+			if i == targetIdx && !hasBadge {
+				t.Fatalf("target session (idx=%d, id=%q, repo=%q) missing 'drafting PR' badge: %q",
+					i, rs.sess.ID, rs.repoPath, line)
+			}
+			if i != targetIdx && hasBadge {
+				t.Fatalf("non-target session (idx=%d, id=%q, repo=%q) has 'drafting PR' badge: %q (target id=%q, repo=%q)",
+					i, rs.sess.ID, rs.repoPath, line, target.sess.ID, target.repoPath)
+			}
+		}
+	})
 }

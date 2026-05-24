@@ -227,6 +227,7 @@ type App struct {
 
 	prDraftInFlight  bool   // true while startPRDraftCmd is running; prevents double-trigger
 	prDraftSessionID string // ID of the session whose PR draft is in flight; "" when idle
+	prDraftRepoPath  string // repo path of the session whose PR draft is in flight; "" when idle
 
 	// keys holds the dashboard action→key bindings. Stored on App so tests
 	// and future rebinding flows can swap a non-default map.
@@ -648,6 +649,7 @@ func (a *App) panelServices() PanelServices {
 		StartPRDraftCmd: func(sess *agent.Session, repoPath string, transitionShipping bool) tea.Cmd {
 			a.prDraftInFlight = true
 			a.prDraftSessionID = sess.ID
+			a.prDraftRepoPath = repoPath
 			a.prModalTransitionShipping = transitionShipping
 			return a.startPRDraftCmd(sess, repoPath, transitionShipping)
 		},
@@ -676,8 +678,10 @@ func (a *App) panelServices() PanelServices {
 				}
 			}
 		},
-		FetchReviewDiff:    func(sess *agent.Session, repoPath string) tea.Cmd { return a.fetchReviewDiffCmd(sess, repoPath) },
-		prDraftInFlightFor: func(sessionID string) bool { return a.prDraftInFlight && a.prDraftSessionID == sessionID },
+		FetchReviewDiff: func(sess *agent.Session, repoPath string) tea.Cmd { return a.fetchReviewDiffCmd(sess, repoPath) },
+		prDraftInFlightFor: func(sessionID, repoPath string) bool {
+			return a.prDraftInFlight && a.prDraftSessionID == sessionID && a.prDraftRepoPath == repoPath
+		},
 		FeedbackTriage: func(repoPath, sessionID string) map[string]*feedbackTriageEntry {
 			return a.feedbackTriage[cacheKey(repoPath, sessionID)]
 		},
@@ -718,6 +722,7 @@ func (a *App) refreshAgentList() {
 	a.dashboard.focusBreakTimerUp = a.wellness.focusBreakTimerUp
 	a.dashboard.cursor = a.cursor
 	a.dashboard.prDraftSessionID = a.prDraftSessionID
+	a.dashboard.prDraftRepoPath = a.prDraftRepoPath
 	a.dashboard.activeRepoName = a.activeRepoDisplayName()
 	a.dashboard.activeRepoPath = a.activeRepo
 	a.syncModalsToDashboard()
@@ -913,6 +918,7 @@ func (a *App) cursorSelectedRepoPath() string {
 func (a *App) syncFocusCursorToDashboard() {
 	a.dashboard.cursor = a.cursor
 	a.dashboard.prDraftSessionID = a.prDraftSessionID
+	a.dashboard.prDraftRepoPath = a.prDraftRepoPath
 }
 
 // activateFocusCursor opens the row currently under the fullscreen-focus
