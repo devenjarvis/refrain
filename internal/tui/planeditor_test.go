@@ -904,6 +904,42 @@ func TestPlanEditor_R_NoopWhenDrafting(t *testing.T) {
 	}
 }
 
+// TestPlanEditor_Brackets_MoveCursor verifies that ] and [ step sectionCursor
+// forward and backward through sections respectively.
+func TestPlanEditor_Brackets_MoveCursor(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	const plan = "# Goal\nbody\n\n## Spec\nspec\n\n## Context\nctx\n"
+	if err := sess.WritePlan(plan); err != nil {
+		t.Fatalf("WritePlan: %v", err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	if len(editor.sections) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(editor.sections))
+	}
+
+	// ] twice: 0→1→2.
+	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	if editor.sectionCursor != 1 {
+		t.Errorf("] once: sectionCursor=%d, want 1", editor.sectionCursor)
+	}
+	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	if editor.sectionCursor != 2 {
+		t.Errorf("] twice: sectionCursor=%d, want 2", editor.sectionCursor)
+	}
+
+	// ] at last section → still 2 (clamped).
+	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	if editor.sectionCursor != 2 {
+		t.Errorf("] at last: sectionCursor=%d, want 2", editor.sectionCursor)
+	}
+
+	// [ once: 2→1.
+	editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
+	if editor.sectionCursor != 1 {
+		t.Errorf("[ once: sectionCursor=%d, want 1", editor.sectionCursor)
+	}
+}
+
 // TestPlanEditor_TabFoldsCursorSection verifies that tab toggles the fold of
 // the section at sectionCursor, not the section at the viewport top.
 func TestPlanEditor_TabFoldsCursorSection(t *testing.T) {

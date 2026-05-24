@@ -549,29 +549,17 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	case "]":
-		m.displayLines() // ensure sectionDisplayStart is populated
-		for _, start := range m.sectionDisplayStart {
-			// Strict > so that pressing ] from exactly on a heading advances
-			// to the *next* heading. Two presses from the same heading are a
-			// no-op on the second press, which is intentional.
-			if start > m.scrollOff {
-				m.scrollOff = start
-				m.clampScroll()
-				return nil
-			}
+		if len(m.sections) > 0 {
+			m.sectionCursor++
+			m.clampCursor()
+			m.scrollToCursor()
 		}
 		return nil
 	case "[":
-		m.displayLines() // ensure sectionDisplayStart is populated
-		best := -1
-		for _, start := range m.sectionDisplayStart {
-			if start < m.scrollOff {
-				best = start
-			}
-		}
-		if best >= 0 {
-			m.scrollOff = best
-			m.clampScroll()
+		if len(m.sections) > 0 {
+			m.sectionCursor--
+			m.clampCursor()
+			m.scrollToCursor()
 		}
 		return nil
 	case "Z":
