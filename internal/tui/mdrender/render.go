@@ -130,6 +130,25 @@ func New(styleName string) *Renderer {
 // StyleName returns the chroma style id this renderer was constructed with.
 func (r *Renderer) StyleName() string { return r.styleName }
 
+// headingUnderline returns a synthetic underline display line for H1/H2
+// headings. H1 uses a heavy ━ rule spanning maxWidth; H2 uses a thin ─ rule
+// spanning min(headingWidth, maxWidth) in a muted color.
+func (r *Renderer) headingUnderline(level, headingWidth, maxWidth int) string {
+	if level == 1 {
+		color := styleH1.GetForeground()
+		return lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("━", maxWidth))
+	}
+	// H2: thin rule no wider than the heading text.
+	w := headingWidth
+	if w > maxWidth {
+		w = maxWidth
+	}
+	if w < 1 {
+		w = 1
+	}
+	return lipgloss.NewStyle().Foreground(colMuted).Render(strings.Repeat("─", w))
+}
+
 // RenderLines is the full-buffer pass: parse, wrap, style, and return the
 // post-wrap ANSI display lines for scroll mode. Result is cached by
 // (sha256(plan), styleName, width).
@@ -160,13 +179,17 @@ func (r *Renderer) RenderLines(plan string, width int) []string {
 		segments := wrapPlain(line, width)
 		if len(segments) == 0 {
 			out = append(out, r.StyleSegment("", ctx, false))
-			continue
+		} else {
+			col := 0
+			for j, seg := range segments {
+				styled := r.styleSegmentWithFence(seg, ctx, j > 0, col)
+				out = append(out, styled)
+				col += ansi.StringWidth(seg)
+			}
 		}
-		col := 0
-		for j, seg := range segments {
-			styled := r.styleSegmentWithFence(seg, ctx, j > 0, col)
-			out = append(out, styled)
-			col += ansi.StringWidth(seg)
+		// Inject underline decoration after H1/H2 heading lines.
+		if ctx.Kind == LineHeading && ctx.HeadingLevel <= 2 {
+			out = append(out, r.headingUnderline(ctx.HeadingLevel, ansi.StringWidth(line), width))
 		}
 	}
 

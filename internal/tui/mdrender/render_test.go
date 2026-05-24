@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/tui/mdrender/testutil"
 	"github.com/muesli/termenv"
 )
@@ -34,26 +35,99 @@ func TestRenderLines_HeadingsLevels1To6(t *testing.T) {
 	r := New("monokai")
 	plan := "# h1\n## h2\n### h3\n#### h4\n##### h5\n###### h6\n"
 	got := r.RenderLines(plan, 80)
-	if len(got) < 6 {
-		t.Fatalf("got %d display lines, want >= 6\n%v", len(got), got)
+	// H1 and H2 each get an underline line, so total ≥ 8 (6 headings + 2 underlines).
+	if len(got) < 8 {
+		t.Fatalf("got %d display lines, want >= 8\n%v", len(got), got)
 	}
-	// Each heading line must contain CSI styling and the plain text.
-	plainLines := []string{"# h1", "## h2", "### h3", "#### h4", "##### h5", "###### h6"}
-	for i, want := range plainLines {
-		line := got[i]
+	// H1 underline at got[1], H2 underline at got[3]; headings at got[0,2,4,5,6,7].
+	type headingCheck struct {
+		idx  int
+		want string
+	}
+	checks := []headingCheck{
+		{0, "# h1"},
+		{2, "## h2"},
+		{4, "### h3"},
+		{5, "#### h4"},
+		{6, "##### h5"},
+		{7, "###### h6"},
+	}
+	for _, c := range checks {
+		line := got[c.idx]
 		if !containsCSI(line) {
-			t.Errorf("line %d: missing ANSI styling: %q", i, line)
+			t.Errorf("got[%d]: missing ANSI styling: %q", c.idx, line)
 		}
-		if testutil.StripANSI(line) != want {
-			t.Errorf("line %d: stripped = %q, want %q", i, testutil.StripANSI(line), want)
+		if testutil.StripANSI(line) != c.want {
+			t.Errorf("got[%d]: stripped = %q, want %q", c.idx, testutil.StripANSI(line), c.want)
 		}
 	}
-	// Different heading levels should produce different SGR sequences.
-	if got[0] == got[1] {
+	// H1 underline: all ━ characters.
+	h1Under := testutil.StripANSI(got[1])
+	for _, ch := range h1Under {
+		if ch != '━' {
+			t.Errorf("H1 underline got[1] contains non-━ rune %q: %q", string(ch), h1Under)
+			break
+		}
+	}
+	// H2 underline: all ─ characters.
+	h2Under := testutil.StripANSI(got[3])
+	for _, ch := range h2Under {
+		if ch != '─' {
+			t.Errorf("H2 underline got[3] contains non-─ rune %q: %q", string(ch), h2Under)
+			break
+		}
+	}
+	// H1 and H2 heading lines should have distinct foregrounds (different levels).
+	if got[0] == got[2] {
 		t.Errorf("h1 and h2 styled identically; expected distinct foregrounds")
 	}
-	if got[2] == got[3] {
+	if got[4] == got[5] {
 		t.Errorf("h3 and h4 styled identically; expected distinct foregrounds")
+	}
+}
+
+func TestRenderLines_H1UnderlineDecoration(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("# Title\nbody\n", 80)
+	if len(got) < 3 {
+		t.Fatalf("got %d lines, want >= 3 (heading + underline + body)", len(got))
+	}
+	under := testutil.StripANSI(got[1])
+	if len(under) == 0 {
+		t.Fatal("H1 underline line is empty")
+	}
+	for _, ch := range under {
+		if ch != '━' {
+			t.Errorf("H1 underline contains non-━ rune %q: %q", string(ch), under)
+			break
+		}
+	}
+	if !containsCSI(got[1]) {
+		t.Errorf("H1 underline has no ANSI styling: %q", got[1])
+	}
+}
+
+func TestRenderLines_H2UnderlineDecoration(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("## Sub\nbody\n", 80)
+	if len(got) < 3 {
+		t.Fatalf("got %d lines, want >= 3 (heading + underline + body)", len(got))
+	}
+	under := testutil.StripANSI(got[1])
+	if len(under) == 0 {
+		t.Fatal("H2 underline line is empty")
+	}
+	for _, ch := range under {
+		if ch != '─' {
+			t.Errorf("H2 underline contains non-─ rune %q: %q", string(ch), under)
+			break
+		}
+	}
+	// H2 underline should not exceed the heading text width.
+	headingWidth := ansi.StringWidth("## Sub")
+	underWidth := ansi.StringWidth(under)
+	if underWidth > headingWidth {
+		t.Errorf("H2 underline width %d > heading width %d", underWidth, headingWidth)
 	}
 }
 
