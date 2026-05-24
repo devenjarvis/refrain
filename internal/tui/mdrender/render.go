@@ -358,7 +358,7 @@ func (r *Renderer) styleSegmentWithFence(segment string, parent LineCtx, isConti
 	case LineBlank:
 		return segment
 	default:
-		return styleInline(segment)
+		return styleParagraph.Render(styleInline(segment))
 	}
 }
 
@@ -613,6 +613,7 @@ var (
 	colBullet         = lipgloss.Color("#A78BFA")
 	colListNum        = lipgloss.Color("#A78BFA")
 	colCheckboxDone   = lipgloss.Color("#10B981") // success green
+	colParagraph      = lipgloss.Color("#D1D5DB") // softer white for prose
 
 	styleH1 = lipgloss.NewStyle().Foreground(colHeading1).Bold(true)
 	styleH2 = lipgloss.NewStyle().Foreground(colHeading2).Bold(true)
@@ -629,6 +630,9 @@ var (
 	styleHR         = lipgloss.NewStyle().Foreground(colHR)
 	styleBullet     = lipgloss.NewStyle().Foreground(colBullet).Bold(true)
 	styleListOrdNum = lipgloss.NewStyle().Foreground(colListNum).Bold(true)
+
+	// Paragraph prose: softer white to reduce glare for extended reading.
+	styleParagraph = lipgloss.NewStyle().Foreground(colParagraph)
 
 	// Fence-marker line ("```go", "```"): muted to keep attention on content.
 	styleFenceMarker = lipgloss.NewStyle().Foreground(colMuted)

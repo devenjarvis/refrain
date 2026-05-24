@@ -347,6 +347,22 @@ func TestStyleLine_FenceContentMultiSegmentColumnTracking(t *testing.T) {
 	}
 }
 
+func TestRenderLines_ParagraphTextIsStyled(t *testing.T) {
+	r := New("monokai")
+	got := r.RenderLines("plain paragraph\n", 80)
+	if len(got) == 0 {
+		t.Fatal("no output lines")
+	}
+	if !containsCSI(got[0]) {
+		t.Errorf("paragraph line has no ANSI styling: %q", got[0])
+	}
+	// Plain text without any inline spans should carry paragraph foreground color.
+	stripped := testutil.StripANSI(got[0])
+	if stripped != "plain paragraph" {
+		t.Errorf("stripped = %q, want %q", stripped, "plain paragraph")
+	}
+}
+
 func TestStyleInline_InlineCodeHasBackground(t *testing.T) {
 	r := New("monokai")
 	got := r.RenderLines("see `code` here\n", 80)
