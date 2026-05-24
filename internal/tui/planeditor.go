@@ -471,7 +471,6 @@ func (m *planEditorModel) Update(msg tea.Msg) tea.Cmd {
 	}
 }
 
-
 func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 	if m.drafting {
 		// Only esc/q work during drafting; everything else is a no-op so the
