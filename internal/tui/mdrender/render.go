@@ -178,18 +178,19 @@ func (r *Renderer) RenderLines(plan string, width int) []string {
 		if i < len(ctxs) {
 			ctx = ctxs[i]
 		}
-		// Fence lines get a │ bar prefix in scroll mode (2 chars wide), so
-		// wrap at width-2 to keep the total within the content measure.
-		isFenceLine := ctx.Kind == LineFenceContent || ctx.Kind == LineFenceOpen || ctx.Kind == LineFenceClose
+		// Content lines inside fenced blocks get a │ bar prefix (2 chars wide),
+		// so wrap at width-2 to keep the total within the content measure.
+		// Open and close fence markers (```go, ```) do not get the bar.
+		isFenceContent := ctx.Kind == LineFenceContent
 		wrapWidth := width
-		if isFenceLine && width > 2 {
+		if isFenceContent && width > 2 {
 			wrapWidth = width - 2
 		}
 		segments := wrapPlain(line, wrapWidth)
 		fenceBar := styleFenceBar.Render("│") + " "
 		if len(segments) == 0 {
 			styled := r.styleSegmentWithFence("", ctx, false, 0, wrapWidth)
-			if isFenceLine {
+			if isFenceContent {
 				styled = fenceBar + styled
 			}
 			out = append(out, styled)
@@ -197,7 +198,7 @@ func (r *Renderer) RenderLines(plan string, width int) []string {
 			col := 0
 			for j, seg := range segments {
 				styled := r.styleSegmentWithFence(seg, ctx, j > 0, col, wrapWidth)
-				if isFenceLine {
+				if isFenceContent {
 					styled = fenceBar + styled
 				}
 				out = append(out, styled)
@@ -334,10 +335,9 @@ func (r *Renderer) styleSegmentWithFence(
 		}
 		segWidth := ansi.StringWidth(segment)
 		styled := ansi.Cut(parent.fencedStyledLine, fenceCol, fenceCol+segWidth)
-		// chroma may not paint a background; the leading whitespace of an
-		// indented code line should still feel like code, but we keep it
-		// understated to avoid overpowering the plan body.
-		return styled
+		// Apply the code-block background tint so chroma-highlighted lines
+		// share the same subtle background as the plaintext fallback path.
+		return lipgloss.NewStyle().Background(colCodeBg).Render(styled)
 	case LineFenceOpen, LineFenceClose:
 		return styleFenceMarker.Render(segment)
 	case LineHeading:

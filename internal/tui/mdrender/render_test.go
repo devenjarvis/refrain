@@ -416,15 +416,23 @@ func TestRenderLines_FenceContentHasLeftBar(t *testing.T) {
 	if len(got) < 3 {
 		t.Fatalf("got %d lines, want >= 3", len(got))
 	}
-	// Fence content line must start with "│ ".
+	// Fence content line must start with "│ " and carry the background tint.
 	contentStripped := testutil.StripANSI(got[1])
 	if !strings.HasPrefix(contentStripped, "│ ") {
 		t.Errorf("fence content line[1] does not start with '│ ': %q", contentStripped)
 	}
-	// Fence open line must also have the bar.
+	if !strings.Contains(got[1], "48;2;") {
+		t.Errorf("fence content line[1] missing background-color SGR: %q", got[1])
+	}
+	// Fence open and close marker lines must NOT have the bar — they are
+	// delimiters, not code content, and the bar would be visual noise.
 	openStripped := testutil.StripANSI(got[0])
-	if !strings.HasPrefix(openStripped, "│ ") {
-		t.Errorf("fence open line[0] does not start with '│ ': %q", openStripped)
+	if strings.HasPrefix(openStripped, "│") {
+		t.Errorf("fence open line[0] unexpectedly has '│' prefix: %q", openStripped)
+	}
+	closeStripped := testutil.StripANSI(got[2])
+	if strings.HasPrefix(closeStripped, "│") {
+		t.Errorf("fence close line[2] unexpectedly has '│' prefix: %q", closeStripped)
 	}
 }
 
