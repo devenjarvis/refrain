@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/devenjarvis/refrain/internal/git"
@@ -94,6 +95,60 @@ func TestParsePlanTasks_NoTasksHeadingFallback(t *testing.T) {
 	tasks := ParsePlanTasks(plan)
 	if len(tasks) != 2 {
 		t.Fatalf("freeform plan: want 2 tasks, got %d", len(tasks))
+	}
+}
+
+// TestParsePlanTasks_WithSubBullets verifies that sub-bullet lines following
+// each checkbox are collected into Body, and the checkbox line itself is not
+// included in Body.
+func TestParsePlanTasks_WithSubBullets(t *testing.T) {
+	plan := `# Goal
+Test sub-bullets.
+
+## Tasks
+- [ ] First task
+  - Files: internal/agent/session.go
+  - Implement: add the field
+- [ ] Second task
+  - Test first: write TestFoo
+  - Implement: do the thing
+  - Verify: go test ./...
+
+## Not in scope
+Nothing.
+`
+	tasks := ParsePlanTasks(plan)
+	if len(tasks) != 2 {
+		t.Fatalf("want 2 tasks, got %d", len(tasks))
+	}
+
+	if tasks[0].Body == "" {
+		t.Error("tasks[0].Body is empty, want sub-bullet content")
+	}
+	if !strings.Contains(tasks[0].Body, "Files: internal/agent/session.go") {
+		t.Errorf("tasks[0].Body missing Files line, got: %q", tasks[0].Body)
+	}
+	if !strings.Contains(tasks[0].Body, "Implement: add the field") {
+		t.Errorf("tasks[0].Body missing Implement line, got: %q", tasks[0].Body)
+	}
+	if strings.Contains(tasks[0].Body, "- [ ]") || strings.Contains(tasks[0].Body, "First task") {
+		t.Errorf("tasks[0].Body must not include the checkbox line, got: %q", tasks[0].Body)
+	}
+
+	if tasks[1].Body == "" {
+		t.Error("tasks[1].Body is empty, want sub-bullet content")
+	}
+	if !strings.Contains(tasks[1].Body, "Test first: write TestFoo") {
+		t.Errorf("tasks[1].Body missing Test first line, got: %q", tasks[1].Body)
+	}
+	if !strings.Contains(tasks[1].Body, "Implement: do the thing") {
+		t.Errorf("tasks[1].Body missing Implement line, got: %q", tasks[1].Body)
+	}
+	if !strings.Contains(tasks[1].Body, "Verify: go test ./...") {
+		t.Errorf("tasks[1].Body missing Verify line, got: %q", tasks[1].Body)
+	}
+	if strings.Contains(tasks[1].Body, "- [ ]") || strings.Contains(tasks[1].Body, "Second task") {
+		t.Errorf("tasks[1].Body must not include the checkbox line, got: %q", tasks[1].Body)
 	}
 }
 
