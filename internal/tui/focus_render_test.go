@@ -1180,7 +1180,7 @@ func TestRenderFocusSessionCard_StaleTodosLineLine3UsesPlan(t *testing.T) {
 
 // TestHeaderOmitsCrossRepoSummary verifies that renderFullscreenFocus never
 // emits a "repo: " label or a "|" cross-repo separator on the header line,
-// even when activeRepoName is set and multiple repo items are present.
+// even when multiple repo items are present in d.items.
 func TestHeaderOmitsCrossRepoSummary(t *testing.T) {
 	sessA := agent.NewSessionForTest("s-a", "add-dark-mode")
 	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
