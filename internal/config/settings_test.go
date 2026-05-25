@@ -462,7 +462,7 @@ func TestResolve_WellnessGlobalOverride(t *testing.T) {
 	minutes := 60
 	maxSessions := 5
 	g := &config.GlobalSettings{
-		FocusSessionMinutes:  &minutes,
+		FocusSessionMinutes:   &minutes,
 		MaxConcurrentSessions: &maxSessions,
 	}
 	r := config.Resolve(g, nil)

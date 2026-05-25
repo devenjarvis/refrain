@@ -189,7 +189,7 @@ type App struct {
 	wellness wellnessState
 
 	sessionLimitModalActive bool
-	cursor                FocusedCursor // pipeline cursor: section + per-section indices
+	cursor                  FocusedCursor // pipeline cursor: section + per-section indices
 	// modals owns panel focus and the lifetime of every overlay model. The
 	// invariant "the model for panelFocus X is non-nil iff modals.Current() == X"
 	// is enforced by the Modals type; see internal/tui/modals.go. App callers
