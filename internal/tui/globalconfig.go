@@ -11,7 +11,7 @@ import (
 const (
 	fieldFocusSession = "Focus Session (min)"
 	fieldFocusBreak   = "Break (min)"
-	fieldMaxAgents    = "Max Concurrent Agents"
+	fieldMaxSessions  = "Max Concurrent Sessions"
 	fieldMaxReview    = "Max Review Backlog"
 )
 
@@ -81,9 +81,9 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 	if gs.FocusBreakMinutes != nil {
 		focusBreakMinutes = strconv.Itoa(*gs.FocusBreakMinutes)
 	}
-	maxConcurrentAgents := ""
-	if gs.MaxConcurrentAgents != nil {
-		maxConcurrentAgents = strconv.Itoa(*gs.MaxConcurrentAgents)
+	maxConcurrentSessions := ""
+	if gs.MaxConcurrentSessions != nil {
+		maxConcurrentSessions = strconv.Itoa(*gs.MaxConcurrentSessions)
 	}
 	maxReviewBacklog := ""
 	if gs.MaxReviewBacklog != nil {
@@ -104,7 +104,7 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 	fields = addTextInput(fields, "Sidebar Width", sidebarWidth, strconv.Itoa(config.DefaultSidebarWidth), inputWidth)
 	fields = addTextInput(fields, fieldFocusSession, focusSessionMinutes, strconv.Itoa(config.DefaultFocusSessionMinutes), inputWidth)
 	fields = addTextInput(fields, fieldFocusBreak, focusBreakMinutes, strconv.Itoa(config.DefaultFocusBreakMinutes), inputWidth)
-	fields = addTextInput(fields, fieldMaxAgents, maxConcurrentAgents, strconv.Itoa(config.DefaultMaxConcurrentAgents), inputWidth)
+	fields = addTextInput(fields, fieldMaxSessions, maxConcurrentSessions, strconv.Itoa(config.DefaultMaxConcurrentSessions), inputWidth)
 	fields = addTextInput(fields, fieldMaxReview, maxReviewBacklog, strconv.Itoa(config.DefaultMaxReviewBacklog), inputWidth)
 
 	return globalConfigModel{
@@ -196,9 +196,9 @@ func (m globalConfigModel) extractSettings() *config.GlobalSettings {
 			s.FocusBreakMinutes = &n
 		}
 	}
-	if v := m.form.textValue(fieldMaxAgents); v != "" {
+	if v := m.form.textValue(fieldMaxSessions); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			s.MaxConcurrentAgents = &n
+			s.MaxConcurrentSessions = &n
 		}
 	}
 	if v := m.form.textValue(fieldMaxReview); v != "" {

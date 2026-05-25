@@ -25,7 +25,7 @@ func TestResolve_DefaultsProperty(t *testing.T) {
 		{"MergeMethod", r.MergeMethod, config.DefaultMergeMethod},
 		{"FocusSessionMinutes", r.FocusSessionMinutes, config.DefaultFocusSessionMinutes},
 		{"FocusBreakMinutes", r.FocusBreakMinutes, config.DefaultFocusBreakMinutes},
-		{"MaxConcurrentAgents", r.MaxConcurrentAgents, config.DefaultMaxConcurrentAgents},
+		{"MaxConcurrentSessions", r.MaxConcurrentSessions, config.DefaultMaxConcurrentSessions},
 		{"MaxReviewBacklog", r.MaxReviewBacklog, config.DefaultMaxReviewBacklog},
 		{"PlanFirstEnabled", r.PlanFirstEnabled, config.DefaultPlanFirstEnabled},
 		{"PRDraftByDefault", r.PRDraftByDefault, config.DefaultPRDraftByDefault},

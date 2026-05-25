@@ -63,9 +63,9 @@ func genGlobalSettings(t *rapid.T) *config.GlobalSettings {
 		v := rapid.IntRange(-5, 60).Draw(t, "g_focus_break_val")
 		g.FocusBreakMinutes = &v
 	}
-	if rapid.Bool().Draw(t, "g_max_agents") {
-		v := rapid.IntRange(-5, 20).Draw(t, "g_max_agents_val")
-		g.MaxConcurrentAgents = &v
+	if rapid.Bool().Draw(t, "g_max_sessions") {
+		v := rapid.IntRange(-5, 20).Draw(t, "g_max_sessions_val")
+		g.MaxConcurrentSessions = &v
 	}
 	if rapid.Bool().Draw(t, "g_max_review") {
 		v := rapid.IntRange(-5, 20).Draw(t, "g_max_review_val")

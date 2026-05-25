@@ -377,11 +377,11 @@ func (m repoPickerModel) renderDetails(width int) string {
 
 	repo := m.repos[idx]
 	count := m.counts[repo.Path]
-	countLabel := "no agents running"
+	countLabel := "no active sessions"
 	if count == 1 {
-		countLabel = "1 agent running"
+		countLabel = "1 active session"
 	} else if count > 1 {
-		countLabel = fmt.Sprintf("%d agents running", count)
+		countLabel = fmt.Sprintf("%d active sessions", count)
 	}
 
 	lines = append(lines, StyleTitle.Render(repo.DisplayName()))

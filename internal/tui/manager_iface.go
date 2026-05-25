@@ -19,6 +19,7 @@ import (
 type SessionManager interface {
 	// Lifecycle / lookup
 	AgentCount() int
+	ActiveSessionCount() int
 	RepoPath() string
 	ListSessions() []*agent.Session
 	GetSession(id string) *agent.Session

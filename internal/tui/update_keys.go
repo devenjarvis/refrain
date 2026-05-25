@@ -54,8 +54,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Agent-limit modal: any key other than 'n' dismisses without navigating.
 		// 'n' falls through to the normal handler, which sees the flag still set
 		// and proceeds with spawn (the existing two-press guard logic below).
-		if a.agentLimitModalActive && msg.String() != "n" {
-			a.agentLimitModalActive = false
+		if a.sessionLimitModalActive && msg.String() != "n" {
+			a.sessionLimitModalActive = false
 			return a, nil
 		}
 
@@ -432,13 +432,13 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 
 		// Soft agent-count guidance.
 		resolved := a.resolvedCache[repoPath]
-		if resolved.MaxConcurrentAgents > 0 && a.activeAgentCount() >= resolved.MaxConcurrentAgents {
-			if !a.agentLimitModalActive {
-				a.agentLimitModalActive = true
+		if resolved.MaxConcurrentSessions > 0 && a.activeSessionCount() >= resolved.MaxConcurrentSessions {
+			if !a.sessionLimitModalActive {
+				a.sessionLimitModalActive = true
 				return a, nil, true
 			}
 			// Second press: proceed, clear modal flag.
-			a.agentLimitModalActive = false
+			a.sessionLimitModalActive = false
 		}
 
 		// Soft review-backlog limit.
@@ -682,7 +682,7 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		counts := make(map[string]int, len(a.cfg.Repos))
 		for _, repo := range a.cfg.Repos {
 			if mgr := a.managers[repo.Path]; mgr != nil {
-				counts[repo.Path] = mgr.AgentCount()
+				counts[repo.Path] = mgr.ActiveSessionCount()
 			}
 		}
 		a.repoPicker = newRepoPickerModel()
@@ -1082,17 +1082,17 @@ func (a App) handlePipelineKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			// Apply the same soft agent-count guard as the single-repo
 			// path before opening the picker.
 			resolved := a.resolvedCache[a.activeRepo]
-			if resolved.MaxConcurrentAgents > 0 && a.activeAgentCount() >= resolved.MaxConcurrentAgents {
-				if !a.agentLimitModalActive {
-					a.agentLimitModalActive = true
+			if resolved.MaxConcurrentSessions > 0 && a.activeSessionCount() >= resolved.MaxConcurrentSessions {
+				if !a.sessionLimitModalActive {
+					a.sessionLimitModalActive = true
 					return a, nil, true
 				}
-				a.agentLimitModalActive = false
+				a.sessionLimitModalActive = false
 			}
 			counts := make(map[string]int, len(a.cfg.Repos))
 			for _, repo := range a.cfg.Repos {
 				if mgr := a.managers[repo.Path]; mgr != nil {
-					counts[repo.Path] = mgr.AgentCount()
+					counts[repo.Path] = mgr.ActiveSessionCount()
 				}
 			}
 			a.repoPicker = newRepoPickerModel()

@@ -612,11 +612,6 @@ func (a *App) mergePRCmdWithMode(sessionID, repoPath string, force bool) tea.Cmd
 	}
 }
 
-// activeAgentCount returns the count of live non-shell agents across all repos.
-// Used to enforce the soft concurrent-agent limit in focus mode. Defers to
-// Manager.AgentCount, which already excludes shells and exited (Done/Error)
-// agents — keeping the "live" definition in one place so all three call sites
-// (quit guard, soft cap, repo-picker counts) can't drift apart.
 func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionShipping bool) tea.Cmd {
 	if sess == nil || sess.Worktree == nil {
 		return func() tea.Msg {

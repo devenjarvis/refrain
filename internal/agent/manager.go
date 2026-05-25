@@ -563,7 +563,7 @@ func (m *Manager) PlannerQuestions() <-chan PlannerQuestion { return m.plannerQu
 // m.watchers so Shutdown drains cleanly; cancellation occurs when m.done
 // closes (manager shutdown), KillSession is called, or CancelDraft is
 // called directly. Drafting subprocesses are NOT counted against
-// MaxConcurrentAgents — they are transient text-generation calls, not
+// MaxConcurrentSessions — they are transient text-generation calls, not
 // long-lived agents.
 //
 // StartDraft also spawns a per-session planner.Server bound to a unix socket
@@ -1565,15 +1565,37 @@ func (m *Manager) stopHookServer() {
 }
 
 // AgentCount returns the total number of live, non-shell agents across all
-// sessions. Shells and naturally-exited (Done/Error) agents are excluded so
-// callers using this for capacity checks (the quit warning, soft concurrency
-// limits) don't count work that's already finished.
+// sessions. Shells and naturally-exited (Done/Error) agents are excluded.
+// Used by the quit guard and repo-remove guard where the concern is running
+// processes, not human oversight load.
 func (m *Manager) AgentCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	count := 0
 	for _, s := range m.sessions {
 		count += s.LiveAgentCount()
+	}
+	return count
+}
+
+// ActiveSessionCount returns the number of sessions requiring human oversight.
+// Shipping and Complete sessions are excluded (parked on CI/reviews or done),
+// as are sessions with no live agents. This is the denominator for the soft
+// concurrency warning: the BCG "3-agent ceiling" is about concurrent tasks
+// requiring attention, not subprocess count.
+func (m *Manager) ActiveSessionCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	count := 0
+	for _, s := range m.sessions {
+		switch s.LifecyclePhase() {
+		case LifecycleShipping, LifecycleComplete:
+			continue
+		}
+		if s.LiveAgentCount() == 0 {
+			continue
+		}
+		count++
 	}
 	return count
 }

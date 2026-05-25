@@ -36,7 +36,7 @@ const (
 	// Wellness defaults.
 	DefaultFocusSessionMinutes = 90
 	DefaultFocusBreakMinutes   = 15
-	DefaultMaxConcurrentAgents = 3
+	DefaultMaxConcurrentSessions = 3
 	DefaultMaxReviewBacklog    = 5
 
 	// DefaultBranchNamePrompt is the instruction sent to Haiku to summarize
@@ -133,7 +133,7 @@ type GlobalSettings struct {
 	// Wellness settings — global preferences, not per-repo.
 	FocusSessionMinutes *int `json:"focus_session_minutes,omitempty"`
 	FocusBreakMinutes   *int `json:"focus_break_minutes,omitempty"`
-	MaxConcurrentAgents *int `json:"max_concurrent_agents,omitempty"`
+	MaxConcurrentSessions *int `json:"max_concurrent_sessions,omitempty"`
 	MaxReviewBacklog    *int `json:"max_review_backlog,omitempty"`
 
 	// ReviewerModel overrides the model used for per-task review subprocesses.
@@ -202,7 +202,7 @@ type ResolvedSettings struct {
 	// Wellness settings.
 	FocusSessionMinutes int
 	FocusBreakMinutes   int
-	MaxConcurrentAgents int
+	MaxConcurrentSessions int
 	MaxReviewBacklog    int
 
 	// Plan-first planning.
@@ -237,7 +237,7 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		SidebarWidth:        DefaultSidebarWidth,
 		FocusSessionMinutes: DefaultFocusSessionMinutes,
 		FocusBreakMinutes:   DefaultFocusBreakMinutes,
-		MaxConcurrentAgents: DefaultMaxConcurrentAgents,
+		MaxConcurrentSessions: DefaultMaxConcurrentSessions,
 		MaxReviewBacklog:    DefaultMaxReviewBacklog,
 		PlanFirstEnabled:    DefaultPlanFirstEnabled,
 		BuildFromPlanPrompt: DefaultBuildFromPlanPrompt,
@@ -287,8 +287,8 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		if global.FocusBreakMinutes != nil {
 			r.FocusBreakMinutes = *global.FocusBreakMinutes
 		}
-		if global.MaxConcurrentAgents != nil {
-			r.MaxConcurrentAgents = *global.MaxConcurrentAgents
+		if global.MaxConcurrentSessions != nil {
+			r.MaxConcurrentSessions = *global.MaxConcurrentSessions
 		}
 		if global.MaxReviewBacklog != nil {
 			r.MaxReviewBacklog = *global.MaxReviewBacklog
