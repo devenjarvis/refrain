@@ -183,6 +183,20 @@ func (m *prComposeModal) updateEdit(msg tea.Msg) tea.Cmd {
 		m.bodyArea.Blur()
 		m.mode = prComposeModeScroll
 		return nil
+	case "ctrl+enter":
+		title := strings.TrimSpace(m.titleInput.Value())
+		if title == "" {
+			return nil
+		}
+		body := strings.TrimSpace(m.bodyArea.Value())
+		draft := m.draft
+		m.Close()
+		return func() tea.Msg {
+			return prComposeSubmitMsg{title: title, body: body, draft: draft}
+		}
+	case "ctrl+d":
+		m.draft = !m.draft
+		return nil
 	case "tab", "shift+tab":
 		if m.focused == 0 {
 			m.focused = 1

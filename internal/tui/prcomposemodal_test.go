@@ -232,6 +232,35 @@ func TestPRCompose_CtrlD_TogglesDraft(t *testing.T) {
 	}
 }
 
+// --- Task 4: submit, cancel, draft toggle across modes ---
+
+func TestPRCompose_CtrlEnterInEditMode_Submits(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.Update(keyRune('i')) // enter edit mode
+	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("expected submit cmd from ctrl+enter in edit mode")
+	}
+	if _, ok := cmd().(prComposeSubmitMsg); !ok {
+		t.Fatalf("got %T, want prComposeSubmitMsg", cmd())
+	}
+	if m.Active() {
+		t.Error("modal should close on submit from edit mode")
+	}
+}
+
+func TestPRCompose_CtrlD_TogglesDraftInEditMode(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.Update(keyRune('i')) // enter edit mode
+	if !m.draft {
+		t.Fatal("prereq: draft should be true")
+	}
+	m.Update(keyCtrlRune('d'))
+	if m.draft {
+		t.Error("ctrl+d in edit mode did not toggle draft off")
+	}
+}
+
 func TestPRCompose_PrintableKey_AppendsToTitleInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i')) // enter edit mode (title focused)
