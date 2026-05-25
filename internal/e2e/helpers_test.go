@@ -191,6 +191,162 @@ func newScrimSession(t *testing.T, scenarios ...scenarioFile) *Session {
 	return s
 }
 
+// newPlanningSession creates an isolated test environment with
+// plan_first_enabled=true. It also creates a "claude" wrapper script on PATH
+// that fixes scrim's `-p` flag handling: when the planner subprocess calls
+// `claude -p --model ...` with the prompt on stdin, the wrapper reads stdin
+// and passes it as the -p value to the real scrim binary.
+func newPlanningSession(t *testing.T, scenarios ...scenarioFile) *Session {
+	t.Helper()
+
+	suffix := randomSuffix()
+	name := sanitizeName(t.Name()) + "-" + suffix
+
+	tempDir := t.TempDir()
+	home := filepath.Join(tempDir, "home")
+	repoDir := filepath.Join(tempDir, "e2erepo-"+suffix)
+
+	for _, d := range []string{
+		home,
+		filepath.Join(home, ".refrain"),
+		repoDir,
+		filepath.Join(repoDir, ".refrain"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("e2e: mkdir %s: %v", d, err)
+		}
+	}
+
+	writeFile(
+		t, filepath.Join(home, ".gitconfig"),
+		"[user]\n\tname = e2e-test\n\temail = e2e@test.local\n[init]\n\tdefaultBranch = main\n",
+	)
+
+	// Create a wrapper script that the planner subprocess finds via PATH.
+	// The planner calls `claude -p --model ...` with the prompt on stdin.
+	// Scrim's flag parser treats `-p` as a StringVar, so `-p --model` sets
+	// prompt="--model" (wrong). This wrapper detects the case and reads
+	// stdin into the -p value before delegating to the real scrim binary.
+	// The wrapper also sets SCRIM_SCENARIOS_DIR and forwards stdin for the
+	// interactive (non -p) case.
+	wrapperDir := filepath.Join(tempDir, "wrapper")
+	if err := os.MkdirAll(wrapperDir, 0o755); err != nil {
+		t.Fatalf("e2e: mkdir wrapper: %v", err)
+	}
+	// The real scrim binary lives next to the wrapper under a different name
+	// so the wrapper can exec it without recursing.
+	realScrimPath := filepath.Join(wrapperDir, "scrim-real")
+	if err := copyFile(scrimBin, realScrimPath); err != nil {
+		t.Fatalf("e2e: copying scrim binary: %v", err)
+	}
+	if err := os.Chmod(realScrimPath, 0o755); err != nil {
+		t.Fatalf("e2e: chmod scrim-real: %v", err)
+	}
+
+	scenariosDir := filepath.Join(tempDir, "scenarios")
+	if err := os.MkdirAll(scenariosDir, 0o755); err != nil {
+		t.Fatalf("e2e: mkdir scenarios: %v", err)
+	}
+
+	wrapperScript := `#!/bin/bash
+# Claude wrapper that fixes compatibility between refrain's planner and scrim.
+#
+# Two issues:
+# 1. The planner passes -p as a standalone flag (stdin mode) but scrim's
+#    flag parser treats -p as a StringVar that eats the next arg as its value.
+# 2. The planner passes --exclude-dynamic-system-prompt-sections as a boolean
+#    flag, but scrim registers it as a StringVar (expects a value).
+#
+# This wrapper rewrites the args before delegating to the real scrim binary.
+export SCRIM_SCENARIOS_DIR="` + scenariosDir + `"
+ARGS=()
+HAS_P=false
+P_FIXED=false
+for arg in "$@"; do
+  if [ "$HAS_P" = true ] && [ "$P_FIXED" = false ]; then
+    case "$arg" in
+      -*)
+        PROMPT=$(cat)
+        ARGS+=("-p" "$PROMPT" "$arg")
+        P_FIXED=true
+        HAS_P=false
+        continue
+        ;;
+      *)
+        ARGS+=("-p" "$arg")
+        P_FIXED=true
+        HAS_P=false
+        continue
+        ;;
+    esac
+  fi
+  if [ "$arg" = "-p" ]; then
+    HAS_P=true
+  elif [ "$arg" = "--exclude-dynamic-system-prompt-sections" ]; then
+    : # strip: scrim registers this as StringVar but planner sends it as bool
+  else
+    ARGS+=("$arg")
+  fi
+done
+if [ "$HAS_P" = true ] && [ "$P_FIXED" = false ]; then
+  PROMPT=$(cat)
+  ARGS+=("-p" "$PROMPT")
+fi
+exec "` + realScrimPath + `" "${ARGS[@]}"
+`
+	wrapperPath := filepath.Join(wrapperDir, "claude")
+	writeFile(t, wrapperPath, wrapperScript)
+	if err := os.Chmod(wrapperPath, 0o755); err != nil {
+		t.Fatalf("e2e: chmod wrapper: %v", err)
+	}
+
+	cfg := map[string]any{
+		"agent_program":      wrapperPath,
+		"bypass_permissions": false,
+		"plan_first_enabled": true,
+	}
+	writeJSON(t, filepath.Join(home, ".refrain", "config.json"), cfg)
+	writeJSON(t, filepath.Join(repoDir, ".refrain", "config.json"), cfg)
+
+	runGit(t, repoDir, home, "init")
+	runGit(t, repoDir, home, "config", "user.name", "Test")
+	runGit(t, repoDir, home, "config", "user.email", "test@test.com")
+	writeFile(t, filepath.Join(repoDir, "README.md"), "# test repo\n")
+	runGit(t, repoDir, home, "add", ".")
+	runGit(t, repoDir, home, "commit", "-m", "initial commit")
+
+	if len(scenarios) == 0 {
+		scenarios = []scenarioFile{defaultScenario}
+	}
+	for _, sc := range scenarios {
+		writeFile(t, filepath.Join(scenariosDir, sc.name), sc.content)
+	}
+
+	s := &Session{
+		t:       t,
+		name:    name,
+		tempDir: tempDir,
+		home:    home,
+		repoDir: repoDir,
+		extraEnv: []string{
+			"SCRIM_SCENARIOS_DIR=" + scenariosDir,
+			"PATH=" + wrapperDir + ":" + filepath.Dir(scrimBin) + ":" + os.Getenv("PATH"),
+		},
+	}
+
+	t.Cleanup(func() { s.Kill() })
+	return s
+}
+
+// copyFile copies src to dst, creating dst with mode 0644.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644)
+}
+
 // Start launches refrain inside a tu virtual terminal session.
 func (s *Session) Start() {
 	s.t.Helper()
