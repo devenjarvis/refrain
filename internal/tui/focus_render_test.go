@@ -1178,6 +1178,41 @@ func TestRenderFocusSessionCard_StaleTodosLineLine3UsesPlan(t *testing.T) {
 	}
 }
 
+// TestHeaderOmitsCrossRepoSummary verifies that renderFullscreenFocus never
+// emits a "repo: " label or a "|" cross-repo separator on the header line,
+// even when multiple repo items are present in d.items.
+func TestHeaderOmitsCrossRepoSummary(t *testing.T) {
+	sessA := agent.NewSessionForTest("s-a", "add-dark-mode")
+	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
+	sessB := agent.NewSessionForTest("s-b", "fix-login")
+	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
+
+	d := newDashboardModel()
+	d.width = 120
+	d.height = 39
+	d.items = []listItem{
+		{kind: listItemRepo, repoPath: "/a", repoName: "repoA"},
+		{kind: listItemSession, repoPath: "/a", repoName: "repoA", session: sessA},
+		{kind: listItemRepo, repoPath: "/b", repoName: "repoB"},
+		{kind: listItemSession, repoPath: "/b", repoName: "repoB", session: sessB},
+	}
+
+	out := d.renderFullscreenFocus(120, 39)
+
+	lines := strings.Split(out, "\n")
+	if len(lines) == 0 {
+		t.Fatal("expected non-empty output")
+	}
+	headerLine := ansi.Strip(lines[0])
+
+	if strings.Contains(headerLine, "repo: ") {
+		t.Errorf("header must not contain \"repo: \", got %q", headerLine)
+	}
+	if strings.Contains(headerLine, " | ") {
+		t.Errorf("header must not contain cross-repo separator \" | \", got %q", headerLine)
+	}
+}
+
 // TestSessionFocusStatus_BuildingProgressCombinesPlanAndCommits verifies that
 // the building card badge uses max(planDone, commitDone) / max(planTotal, commitMax).
 func TestSessionFocusStatus_BuildingProgressCombinesPlanAndCommits(t *testing.T) {
