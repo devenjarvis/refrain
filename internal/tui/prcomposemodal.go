@@ -218,15 +218,38 @@ func (m *prComposeModal) updateEdit(msg tea.Msg) tea.Cmd {
 }
 
 // View renders the full-page PR compose. Only call when Active() is true.
-// Scroll mode shows rendered body text; edit mode (added in a later task)
-// shows the interactive input fields.
 func (m *prComposeModal) View() string {
 	var lines []string
 	lines = append(lines, m.renderHeader())
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, m.width-2))))
-	lines = append(lines, m.renderScrollBody())
+	switch m.mode {
+	case prComposeModeEdit:
+		lines = append(lines, m.renderEditBody())
+	default:
+		lines = append(lines, m.renderScrollBody())
+	}
 	lines = append(lines, m.renderFooter())
 	return strings.Join(lines, "\n")
+}
+
+func (m *prComposeModal) renderEditBody() string {
+	pad := strings.Repeat(" ", m.displayLeftPad())
+
+	titleLabel := StyleSubtle.Render("Title")
+	bodyLabel := StyleSubtle.Render("Body")
+	if m.focused == 0 {
+		titleLabel = StyleTitle.Render("Title")
+	} else {
+		bodyLabel = StyleTitle.Render("Body")
+	}
+
+	return strings.Join([]string{
+		pad + titleLabel,
+		m.titleInput.View(),
+		"",
+		pad + bodyLabel,
+		m.bodyArea.View(),
+	}, "\n")
 }
 
 func (m *prComposeModal) renderScrollBody() string {
@@ -270,11 +293,20 @@ func (m *prComposeModal) renderScrollBody() string {
 
 func (m *prComposeModal) renderFooter() string {
 	divider := StyleSubtle.Render(strings.Repeat("─", max(1, m.width-2)))
-	hints := StyleActive.Render("j/k") + StyleSubtle.Render(" scroll  ") +
-		StyleActive.Render("i") + StyleSubtle.Render(" edit  ") +
-		StyleActive.Render("ctrl+↵") + StyleSubtle.Render(" create  ") +
-		StyleActive.Render("ctrl+d") + StyleSubtle.Render(" toggle draft  ") +
-		StyleActive.Render("esc") + StyleSubtle.Render(" cancel")
+	var hints string
+	switch m.mode {
+	case prComposeModeEdit:
+		hints = StyleActive.Render("tab") + StyleSubtle.Render(" switch  ") +
+			StyleActive.Render("ctrl+↵") + StyleSubtle.Render(" create  ") +
+			StyleActive.Render("ctrl+d") + StyleSubtle.Render(" toggle draft  ") +
+			StyleActive.Render("esc") + StyleSubtle.Render(" back")
+	default:
+		hints = StyleActive.Render("j/k") + StyleSubtle.Render(" scroll  ") +
+			StyleActive.Render("i") + StyleSubtle.Render(" edit  ") +
+			StyleActive.Render("ctrl+↵") + StyleSubtle.Render(" create  ") +
+			StyleActive.Render("ctrl+d") + StyleSubtle.Render(" toggle draft  ") +
+			StyleActive.Render("esc") + StyleSubtle.Render(" cancel")
+	}
 	return divider + "\n" + hints
 }
 

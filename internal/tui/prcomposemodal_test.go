@@ -232,6 +232,20 @@ func TestPRCompose_CtrlD_TogglesDraft(t *testing.T) {
 	}
 }
 
+// --- Task 5: edit-mode View ---
+
+func TestPRCompose_ViewEditMode_ContainsHeaderAndTitle(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.Update(keyRune('i')) // enter edit mode
+	v := m.View()
+	if !strings.Contains(v, "PR DRAFT") {
+		t.Errorf("edit view missing 'PR DRAFT', got: %q", v)
+	}
+	if !strings.Contains(v, "Initial title") {
+		t.Errorf("edit view missing title value, got: %q", v)
+	}
+}
+
 // --- Task 4: submit, cancel, draft toggle across modes ---
 
 func TestPRCompose_CtrlEnterInEditMode_Submits(t *testing.T) {
