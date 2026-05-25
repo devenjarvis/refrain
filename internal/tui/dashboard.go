@@ -1550,56 +1550,6 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		timerStr = barModel.ViewAs(pct) + " " + fmt.Sprintf("%dm/%dm", elapsedMin, d.focusSessionMinutes)
 	}
 	headerLine := title + "  " + timerStr
-	if d.activeRepoName != "" {
-		headerLine += "  " + StyleSubtle.Render("repo: "+d.activeRepoName)
-	}
-	// Cross-repo summary: collect repo names and per-repo agent status counts.
-	type repoStat struct {
-		name    string
-		path    string
-		active  int
-		waiting int
-	}
-	var repoOrder []string
-	repoStats := make(map[string]*repoStat)
-	for _, item := range d.items {
-		if item.kind == listItemRepo {
-			if _, ok := repoStats[item.repoPath]; !ok {
-				repoOrder = append(repoOrder, item.repoPath)
-				repoStats[item.repoPath] = &repoStat{name: item.repoName, path: item.repoPath}
-			}
-		} else if item.kind == listItemAgent && item.agent != nil && !item.agent.IsShell {
-			if rs, ok := repoStats[item.repoPath]; ok {
-				switch item.agent.Status() {
-				case agent.StatusActive:
-					rs.active++
-				case agent.StatusWaiting:
-					rs.waiting++
-				}
-			}
-		}
-	}
-	if len(repoOrder) > 1 {
-		var parts []string
-		for _, path := range repoOrder {
-			rs := repoStats[path]
-			var sym string
-			if rs.active > 0 {
-				sym = fmt.Sprintf("%d●", rs.active)
-			} else if rs.waiting > 0 {
-				sym = fmt.Sprintf("%d⏸", rs.waiting)
-			} else {
-				sym = "0"
-			}
-			entry := rs.name + "(" + sym + ")"
-			if path == d.activeRepoPath {
-				parts = append(parts, StyleActive.Render(entry))
-			} else {
-				parts = append(parts, StyleSubtle.Render(entry))
-			}
-		}
-		headerLine += "  " + strings.Join(parts, StyleSubtle.Render(" | "))
-	}
 	lines = append(lines, headerLine)
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
 
