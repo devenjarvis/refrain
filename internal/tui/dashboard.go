@@ -505,17 +505,11 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 	if idleAskingCount > 0 {
 		return lipgloss.NewStyle().Foreground(ColorWarning).Render(fmt.Sprintf("? %d idle — may need input", idleAskingCount))
 	}
-	if sess.IsReviewable() && sess.DoneAt().IsZero() && activeCount == 0 {
-		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ idle — press m to review")
-	}
-	if !sess.DoneAt().IsZero() {
-		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ finished — awaiting prompt")
-	}
+	// Progress bar takes priority over the idle/reviewable badge so it
+	// stays visible while the agent pauses between tasks. Once all tasks
+	// are complete (done == total), fall through to the review badge.
 	if sess.LifecyclePhase() == agent.LifecycleInProgress {
 		const barWidth = 20
-		// Combine plan-checkbox counts with [task N] commit counts so the bar
-		// advances even when Claude omits a checkbox toggle. Use max(planDone,
-		// commitDone) / max(planTotal, commitMax) and clamp done ≤ total.
 		var planTotal, planDone int
 		if plan, present := sess.CachedPlan(); present {
 			planTotal, planDone = planTaskCounts(plan)
@@ -526,22 +520,32 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 		if done > total {
 			done = total
 		}
-		if total > 0 {
+		if total > 0 && done < total {
 			return renderCardProgressBar(done, total, barWidth, ColorPrimary)
 		}
-		if ag := sess.PrimaryAgent(); ag != nil {
-			todos := ag.Todos()
-			if len(todos) > 0 {
-				todoTotal := len(todos)
-				todoDone := 0
-				for _, t := range todos {
-					if t.Status == "completed" {
-						todoDone++
+		if total == 0 {
+			if ag := sess.PrimaryAgent(); ag != nil {
+				todos := ag.Todos()
+				if len(todos) > 0 {
+					todoTotal := len(todos)
+					todoDone := 0
+					for _, t := range todos {
+						if t.Status == "completed" {
+							todoDone++
+						}
+					}
+					if todoDone < todoTotal {
+						return renderCardProgressBar(todoDone, todoTotal, barWidth, ColorPrimary)
 					}
 				}
-				return renderCardProgressBar(todoDone, todoTotal, barWidth, ColorPrimary)
 			}
 		}
+	}
+	if sess.IsReviewable() && sess.DoneAt().IsZero() && activeCount == 0 {
+		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ idle — press m to review")
+	}
+	if !sess.DoneAt().IsZero() {
+		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ finished — awaiting prompt")
 	}
 	return StyleSubtle.Render(fmt.Sprintf("%d active, %d idle", activeCount, idleCount))
 }

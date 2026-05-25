@@ -57,6 +57,7 @@ type Session struct {
 	planCachePresent bool
 	planCacheContent string
 	planCacheMTime   time.Time
+	planCacheSize    int64
 
 	// Commit-task progress cache. Refreshed on KindStop events for
 	// LifecycleInProgress sessions via RefreshCommitTaskCount; read on the
@@ -1164,17 +1165,20 @@ func (s *Session) WritePlan(content string) error {
 	}
 	committed = true
 
-	// Record mtime alongside content so CachedPlan's mtime check skips
-	// the ReadFile on the immediate next tick.
+	// Record mtime and size alongside content so CachedPlan's cache check
+	// skips the ReadFile on the immediate next tick.
 	var mtime time.Time
+	var size int64
 	if fi, err2 := os.Stat(planPath); err2 == nil {
 		mtime = fi.ModTime()
+		size = fi.Size()
 	}
 	s.mu.Lock()
 	s.planCacheLoaded = true
 	s.planCachePresent = true
 	s.planCacheContent = content
 	s.planCacheMTime = mtime
+	s.planCacheSize = size
 	s.mu.Unlock()
 
 	return nil
@@ -1216,6 +1220,7 @@ func (s *Session) CachedPlan() (string, bool) {
 				s.planCachePresent = false
 				s.planCacheContent = ""
 				s.planCacheMTime = time.Time{}
+				s.planCacheSize = 0
 				s.mu.Unlock()
 			}
 			return "", false
@@ -1229,16 +1234,17 @@ func (s *Session) CachedPlan() (string, bool) {
 	}
 
 	mtime := fi.ModTime()
+	size := fi.Size()
 
 	s.mu.RLock()
-	if s.planCacheLoaded && mtime.Equal(s.planCacheMTime) {
+	if s.planCacheLoaded && mtime.Equal(s.planCacheMTime) && size == s.planCacheSize {
 		content, present := s.planCacheContent, s.planCachePresent
 		s.mu.RUnlock()
 		return content, present
 	}
 	s.mu.RUnlock()
 
-	// mtime changed (or first call): read the file outside any lock.
+	// mtime or size changed (or first call): read the file outside any lock.
 	data, err := os.ReadFile(planPath)
 	if err != nil {
 		// Don't poison the cache on a transient read error.
@@ -1257,6 +1263,7 @@ func (s *Session) CachedPlan() (string, bool) {
 		s.planCachePresent = true
 		s.planCacheContent = content
 		s.planCacheMTime = mtime
+		s.planCacheSize = size
 	} else {
 		content = s.planCacheContent
 	}

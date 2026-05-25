@@ -301,6 +301,14 @@ func (m *Manager) dispatchHookEvents() {
 		}
 		sessID := sess.ID
 		if changed := a.OnHookEvent(e); changed {
+			// Refresh commit task count synchronously before emitting the
+			// status-change event so the TUI has current values when it
+			// evaluates auto-promotion.
+			if e.Kind == hook.KindStop && sess.LifecyclePhase() == LifecycleInProgress {
+				if err := sess.RefreshCommitTaskCount(); err != nil {
+					fmt.Fprintf(os.Stderr, "refrain: refresh commit task count: %v\n", err)
+				}
+			}
 			m.emit(Event{
 				Type:      EventStatusChanged,
 				AgentID:   a.ID,
@@ -320,16 +328,6 @@ func (m *Manager) dispatchHookEvents() {
 			}
 			m.maybeRenameFromPrompt(sess, a, e.Prompt)
 			m.maybeStartTaskSummary(sess)
-		}
-
-		if e.Kind == hook.KindStop && sess.LifecyclePhase() == LifecycleInProgress {
-			m.watchers.Add(1)
-			go func(s *Session) {
-				defer m.watchers.Done()
-				if err := s.RefreshCommitTaskCount(); err != nil {
-					fmt.Fprintf(os.Stderr, "refrain: refresh commit task count: %v\n", err)
-				}
-			}(sess)
 		}
 	}
 }
