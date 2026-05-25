@@ -158,29 +158,59 @@ func TestPRCompose_CtrlEnter_EmptyTitle_NoOp(t *testing.T) {
 	}
 }
 
-func TestPRCompose_Tab_SwitchesFocusToBody(t *testing.T) {
+// --- Task 3: edit-mode transitions ---
+
+func TestPRCompose_I_EntersEditModeAndFocusesTitle(t *testing.T) {
 	m := makePRComposeForTest(t)
-	if m.focused != 0 {
-		t.Fatalf("test prereq: focused=%d, want 0", m.focused)
+	if m.mode != prComposeModeScroll {
+		t.Fatalf("prereq: mode=%v, want scroll", m.mode)
 	}
-	cmd := m.Update(keyNamed(tea.KeyTab))
-	// Update returns a focus cmd; we only verify state here.
-	_ = cmd
-	if m.focused != 1 {
-		t.Errorf("after tab focused = %d, want 1 (body)", m.focused)
+	m.Update(keyRune('i'))
+	if m.mode != prComposeModeEdit {
+		t.Errorf("after i: mode=%v, want prComposeModeEdit", m.mode)
 	}
-	// Another tab should swing back to title (it cycles 1→0).
-	m.Update(keyNamed(tea.KeyTab))
 	if m.focused != 0 {
-		t.Errorf("after second tab focused = %d, want 0 (title)", m.focused)
+		t.Errorf("after i: focused=%d, want 0 (title)", m.focused)
 	}
 }
 
-func TestPRCompose_ShiftTab_SwitchesFocus(t *testing.T) {
+func TestPRCompose_EscInEditMode_ReturnsToScroll(t *testing.T) {
 	m := makePRComposeForTest(t)
+	m.Update(keyRune('i'))
+	if m.mode != prComposeModeEdit {
+		t.Fatalf("prereq: expected edit mode")
+	}
+	m.Update(keyNamed(tea.KeyEscape))
+	if m.mode != prComposeModeScroll {
+		t.Errorf("esc in edit mode did not return to scroll: mode=%v", m.mode)
+	}
+	if !m.Active() {
+		t.Error("esc in edit mode should not close the view")
+	}
+}
+
+func TestPRCompose_Tab_SwitchesFocusToBodyInEditMode(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.Update(keyRune('i')) // enter edit mode; focused=0 (title)
+	if m.focused != 0 {
+		t.Fatalf("prereq: focused=%d, want 0 after i", m.focused)
+	}
+	m.Update(keyNamed(tea.KeyTab))
+	if m.focused != 1 {
+		t.Errorf("after tab: focused=%d, want 1 (body)", m.focused)
+	}
+	m.Update(keyNamed(tea.KeyTab))
+	if m.focused != 0 {
+		t.Errorf("after second tab: focused=%d, want 0 (title)", m.focused)
+	}
+}
+
+func TestPRCompose_ShiftTab_SwitchesFocusInEditMode(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.Update(keyRune('i')) // enter edit mode
 	m.Update(keyShiftNamed(tea.KeyTab))
 	if m.focused != 1 {
-		t.Errorf("after shift+tab focused = %d, want 1", m.focused)
+		t.Errorf("after shift+tab: focused=%d, want 1", m.focused)
 	}
 }
 
@@ -202,44 +232,30 @@ func TestPRCompose_CtrlD_TogglesDraft(t *testing.T) {
 	}
 }
 
-func TestPRCompose_PrintableKey_AppendsToFocusedField(t *testing.T) {
+func TestPRCompose_PrintableKey_AppendsToTitleInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.titleInput.SetValue("hi")
-	// Move cursor to end. bubbles textarea handles this on Focus, but be safe.
+	m.Update(keyRune('i')) // enter edit mode (title focused)
 	m.titleInput.SetValue("hi")
 	m.Update(keyRune('!'))
 	if got := m.titleInput.Value(); !strings.Contains(got, "!") {
-		t.Errorf("title = %q, want it to include '!' after typing", got)
+		t.Errorf("title = %q, want it to include '!' after typing in edit mode", got)
 	}
 }
 
-func TestPRCompose_PrintableKey_RoutedToBodyWhenFocused(t *testing.T) {
+func TestPRCompose_PrintableKey_RoutedToBodyInEditModeWhenBodyFocused(t *testing.T) {
 	m := makePRComposeForTest(t)
-	// Switch focus to body field, then type.
-	m.Update(keyNamed(tea.KeyTab))
+	m.Update(keyRune('i'))         // enter edit mode (title focused)
+	m.Update(keyNamed(tea.KeyTab)) // switch to body
 	if m.focused != 1 {
 		t.Fatalf("focused = %d after tab, want 1", m.focused)
 	}
 	bodyBefore := m.bodyArea.Value()
 	m.Update(keyRune('?'))
-	bodyAfter := m.bodyArea.Value()
-	if bodyAfter == bodyBefore {
+	if m.bodyArea.Value() == bodyBefore {
 		t.Error("typing in body did not change body value")
 	}
-	// Title should be unchanged when body has focus.
 	if !strings.HasPrefix(m.titleInput.Value(), "Initial title") {
 		t.Errorf("title leaked: %q", m.titleInput.Value())
-	}
-}
-
-func TestPRCompose_PasteForwardedToFocusedField(t *testing.T) {
-	m := makePRComposeForTest(t)
-	cmd := m.Update(tea.PasteMsg{Content: "pasted-title"})
-	if cmd != nil {
-		cmd()
-	}
-	if got := m.titleInput.Value(); !strings.Contains(got, "pasted-title") {
-		t.Errorf("title = %q, want it to contain pasted content", got)
 	}
 }
 

@@ -76,8 +76,9 @@ func (m *prComposeModal) Open(title, body string, draft bool, sessName string) t
 	m.focused = 0
 	m.titleInput.SetValue(title)
 	m.bodyArea.SetValue(body)
+	m.titleInput.Blur()
 	m.bodyArea.Blur()
-	return m.titleInput.Focus()
+	return nil
 }
 
 // Close hides the view and blurs both fields.
@@ -101,76 +102,104 @@ func (m *prComposeModal) SetSize(w, h int) {
 	m.clampScroll()
 }
 
-// Update routes a tea.Msg. Submit, cancel, draft toggle, and field focus are
-// handled flat for now; scroll/edit mode dispatch is introduced in a later task.
-// Scroll keybindings (j/k/pgdn/pgup/g/G) adjust scrollOff in all modes.
+// Update routes a tea.Msg to updateScroll or updateEdit based on mode.
 func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
 	if !m.active {
 		return nil
 	}
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "esc":
-			m.Close()
-			return func() tea.Msg { return prComposeCancelMsg{} }
-		case "ctrl+enter":
-			title := strings.TrimSpace(m.titleInput.Value())
-			if title == "" {
-				return nil
-			}
-			body := strings.TrimSpace(m.bodyArea.Value())
-			draft := m.draft
-			m.Close()
-			return func() tea.Msg {
-				return prComposeSubmitMsg{title: title, body: body, draft: draft}
-			}
-		case "tab", "shift+tab":
-			if m.focused == 0 {
-				m.focused = 1
-				m.titleInput.Blur()
-				return m.bodyArea.Focus()
-			}
-			m.focused = 0
-			m.bodyArea.Blur()
-			return m.titleInput.Focus()
-		case "ctrl+d":
-			m.draft = !m.draft
-			return nil
-		// Scroll keybindings mirror the plan editor.
-		case "j":
-			m.scrollOff++
-			m.clampScroll()
-			return nil
-		case "k":
-			if m.scrollOff > 0 {
-				m.scrollOff--
-			}
-			return nil
-		case "pgdown":
-			m.scrollOff += m.scrollBodyHeight() / 2
-			m.clampScroll()
-			return nil
-		case "pgup":
-			m.scrollOff -= m.scrollBodyHeight() / 2
-			if m.scrollOff < 0 {
-				m.scrollOff = 0
-			}
-			return nil
-		case "g":
-			m.scrollOff = 0
-			return nil
-		case "G":
-			m.scrollOff = 9999
-			m.clampScroll()
+	switch m.mode {
+	case prComposeModeEdit:
+		return m.updateEdit(msg)
+	default:
+		return m.updateScroll(msg)
+	}
+}
+
+func (m *prComposeModal) updateScroll(msg tea.Msg) tea.Cmd {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return nil
+	}
+	switch key.String() {
+	case "esc":
+		m.Close()
+		return func() tea.Msg { return prComposeCancelMsg{} }
+	case "ctrl+enter":
+		title := strings.TrimSpace(m.titleInput.Value())
+		if title == "" {
 			return nil
 		}
+		body := strings.TrimSpace(m.bodyArea.Value())
+		draft := m.draft
+		m.Close()
+		return func() tea.Msg {
+			return prComposeSubmitMsg{title: title, body: body, draft: draft}
+		}
+	case "ctrl+d":
+		m.draft = !m.draft
+	case "i":
+		m.mode = prComposeModeEdit
+		m.focused = 0
+		return m.titleInput.Focus()
+	case "j":
+		m.scrollOff++
+		m.clampScroll()
+	case "k":
+		if m.scrollOff > 0 {
+			m.scrollOff--
+		}
+	case "pgdown":
+		m.scrollOff += m.scrollBodyHeight() / 2
+		m.clampScroll()
+	case "pgup":
+		m.scrollOff -= m.scrollBodyHeight() / 2
+		if m.scrollOff < 0 {
+			m.scrollOff = 0
+		}
+	case "g":
+		m.scrollOff = 0
+	case "G":
+		m.scrollOff = 9999
+		m.clampScroll()
+	}
+	return nil
+}
+
+func (m *prComposeModal) updateEdit(msg tea.Msg) tea.Cmd {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		if m.focused == 0 {
+			var cmd tea.Cmd
+			m.titleInput, cmd = m.titleInput.Update(msg)
+			return cmd
+		}
+		var cmd tea.Cmd
+		m.bodyArea, cmd = m.bodyArea.Update(msg)
+		return cmd
+	}
+	switch key.String() {
+	case "esc":
+		m.titleInput.Blur()
+		m.bodyArea.Blur()
+		m.mode = prComposeModeScroll
+		return nil
+	case "tab", "shift+tab":
+		if m.focused == 0 {
+			m.focused = 1
+			m.titleInput.Blur()
+			return m.bodyArea.Focus()
+		}
+		m.focused = 0
+		m.bodyArea.Blur()
+		return m.titleInput.Focus()
+	}
+	if m.focused == 0 {
+		var cmd tea.Cmd
+		m.titleInput, cmd = m.titleInput.Update(msg)
+		return cmd
 	}
 	var cmd tea.Cmd
-	if m.focused == 0 {
-		m.titleInput, cmd = m.titleInput.Update(msg)
-	} else {
-		m.bodyArea, cmd = m.bodyArea.Update(msg)
-	}
+	m.bodyArea, cmd = m.bodyArea.Update(msg)
 	return cmd
 }
 
