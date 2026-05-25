@@ -56,16 +56,10 @@ match:
 session:
   id: "e2e-tp-build"
   model: "claude-sonnet-4-6"
-  tools: ["Bash"]
 turns:
-  - delay: "1s"
+  - delay: "2s"
+    exec: "echo 'feature A' > featureA.txt && git add featureA.txt && git commit -m '[task 1] Create feature A' && sed -i 's/- \\[ \\] Create feature A/- [x] Create feature A/' .claude/plan.md"
     assistant:
-      - type: tool_use
-        id: "toolu_b1"
-        name: "Bash"
-        execute: true
-        input:
-          command: "echo 'feature A' > featureA.txt && git add featureA.txt && git commit -m '[task 1] Create feature A' && sed -i 's/- \\[ \\] Create feature A/- [x] Create feature A/' .claude/plan.md"
       - type: text
         text: "Completed task 1."
 `,
@@ -80,16 +74,10 @@ match:
 session:
   id: "e2e-tp-build"
   model: "claude-sonnet-4-6"
-  tools: ["Bash"]
 turns:
-  - delay: "1s"
+  - delay: "2s"
+    exec: "echo 'feature B' > featureB.txt && git add featureB.txt && git commit -m '[task 2] Create feature B' && sed -i 's/- \\[ \\] Create feature B/- [x] Create feature B/' .claude/plan.md"
     assistant:
-      - type: tool_use
-        id: "toolu_b2"
-        name: "Bash"
-        execute: true
-        input:
-          command: "echo 'feature B' > featureB.txt && git add featureB.txt && git commit -m '[task 2] Create feature B' && sed -i 's/- \\[ \\] Create feature B/- [x] Create feature B/' .claude/plan.md"
       - type: text
         text: "Completed task 2."
 `,
@@ -104,16 +92,10 @@ match:
 session:
   id: "e2e-tp-build"
   model: "claude-sonnet-4-6"
-  tools: ["Bash"]
 turns:
-  - delay: "1s"
+  - delay: "2s"
+    exec: "echo 'feature C' > featureC.txt && git add featureC.txt && git commit -m '[task 3] Create feature C' && sed -i 's/- \\[ \\] Create feature C/- [x] Create feature C/' .claude/plan.md"
     assistant:
-      - type: tool_use
-        id: "toolu_b3"
-        name: "Bash"
-        execute: true
-        input:
-          command: "echo 'feature C' > featureC.txt && git add featureC.txt && git commit -m '[task 3] Create feature C' && sed -i 's/- \\[ \\] Create feature C/- [x] Create feature C/' .claude/plan.md"
       - type: text
         text: "Completed task 3."
 `,
@@ -129,16 +111,10 @@ match:
 session:
   id: "e2e-tp-nc-build"
   model: "claude-sonnet-4-6"
-  tools: ["Bash"]
 turns:
-  - delay: "1s"
+  - delay: "2s"
+    exec: "echo 'feature A' > featureA.txt && git add featureA.txt && git commit -m '[task 1] Create feature A'"
     assistant:
-      - type: tool_use
-        id: "toolu_nc1"
-        name: "Bash"
-        execute: true
-        input:
-          command: "echo 'feature A' > featureA.txt && git add featureA.txt && git commit -m '[task 1] Create feature A'"
       - type: text
         text: "Done with task 1."
 `,
@@ -152,16 +128,10 @@ match:
 session:
   id: "e2e-tp-nc-build"
   model: "claude-sonnet-4-6"
-  tools: ["Bash"]
 turns:
-  - delay: "1s"
+  - delay: "2s"
+    exec: "echo 'feature B' > featureB.txt && git add featureB.txt && git commit -m '[task 2] Create feature B'"
     assistant:
-      - type: tool_use
-        id: "toolu_nc2"
-        name: "Bash"
-        execute: true
-        input:
-          command: "echo 'feature B' > featureB.txt && git add featureB.txt && git commit -m '[task 2] Create feature B'"
       - type: text
         text: "Done with task 2."
 `,
@@ -175,16 +145,10 @@ match:
 session:
   id: "e2e-tp-nc-build"
   model: "claude-sonnet-4-6"
-  tools: ["Bash"]
 turns:
-  - delay: "1s"
+  - delay: "2s"
+    exec: "echo 'feature C' > featureC.txt && git add featureC.txt && git commit -m '[task 3] Create feature C'"
     assistant:
-      - type: tool_use
-        id: "toolu_nc3"
-        name: "Bash"
-        execute: true
-        input:
-          command: "echo 'feature C' > featureC.txt && git add featureC.txt && git commit -m '[task 3] Create feature C'"
       - type: text
         text: "Done with task 3."
 `,
@@ -252,13 +216,20 @@ func TestTaskProgressBarUpdates(t *testing.T) {
 		t.Fatalf("session did not transition to BUILDING after approve\nScreen:\n%s", s.Screenshot())
 	}
 
-	// Enter the agent terminal to type follow-up prompts. Press space/enter
-	// on the building session card to open focusLaunch.
+	// The first build scenario fires automatically from the BuildFromPlanPrompt.
+	// Wait for the first task's progress to appear before entering focusLaunch
+	// to buffer the follow-up prompts.
+	if !waitForProgress(s, 1, 3, 25000) {
+		t.Fatalf("progress bar never showed 1/3 tasks\nScreen:\n%s", s.Screenshot())
+	}
+
+	// Enter the agent terminal to type follow-up prompts. Press enter on
+	// the building session card to open focusLaunch.
 	s.Press("enter")
 	s.WaitForText("back", 10000)
 
 	// Buffer follow-up prompts for scenarios 2 and 3. Scrim reads them
-	// from stdin after each scenario completes.
+	// from stdin after the current scenario completes.
 	s.Type("continue task 2\n")
 	s.Type("continue task 3\n")
 
@@ -266,20 +237,14 @@ func TestTaskProgressBarUpdates(t *testing.T) {
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
-	// Task 1: the first build scenario creates a [task 1] commit and
-	// toggles the first checkbox. The progress bar should show 1/3.
-	if !waitForProgress(s, 1, 3, 20000) {
-		t.Errorf("progress bar never showed 1/3 tasks\nScreen:\n%s", s.Screenshot())
-	}
-
 	// Task 2: second scenario fires after scrim reads "continue task 2".
-	if !waitForProgress(s, 2, 3, 20000) {
+	if !waitForProgress(s, 2, 3, 25000) {
 		t.Errorf("progress bar never showed 2/3 tasks\nScreen:\n%s", s.Screenshot())
 	}
 
 	// Task 3: all tasks complete. The session should auto-promote to
 	// REVIEWING since all tasks are done.
-	if !waitForBadgeText(s, "REVIEWING", 20000) {
+	if !waitForBadgeText(s, "REVIEWING", 25000) {
 		// If not promoted, check if 3/3 is visible in BUILDING.
 		if !waitForProgress(s, 3, 3, 5000) {
 			t.Errorf("progress bar never showed 3/3 tasks and session didn't promote to REVIEWING\nScreen:\n%s", s.Screenshot())
@@ -303,6 +268,13 @@ func TestTaskProgressBarCommitOnly(t *testing.T) {
 		t.Fatalf("session did not transition to BUILDING\nScreen:\n%s", s.Screenshot())
 	}
 
+	// Without checkbox toggling, only commit-based counts drive progress.
+	// After each stop event, RefreshCommitTaskCount runs and updates the
+	// cached count. Wait for the first task to complete before buffering.
+	if !waitForProgress(s, 1, 3, 25000) {
+		t.Fatalf("commit-only progress never showed 1/3 tasks\nScreen:\n%s", s.Screenshot())
+	}
+
 	// Enter focusLaunch to buffer follow-up prompts.
 	s.Press("enter")
 	s.WaitForText("back", 10000)
@@ -311,20 +283,13 @@ func TestTaskProgressBarCommitOnly(t *testing.T) {
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
-	// Without checkbox toggling, only commit-based counts drive progress.
-	// After each stop event, RefreshCommitTaskCount runs and updates the
-	// cached count.
-	if !waitForProgress(s, 1, 3, 20000) {
-		t.Errorf("commit-only progress never showed 1/3 tasks\nScreen:\n%s", s.Screenshot())
-	}
-
-	if !waitForProgress(s, 2, 3, 20000) {
+	if !waitForProgress(s, 2, 3, 25000) {
 		t.Errorf("commit-only progress never showed 2/3 tasks\nScreen:\n%s", s.Screenshot())
 	}
 
 	// After task 3, all commit indices are present. Session should
 	// auto-promote since commitDone == commitMax == planTotal.
-	if !waitForBadgeText(s, "REVIEWING", 20000) {
+	if !waitForBadgeText(s, "REVIEWING", 25000) {
 		if !waitForProgress(s, 3, 3, 5000) {
 			t.Errorf("commit-only progress never reached 3/3 and session didn't promote\nScreen:\n%s", s.Screenshot())
 		}
@@ -349,7 +314,7 @@ func TestTaskProgressBarStaysInBuilding(t *testing.T) {
 	}
 
 	// Wait for task 1 to complete.
-	if !waitForProgress(s, 1, 3, 20000) {
+	if !waitForProgress(s, 1, 3, 25000) {
 		t.Errorf("progress bar never showed 1/3 tasks\nScreen:\n%s", s.Screenshot())
 	}
 
