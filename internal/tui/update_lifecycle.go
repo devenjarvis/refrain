@@ -385,9 +385,23 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 					// Auto-promote InProgress → ReadyForReview on first
 					// idle/done signal. Only fires once per session (the
 					// phase gate makes it idempotent on subsequent events).
+					// Suppressed when the plan has uncompleted tasks so the
+					// session stays in BUILDING with a visible progress bar.
 					if sess.LifecyclePhase() == agent.LifecycleInProgress && sess.IsReviewable() {
-						sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
-						autoPromoteCmd = a.fetchReviewDiffCmd(sess, msg.repoPath)
+						promote := true
+						if plan, present := sess.CachedPlan(); present {
+							pTotal, pDone := planTaskCounts(plan)
+							cDone, cMax := sess.CommitTaskCount()
+							effectiveTotal := max(pTotal, cMax)
+							effectiveDone := max(pDone, cDone)
+							if effectiveTotal > 0 && effectiveDone < effectiveTotal {
+								promote = false
+							}
+						}
+						if promote {
+							sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
+							autoPromoteCmd = a.fetchReviewDiffCmd(sess, msg.repoPath)
+						}
 					}
 					// Mark session done when all non-shell agents have exited.
 					if msg.event.Status == agent.StatusDone || msg.event.Status == agent.StatusError {
