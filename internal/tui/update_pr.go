@@ -32,7 +32,7 @@ func (a App) handlePRDraftReady(msg prDraftReadyMsg) (tea.Model, tea.Cmd) {
 	a.prModalBase = msg.base
 	a.prModalTransitionShipping = msg.transitionShipping
 	resolved := a.resolvedCache[msg.repoPath]
-	cmd := a.prComposeModal.Open(msg.title, msg.body, resolved.PRDraftByDefault)
+	cmd := a.prComposeModal.Open(msg.title, msg.body, resolved.PRDraftByDefault, "")
 	return a, cmd
 }
 

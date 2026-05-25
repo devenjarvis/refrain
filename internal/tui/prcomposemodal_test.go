@@ -13,19 +13,31 @@ func makePRComposeForTest(t *testing.T) *prComposeModal {
 	t.Helper()
 	m := newPRComposeModal()
 	m.SetSize(120, 40)
-	m.Open("Initial title", "Initial body line 1\nbody line 2", true)
+	m.Open("Initial title", "Initial body line 1\nbody line 2", true, "")
 	return &m
+}
+
+func TestPRCompose_OpenSetsScrollModeAndHasRenderer(t *testing.T) {
+	m := newPRComposeModal()
+	m.SetSize(120, 40)
+	m.Open("Title", "Body", true, "my-session")
+	if m.mode != prComposeModeScroll {
+		t.Errorf("mode = %v, want prComposeModeScroll", m.mode)
+	}
+	if m.bodyArea.MarkdownRenderer() == nil {
+		t.Error("bodyArea should have a MarkdownRenderer set")
+	}
 }
 
 func TestPRCompose_OpenSeedsFieldsAndFocusesTitle(t *testing.T) {
 	m := newPRComposeModal()
 	m.SetSize(120, 40)
-	cmd := m.Open("My title", "Body text", false)
+	cmd := m.Open("My title", "Body text", false, "")
 	if !m.Active() {
 		t.Fatal("modal should be Active after Open")
 	}
-	if m.titleArea.Value() != "My title" {
-		t.Errorf("title = %q, want %q", m.titleArea.Value(), "My title")
+	if m.titleInput.Value() != "My title" {
+		t.Errorf("title = %q, want %q", m.titleInput.Value(), "My title")
 	}
 	if m.bodyArea.Value() != "Body text" {
 		t.Errorf("body = %q, want %q", m.bodyArea.Value(), "Body text")
@@ -36,7 +48,7 @@ func TestPRCompose_OpenSeedsFieldsAndFocusesTitle(t *testing.T) {
 	if m.focused != 0 {
 		t.Errorf("focused = %d, want 0 (title)", m.focused)
 	}
-	_ = cmd // Focus may produce a cmd; we only verify state here.
+	_ = cmd // Open returns nil in scroll mode; we only verify state here.
 }
 
 func TestPRCompose_EscCancels(t *testing.T) {
@@ -55,7 +67,7 @@ func TestPRCompose_EscCancels(t *testing.T) {
 
 func TestPRCompose_CtrlEnterSubmitsTrimmedValues(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.titleArea.SetValue("  trimmed title  ")
+	m.titleInput.SetValue("  trimmed title  ")
 	m.bodyArea.SetValue("\nbody with leading newline\n")
 
 	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
@@ -82,7 +94,7 @@ func TestPRCompose_CtrlEnterSubmitsTrimmedValues(t *testing.T) {
 
 func TestPRCompose_CtrlEnter_EmptyTitle_NoOp(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.titleArea.SetValue("   ")
+	m.titleInput.SetValue("   ")
 	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatalf("empty title submit should be a no-op (no cmd); got %T", cmd())
@@ -138,11 +150,11 @@ func TestPRCompose_CtrlD_TogglesDraft(t *testing.T) {
 
 func TestPRCompose_PrintableKey_AppendsToFocusedField(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.titleArea.SetValue("hi")
+	m.titleInput.SetValue("hi")
 	// Move cursor to end. bubbles textarea handles this on Focus, but be safe.
-	m.titleArea.SetValue("hi")
+	m.titleInput.SetValue("hi")
 	m.Update(keyRune('!'))
-	if got := m.titleArea.Value(); !strings.Contains(got, "!") {
+	if got := m.titleInput.Value(); !strings.Contains(got, "!") {
 		t.Errorf("title = %q, want it to include '!' after typing", got)
 	}
 }
@@ -161,8 +173,8 @@ func TestPRCompose_PrintableKey_RoutedToBodyWhenFocused(t *testing.T) {
 		t.Error("typing in body did not change body value")
 	}
 	// Title should be unchanged when body has focus.
-	if !strings.HasPrefix(m.titleArea.Value(), "Initial title") {
-		t.Errorf("title leaked: %q", m.titleArea.Value())
+	if !strings.HasPrefix(m.titleInput.Value(), "Initial title") {
+		t.Errorf("title leaked: %q", m.titleInput.Value())
 	}
 }
 
@@ -172,7 +184,7 @@ func TestPRCompose_PasteForwardedToFocusedField(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
-	if got := m.titleArea.Value(); !strings.Contains(got, "pasted-title") {
+	if got := m.titleInput.Value(); !strings.Contains(got, "pasted-title") {
 		t.Errorf("title = %q, want it to contain pasted content", got)
 	}
 }
