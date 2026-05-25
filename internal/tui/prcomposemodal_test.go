@@ -275,6 +275,46 @@ func TestPRCompose_CtrlD_TogglesDraftInEditMode(t *testing.T) {
 	}
 }
 
+// --- Task 6: PasteMsg routing ---
+
+func TestPRCompose_PasteInEditMode_TitleFocused_UpdatesTitle(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.Update(keyRune('i')) // enter edit mode, title focused
+	if m.focused != 0 {
+		t.Fatalf("prereq: focused=%d, want 0 (title)", m.focused)
+	}
+	cmd := m.Update(tea.PasteMsg{Content: "pasted-title"})
+	if cmd != nil {
+		cmd()
+	}
+	if got := m.titleInput.Value(); !strings.Contains(got, "pasted-title") {
+		t.Errorf("title = %q, want it to contain pasted content", got)
+	}
+}
+
+func TestPRCompose_PasteInEditMode_BodyFocused_UpdatesBody(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.Update(keyRune('i'))         // enter edit mode
+	m.Update(keyNamed(tea.KeyTab)) // switch to body
+	if m.focused != 1 {
+		t.Fatalf("prereq: focused=%d, want 1 (body)", m.focused)
+	}
+	bodyBefore := m.bodyArea.Value()
+	m.Update(tea.PasteMsg{Content: "pasted-body"})
+	if got := m.bodyArea.Value(); got == bodyBefore {
+		t.Error("paste in body-focused edit mode did not update body")
+	}
+}
+
+func TestPRCompose_PasteInScrollMode_IsNoOp(t *testing.T) {
+	m := makePRComposeForTest(t)
+	titleBefore := m.titleInput.Value()
+	m.Update(tea.PasteMsg{Content: "should-be-ignored"})
+	if m.titleInput.Value() != titleBefore {
+		t.Error("paste in scroll mode should not modify title")
+	}
+}
+
 func TestPRCompose_PrintableKey_AppendsToTitleInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i')) // enter edit mode (title focused)

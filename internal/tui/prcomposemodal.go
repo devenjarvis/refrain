@@ -103,8 +103,22 @@ func (m *prComposeModal) SetSize(w, h int) {
 }
 
 // Update routes a tea.Msg to updateScroll or updateEdit based on mode.
+// PasteMsg in edit mode is forwarded to the focused field before mode dispatch.
 func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
 	if !m.active {
+		return nil
+	}
+	if paste, ok := msg.(tea.PasteMsg); ok {
+		if m.mode == prComposeModeEdit {
+			if m.focused == 0 {
+				var cmd tea.Cmd
+				m.titleInput, cmd = m.titleInput.Update(paste)
+				return cmd
+			}
+			var cmd tea.Cmd
+			m.bodyArea, cmd = m.bodyArea.Update(paste)
+			return cmd
+		}
 		return nil
 	}
 	switch m.mode {
