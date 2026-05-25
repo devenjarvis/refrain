@@ -309,19 +309,6 @@ func (m *Manager) dispatchHookEvents() {
 			})
 		}
 
-		// Refresh commit task count after emitting the status event. Run
-		// in a tracked goroutine so the hook dispatcher isn't blocked by
-		// the git-log shell-out.
-		if e.Kind == hook.KindStop && sess.LifecyclePhase() == LifecycleInProgress {
-			m.watchers.Add(1)
-			go func(s *Session) {
-				defer m.watchers.Done()
-				if err := s.RefreshCommitTaskCount(); err != nil {
-					fmt.Fprintf(os.Stderr, "refrain: refresh commit task count: %v\n", err)
-				}
-			}(sess)
-		}
-
 		if e.Kind == hook.KindUserPromptSubmit {
 			// Capture the original prompt before dispatching the rename so
 			// retries on later UserPromptSubmit events drive the namer with
@@ -333,6 +320,16 @@ func (m *Manager) dispatchHookEvents() {
 			}
 			m.maybeRenameFromPrompt(sess, a, e.Prompt)
 			m.maybeStartTaskSummary(sess)
+		}
+
+		if e.Kind == hook.KindStop && sess.LifecyclePhase() == LifecycleInProgress {
+			m.watchers.Add(1)
+			go func(s *Session) {
+				defer m.watchers.Done()
+				if err := s.RefreshCommitTaskCount(); err != nil {
+					fmt.Fprintf(os.Stderr, "refrain: refresh commit task count: %v\n", err)
+				}
+			}(sess)
 		}
 	}
 }
