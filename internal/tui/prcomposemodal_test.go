@@ -245,8 +245,13 @@ func TestPRCompose_ViewEditMode_ContainsHeaderAndTitle(t *testing.T) {
 	if !strings.Contains(v, "PR DRAFT") {
 		t.Errorf("edit view missing 'PR DRAFT', got: %q", v)
 	}
+	// titleInput.View() must appear: value set in makePRComposeForTest.
 	if !strings.Contains(v, "Initial title") {
-		t.Errorf("edit view missing title value, got: %q", v)
+		t.Errorf("edit view missing titleInput.View() output, got: %q", v)
+	}
+	// bodyArea.View() must appear: value set in makePRComposeForTest.
+	if !strings.Contains(v, "Initial body line 1") {
+		t.Errorf("edit view missing bodyArea.View() output, got: %q", v)
 	}
 }
 
