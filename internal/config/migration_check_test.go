@@ -21,3 +21,17 @@ func TestLegacyFocusModeEnabledIsSilentlyIgnored(t *testing.T) {
 		t.Error("FocusSessionMinutes should be set to 60")
 	}
 }
+
+func TestLegacyMaxConcurrentAgentsIsSilentlyIgnored(t *testing.T) {
+	data := []byte(`{"max_concurrent_agents": 5, "audio_enabled": true}`)
+	var s GlobalSettings
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if s.MaxConcurrentSessions != nil {
+		t.Error("MaxConcurrentSessions should be nil when only legacy key is present")
+	}
+	if s.AudioEnabled == nil || !*s.AudioEnabled {
+		t.Error("AudioEnabled should be set to true")
+	}
+}

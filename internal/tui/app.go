@@ -188,8 +188,8 @@ type App struct {
 	// flushed to the wellness log on quit. See wellness.go.
 	wellness wellnessState
 
-	agentLimitModalActive bool
-	cursor                FocusedCursor // pipeline cursor: section + per-section indices
+	sessionLimitModalActive bool
+	cursor                  FocusedCursor // pipeline cursor: section + per-section indices
 	// modals owns panel focus and the lifetime of every overlay model. The
 	// invariant "the model for panelFocus X is non-nil iff modals.Current() == X"
 	// is enforced by the Modals type; see internal/tui/modals.go. App callers
@@ -1071,7 +1071,7 @@ func (a App) View() tea.View {
 			body = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
 		}
 		// Agent-limit modal overlay: replace body with centered modal when active.
-		if a.agentLimitModalActive {
+		if a.sessionLimitModalActive {
 			modalW := a.width / 2
 			if modalW > 60 {
 				modalW = 60
@@ -1079,9 +1079,9 @@ func (a App) View() tea.View {
 			if modalW < 40 {
 				modalW = 40
 			}
-			activeCount := a.activeAgentCount()
+			activeCount := a.activeSessionCount()
 			limitLine := StyleWarning.Render(fmt.Sprintf(
-				"You're already running %d agents — beyond ~3, oversight cost exceeds output value.",
+				"You're already running %d active sessions — beyond ~3, oversight cost exceeds output value.",
 				activeCount,
 			))
 			overlayContent := lipgloss.JoinVertical(
@@ -1346,10 +1346,10 @@ func (a *App) cleanStaleCaches() {
 
 // pollAllSessions returns Cmds for sessions that are due for a PR status poll.
 // It respects adaptive intervals and limits concurrent in-flight polls.
-func (a *App) activeAgentCount() int {
+func (a *App) activeSessionCount() int {
 	count := 0
 	for _, mgr := range a.managers {
-		count += mgr.AgentCount()
+		count += mgr.ActiveSessionCount()
 	}
 	return count
 }

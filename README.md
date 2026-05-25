@@ -164,7 +164,7 @@ Unknown `{tokens}` are left literal. Example: `BranchPrefix: "{user}/"` produces
 The dashboard surfaces three wellness affordances tuned to keep parallel-agent work sustainable:
 
 - **Session timer** (`focus_session_minutes`, default `90`) — when the configured block elapses, Refrain automatically opens a centered break overlay with a coherent-breathing animation.
-- **Soft agent limit** (`max_concurrent_agents`, default `3`) — pressing `n` past the cap shows a one-key warning; pressing `n` a second time overrides and spawns anyway.
+- **Soft session limit** (`max_concurrent_sessions`, default `3`) — pressing `n` past the cap shows a one-key warning; pressing `n` a second time overrides and spawns anyway. Only active sessions (excluding Shipping and Complete phases) count toward the limit.
 - **Soft review backlog** (`max_review_backlog`, default `5`) — same two-press override pattern when the REVIEWING section has too many sessions waiting.
 
 Every block (work + break) is appended to `.refrain/logs/wellness.log` so you can audit your own pacing later.

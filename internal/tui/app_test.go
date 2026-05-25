@@ -1229,7 +1229,7 @@ func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 }
 
 // TestSoftAgentLimitGuard verifies the two-press 'n' guard in focus mode:
-// first press shows the modal and sets agentLimitModalActive; second press proceeds.
+// first press shows the modal and sets sessionLimitModalActive; second press proceeds.
 func TestSoftAgentLimitGuard(t *testing.T) {
 	requireClaude(t)
 	dir, err := os.MkdirTemp("", "refrain-softlimit-*")
@@ -1250,9 +1250,9 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 	run("git", "commit", "--allow-empty", "-m", "init")
 
 	mgr := agent.NewManager(dir, config.ResolvedSettings{
-		BypassPermissions:   true,
-		AgentProgram:        "claude",
-		MaxConcurrentAgents: 1, // limit to 1 so we hit it immediately
+		BypassPermissions:     true,
+		AgentProgram:          "claude",
+		MaxConcurrentSessions: 1, // limit to 1 so we hit it immediately
 	})
 	defer mgr.Shutdown()
 
@@ -1264,12 +1264,12 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = config.ResolvedSettings{
-		BypassPermissions:   true,
-		AgentProgram:        "claude",
-		MaxConcurrentAgents: 1,
+		BypassPermissions:     true,
+		AgentProgram:          "claude",
+		MaxConcurrentSessions: 1,
 	}
 
-	// Create the first agent to reach the limit.
+	// Create the first session to reach the limit.
 	app = createAgent(t, app)
 	if app.err != "" {
 		t.Fatalf("Error creating first agent: %s", app.err)
@@ -1287,7 +1287,7 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 
 	// Enable focus mode.
 
-	// First 'n' press: should set agentLimitModalActive and not create agent.
+	// First 'n' press: should set sessionLimitModalActive and not create agent.
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
 	if cmd != nil {
@@ -1298,8 +1298,8 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 			t.Fatal("Expected no agent creation on first 'n' press at limit")
 		}
 	}
-	if !app.agentLimitModalActive {
-		t.Fatal("Expected agentLimitModalActive=true after first 'n' at limit")
+	if !app.sessionLimitModalActive {
+		t.Fatal("Expected sessionLimitModalActive=true after first 'n' at limit")
 	}
 	if v := app.View(); !strings.Contains(v.Content, "Focus limit reached") {
 		t.Fatalf("Expected rendered View to contain 'Focus limit reached' modal title; got:\n%s", v.Content)
@@ -1308,8 +1308,8 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 	// Second 'n' press: should clear modal and proceed with creation.
 	model, cmd = app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
-	if app.agentLimitModalActive {
-		t.Fatal("Expected agentLimitModalActive=false after second 'n'")
+	if app.sessionLimitModalActive {
+		t.Fatal("Expected sessionLimitModalActive=false after second 'n'")
 	}
 	if v := app.View(); strings.Contains(v.Content, "Focus limit reached") {
 		t.Fatal("Expected rendered View to NOT contain 'Focus limit reached' after override")
@@ -1321,14 +1321,14 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 
 	// Any other key press should dismiss the modal without spawning and without
 	// performing its normal action (e.g. 'j' must not move the focus cursor).
-	app.agentLimitModalActive = true
+	app.sessionLimitModalActive = true
 	beforeIdx := app.cursor.Index(focusSectionBuilding)
 	beforeQueue := app.cursor.Index(focusSectionReview)
 	beforeSection := app.cursor.Section()
 	model, dismissCmd := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.agentLimitModalActive {
-		t.Fatal("Expected agentLimitModalActive cleared by non-n key press")
+	if app.sessionLimitModalActive {
+		t.Fatal("Expected sessionLimitModalActive cleared by non-n key press")
 	}
 	if dismissCmd != nil {
 		if msg := dismissCmd(); msg != nil {
@@ -1368,9 +1368,9 @@ func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 	run("git", "commit", "--allow-empty", "-m", "init")
 
 	mgr := agent.NewManager(dir, config.ResolvedSettings{
-		BypassPermissions:   true,
-		AgentProgram:        "claude",
-		MaxConcurrentAgents: 1,
+		BypassPermissions:     true,
+		AgentProgram:          "claude",
+		MaxConcurrentSessions: 1,
 	})
 	defer mgr.Shutdown()
 
@@ -1382,12 +1382,12 @@ func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = config.ResolvedSettings{
-		BypassPermissions:   true,
-		AgentProgram:        "claude",
-		MaxConcurrentAgents: 1,
+		BypassPermissions:     true,
+		AgentProgram:          "claude",
+		MaxConcurrentSessions: 1,
 	}
 
-	// Create the first agent to reach the limit (single-repo cfg so 'n' creates
+	// Create the first session to reach the limit (single-repo cfg so 'n' creates
 	// directly rather than opening the repo picker).
 	app = createAgent(t, app)
 	if app.err != "" {
@@ -1406,7 +1406,7 @@ func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 		t.Fatalf("Expected focusList after exit, got %v", app.dashboard.panelFocus)
 	}
 
-	// First 'n' press: should show modal and set agentLimitModalActive; picker must NOT open.
+	// First 'n' press: should show modal and set sessionLimitModalActive; picker must NOT open.
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
 	if cmd != nil {
@@ -1415,8 +1415,8 @@ func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 			t.Fatal("Expected no agent creation on first 'n' press at limit")
 		}
 	}
-	if !app.agentLimitModalActive {
-		t.Fatal("Expected agentLimitModalActive=true after first 'n' at limit")
+	if !app.sessionLimitModalActive {
+		t.Fatal("Expected sessionLimitModalActive=true after first 'n' at limit")
 	}
 	if v := app.View(); !strings.Contains(v.Content, "Focus limit reached") {
 		t.Fatalf("Expected rendered View to contain 'Focus limit reached' modal title; got:\n%s", v.Content)
@@ -1428,8 +1428,8 @@ func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 	// Second 'n' press: should clear modal and open the picker.
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
-	if app.agentLimitModalActive {
-		t.Fatal("Expected agentLimitModalActive=false after second 'n'")
+	if app.sessionLimitModalActive {
+		t.Fatal("Expected sessionLimitModalActive=false after second 'n'")
 	}
 	if app.view != ViewRepoPicker {
 		t.Fatal("Expected view == ViewRepoPicker after second 'n' override")

@@ -453,25 +453,25 @@ func TestResolve_WellnessDefaults(t *testing.T) {
 	if r.FocusSessionMinutes != config.DefaultFocusSessionMinutes {
 		t.Errorf("FocusSessionMinutes = %d, want %d", r.FocusSessionMinutes, config.DefaultFocusSessionMinutes)
 	}
-	if r.MaxConcurrentAgents != config.DefaultMaxConcurrentAgents {
-		t.Errorf("MaxConcurrentAgents = %d, want %d", r.MaxConcurrentAgents, config.DefaultMaxConcurrentAgents)
+	if r.MaxConcurrentSessions != config.DefaultMaxConcurrentSessions {
+		t.Errorf("MaxConcurrentSessions = %d, want %d", r.MaxConcurrentSessions, config.DefaultMaxConcurrentSessions)
 	}
 }
 
 func TestResolve_WellnessGlobalOverride(t *testing.T) {
 	minutes := 60
-	maxAgents := 5
+	maxSessions := 5
 	g := &config.GlobalSettings{
-		FocusSessionMinutes: &minutes,
-		MaxConcurrentAgents: &maxAgents,
+		FocusSessionMinutes:   &minutes,
+		MaxConcurrentSessions: &maxSessions,
 	}
 	r := config.Resolve(g, nil)
 
 	if r.FocusSessionMinutes != 60 {
 		t.Errorf("FocusSessionMinutes = %d, want 60", r.FocusSessionMinutes)
 	}
-	if r.MaxConcurrentAgents != 5 {
-		t.Errorf("MaxConcurrentAgents = %d, want 5", r.MaxConcurrentAgents)
+	if r.MaxConcurrentSessions != 5 {
+		t.Errorf("MaxConcurrentSessions = %d, want 5", r.MaxConcurrentSessions)
 	}
 }
 

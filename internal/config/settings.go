@@ -34,10 +34,10 @@ const (
 	MaxSidebarWidth      = 60
 
 	// Wellness defaults.
-	DefaultFocusSessionMinutes = 90
-	DefaultFocusBreakMinutes   = 15
-	DefaultMaxConcurrentAgents = 3
-	DefaultMaxReviewBacklog    = 5
+	DefaultFocusSessionMinutes   = 90
+	DefaultFocusBreakMinutes     = 15
+	DefaultMaxConcurrentSessions = 3
+	DefaultMaxReviewBacklog      = 5
 
 	// DefaultBranchNamePrompt is the instruction sent to Haiku to summarize
 	// the user's first prompt into a branch slug. Users can override via the
@@ -131,10 +131,10 @@ type GlobalSettings struct {
 	SidebarWidth      *int    `json:"sidebar_width,omitempty"`
 
 	// Wellness settings — global preferences, not per-repo.
-	FocusSessionMinutes *int `json:"focus_session_minutes,omitempty"`
-	FocusBreakMinutes   *int `json:"focus_break_minutes,omitempty"`
-	MaxConcurrentAgents *int `json:"max_concurrent_agents,omitempty"`
-	MaxReviewBacklog    *int `json:"max_review_backlog,omitempty"`
+	FocusSessionMinutes   *int `json:"focus_session_minutes,omitempty"`
+	FocusBreakMinutes     *int `json:"focus_break_minutes,omitempty"`
+	MaxConcurrentSessions *int `json:"max_concurrent_sessions,omitempty"`
+	MaxReviewBacklog      *int `json:"max_review_backlog,omitempty"`
 
 	// ReviewerModel overrides the model used for per-task review subprocesses.
 	ReviewerModel *string `json:"reviewer_model,omitempty"`
@@ -200,10 +200,10 @@ type ResolvedSettings struct {
 	SidebarWidth  int
 
 	// Wellness settings.
-	FocusSessionMinutes int
-	FocusBreakMinutes   int
-	MaxConcurrentAgents int
-	MaxReviewBacklog    int
+	FocusSessionMinutes   int
+	FocusBreakMinutes     int
+	MaxConcurrentSessions int
+	MaxReviewBacklog      int
 
 	// Plan-first planning.
 	PlanFirstEnabled    bool
@@ -226,25 +226,25 @@ type ResolvedSettings struct {
 // Global overrides defaults; repo overrides global.
 func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 	r := ResolvedSettings{
-		AudioEnabled:        DefaultAudioEnabled,
-		BypassPermissions:   DefaultBypassPermissions,
-		BranchPrefix:        DefaultBranchPrefix,
-		BranchNamePrompt:    DefaultBranchNamePrompt,
-		AgentProgram:        DefaultAgentProgram,
-		PlanModel:           DefaultPlanModel,
-		ReviewerModel:       DefaultReviewerModel,
-		WorktreeDir:         DefaultWorktreeDir,
-		SidebarWidth:        DefaultSidebarWidth,
-		FocusSessionMinutes: DefaultFocusSessionMinutes,
-		FocusBreakMinutes:   DefaultFocusBreakMinutes,
-		MaxConcurrentAgents: DefaultMaxConcurrentAgents,
-		MaxReviewBacklog:    DefaultMaxReviewBacklog,
-		PlanFirstEnabled:    DefaultPlanFirstEnabled,
-		BuildFromPlanPrompt: DefaultBuildFromPlanPrompt,
-		BuildSystemPrompt:   DefaultBuildSystemPrompt,
-		PRDraftByDefault:    DefaultPRDraftByDefault,
-		AutoOpenPRInBrowser: DefaultAutoOpenPRInBrowser,
-		MergeMethod:         DefaultMergeMethod,
+		AudioEnabled:          DefaultAudioEnabled,
+		BypassPermissions:     DefaultBypassPermissions,
+		BranchPrefix:          DefaultBranchPrefix,
+		BranchNamePrompt:      DefaultBranchNamePrompt,
+		AgentProgram:          DefaultAgentProgram,
+		PlanModel:             DefaultPlanModel,
+		ReviewerModel:         DefaultReviewerModel,
+		WorktreeDir:           DefaultWorktreeDir,
+		SidebarWidth:          DefaultSidebarWidth,
+		FocusSessionMinutes:   DefaultFocusSessionMinutes,
+		FocusBreakMinutes:     DefaultFocusBreakMinutes,
+		MaxConcurrentSessions: DefaultMaxConcurrentSessions,
+		MaxReviewBacklog:      DefaultMaxReviewBacklog,
+		PlanFirstEnabled:      DefaultPlanFirstEnabled,
+		BuildFromPlanPrompt:   DefaultBuildFromPlanPrompt,
+		BuildSystemPrompt:     DefaultBuildSystemPrompt,
+		PRDraftByDefault:      DefaultPRDraftByDefault,
+		AutoOpenPRInBrowser:   DefaultAutoOpenPRInBrowser,
+		MergeMethod:           DefaultMergeMethod,
 	}
 
 	if global != nil {
@@ -287,8 +287,8 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		if global.FocusBreakMinutes != nil {
 			r.FocusBreakMinutes = *global.FocusBreakMinutes
 		}
-		if global.MaxConcurrentAgents != nil {
-			r.MaxConcurrentAgents = *global.MaxConcurrentAgents
+		if global.MaxConcurrentSessions != nil {
+			r.MaxConcurrentSessions = *global.MaxConcurrentSessions
 		}
 		if global.MaxReviewBacklog != nil {
 			r.MaxReviewBacklog = *global.MaxReviewBacklog
