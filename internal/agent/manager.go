@@ -301,20 +301,25 @@ func (m *Manager) dispatchHookEvents() {
 		}
 		sessID := sess.ID
 		if changed := a.OnHookEvent(e); changed {
-			// Refresh commit task count synchronously before emitting the
-			// status-change event so the TUI has current values when it
-			// evaluates auto-promotion.
-			if e.Kind == hook.KindStop && sess.LifecyclePhase() == LifecycleInProgress {
-				if err := sess.RefreshCommitTaskCount(); err != nil {
-					fmt.Fprintf(os.Stderr, "refrain: refresh commit task count: %v\n", err)
-				}
-			}
 			m.emit(Event{
 				Type:      EventStatusChanged,
 				AgentID:   a.ID,
 				SessionID: sessID,
 				Status:    a.Status(),
 			})
+		}
+
+		// Refresh commit task count after emitting the status event. Run
+		// in a tracked goroutine so the hook dispatcher isn't blocked by
+		// the git-log shell-out.
+		if e.Kind == hook.KindStop && sess.LifecyclePhase() == LifecycleInProgress {
+			m.watchers.Add(1)
+			go func(s *Session) {
+				defer m.watchers.Done()
+				if err := s.RefreshCommitTaskCount(); err != nil {
+					fmt.Fprintf(os.Stderr, "refrain: refresh commit task count: %v\n", err)
+				}
+			}(sess)
 		}
 
 		if e.Kind == hook.KindUserPromptSubmit {
