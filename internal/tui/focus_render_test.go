@@ -1190,7 +1190,6 @@ func TestHeaderOmitsCrossRepoSummary(t *testing.T) {
 	d := newDashboardModel()
 	d.width = 120
 	d.height = 39
-	d.activeRepoName = "myrepo"
 	d.items = []listItem{
 		{kind: listItemRepo, repoPath: "/a", repoName: "repoA"},
 		{kind: listItemSession, repoPath: "/a", repoName: "repoA", session: sessA},
