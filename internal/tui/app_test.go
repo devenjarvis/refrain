@@ -2076,7 +2076,7 @@ func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
 	app.dashboard.height = 39
 	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
 	app.prComposeModal.SetSize(120, 39)
-	_ = app.prComposeModal.Open("My PR Title", "My PR Body", false, "")
+	_ = app.prComposeModal.Open("My PR Title", "My PR Body", false, "ship-it")
 
 	v := app.View()
 	if !strings.Contains(v.Content, "My PR Title") {
