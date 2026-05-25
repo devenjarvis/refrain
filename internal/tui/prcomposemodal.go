@@ -101,9 +101,9 @@ func (m *prComposeModal) SetSize(w, h int) {
 	m.clampScroll()
 }
 
-// Update routes a tea.Msg. Focus toggle, submit, cancel, and draft toggle
-// work the same as the old modal; scroll/edit mode dispatch is added in a
-// later task.
+// Update routes a tea.Msg. Submit, cancel, draft toggle, and field focus are
+// handled flat for now; scroll/edit mode dispatch is introduced in a later task.
+// Scroll keybindings (j/k/pgdn/pgup/g/G) adjust scrollOff in all modes.
 func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
 	if !m.active {
 		return nil
@@ -136,6 +136,33 @@ func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
 		case "ctrl+d":
 			m.draft = !m.draft
 			return nil
+		// Scroll keybindings mirror the plan editor.
+		case "j":
+			m.scrollOff++
+			m.clampScroll()
+			return nil
+		case "k":
+			if m.scrollOff > 0 {
+				m.scrollOff--
+			}
+			return nil
+		case "pgdown":
+			m.scrollOff += m.scrollBodyHeight() / 2
+			m.clampScroll()
+			return nil
+		case "pgup":
+			m.scrollOff -= m.scrollBodyHeight() / 2
+			if m.scrollOff < 0 {
+				m.scrollOff = 0
+			}
+			return nil
+		case "g":
+			m.scrollOff = 0
+			return nil
+		case "G":
+			m.scrollOff = 9999
+			m.clampScroll()
+			return nil
 		}
 	}
 	var cmd tea.Cmd
@@ -147,26 +174,65 @@ func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// View renders a basic full-page header with title/body content. Scroll and
-// edit mode views are fleshed out in later tasks.
+// View renders the full-page PR compose. Only call when Active() is true.
+// Scroll mode shows rendered body text; edit mode (added in a later task)
+// shows the interactive input fields.
 func (m *prComposeModal) View() string {
-	header := m.renderHeader()
-	divider := StyleSubtle.Render(strings.Repeat("─", max(1, m.width-2)))
+	var lines []string
+	lines = append(lines, m.renderHeader())
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, m.width-2))))
+	lines = append(lines, m.renderScrollBody())
+	lines = append(lines, m.renderFooter())
+	return strings.Join(lines, "\n")
+}
 
-	titleLabel := StyleSubtle.Render("Title")
-	bodyLabel := StyleSubtle.Render("Body")
-	if m.focused == 0 {
-		titleLabel = StyleTitle.Render("Title")
+func (m *prComposeModal) renderScrollBody() string {
+	pad := strings.Repeat(" ", m.displayLeftPad())
+
+	titleVal := m.titleInput.Value()
+	if titleVal == "" {
+		titleVal = StyleSubtle.Render("(no title)")
+	}
+	titleLine := pad + StyleTitle.Render("Title: ") + titleVal
+
+	bodyVal := m.bodyArea.Value()
+	var bodyContent string
+	if bodyVal == "" {
+		bodyContent = pad + StyleSubtle.Render("(no body)")
 	} else {
-		bodyLabel = StyleTitle.Render("Body")
+		rendered := m.renderer.RenderLines(bodyVal, m.contentWidth())
+		bh := m.scrollBodyHeight()
+		start := m.scrollOff
+		if start > len(rendered) {
+			start = len(rendered)
+		}
+		end := start + bh
+		if end > len(rendered) {
+			end = len(rendered)
+		}
+		paddedLines := make([]string, len(rendered[start:end]))
+		for i, l := range rendered[start:end] {
+			paddedLines[i] = pad + l
+		}
+		bodyContent = strings.Join(paddedLines, "\n")
 	}
 
 	return strings.Join([]string{
-		header, divider,
-		titleLabel, m.titleInput.Value(),
-		"", bodyLabel, m.bodyArea.Value(),
-		divider, "",
+		titleLine,
+		"",
+		pad + StyleSubtle.Render("Body"),
+		bodyContent,
 	}, "\n")
+}
+
+func (m *prComposeModal) renderFooter() string {
+	divider := StyleSubtle.Render(strings.Repeat("─", max(1, m.width-2)))
+	hints := StyleActive.Render("j/k") + StyleSubtle.Render(" scroll  ") +
+		StyleActive.Render("i") + StyleSubtle.Render(" edit  ") +
+		StyleActive.Render("ctrl+↵") + StyleSubtle.Render(" create  ") +
+		StyleActive.Render("ctrl+d") + StyleSubtle.Render(" toggle draft  ") +
+		StyleActive.Render("esc") + StyleSubtle.Render(" cancel")
+	return divider + "\n" + hints
 }
 
 func (m *prComposeModal) renderHeader() string {

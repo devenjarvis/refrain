@@ -51,6 +51,60 @@ func TestPRCompose_OpenSeedsFieldsAndFocusesTitle(t *testing.T) {
 	_ = cmd // Open returns nil in scroll mode; we only verify state here.
 }
 
+// --- Task 2: scroll mode View and scroll keybindings ---
+
+func TestPRCompose_ViewScrollMode_ContainsHeaderAndTitle(t *testing.T) {
+	m := newPRComposeModal()
+	m.SetSize(120, 40)
+	m.Open("My PR Title", "Some body content", true, "feature-x")
+	v := m.View()
+	if !strings.Contains(v, "PR DRAFT") {
+		t.Errorf("scroll view missing 'PR DRAFT', got: %q", v)
+	}
+	if !strings.Contains(v, "feature-x") {
+		t.Errorf("scroll view missing session name 'feature-x', got: %q", v)
+	}
+	if !strings.Contains(v, "My PR Title") {
+		t.Errorf("scroll view missing title text, got: %q", v)
+	}
+}
+
+func TestPRCompose_ScrollKeyJ_IncrementsScrollOff(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.bodyArea.SetValue(strings.Repeat("line\n", 50))
+	m.SetSize(120, 40)
+	before := m.scrollOff
+	m.Update(keyRune('j'))
+	if m.scrollOff <= before {
+		t.Errorf("j did not increment scrollOff: before=%d after=%d", before, m.scrollOff)
+	}
+}
+
+func TestPRCompose_ScrollKeyK_DecrementsScrollOff(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.bodyArea.SetValue(strings.Repeat("line\n", 50))
+	m.SetSize(120, 40)
+	m.Update(keyRune('j'))
+	m.Update(keyRune('j'))
+	after := m.scrollOff
+	m.Update(keyRune('k'))
+	if m.scrollOff >= after {
+		t.Errorf("k did not decrement scrollOff: before=%d after=%d", after, m.scrollOff)
+	}
+}
+
+func TestPRCompose_ScrollKeyG_GoesToTop(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.bodyArea.SetValue(strings.Repeat("line\n", 50))
+	m.SetSize(120, 40)
+	m.Update(keyRune('j'))
+	m.Update(keyRune('j'))
+	m.Update(keyRune('g'))
+	if m.scrollOff != 0 {
+		t.Errorf("g did not reset scrollOff to 0, got %d", m.scrollOff)
+	}
+}
+
 func TestPRCompose_EscCancels(t *testing.T) {
 	m := makePRComposeForTest(t)
 	cmd := m.Update(keyNamed(tea.KeyEscape))
