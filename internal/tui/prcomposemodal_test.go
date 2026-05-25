@@ -67,6 +67,10 @@ func TestPRCompose_ViewScrollMode_ContainsHeaderAndTitle(t *testing.T) {
 	if !strings.Contains(v, "My PR Title") {
 		t.Errorf("scroll view missing title text, got: %q", v)
 	}
+	// Verify body is rendered through mdrender (content must appear in output).
+	if !strings.Contains(v, "Some body content") {
+		t.Errorf("scroll view missing body content rendered through mdrender, got: %q", v)
+	}
 }
 
 func TestPRCompose_ScrollKeyJ_IncrementsScrollOff(t *testing.T) {
