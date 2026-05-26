@@ -236,27 +236,6 @@ func TestPRCompose_CtrlD_TogglesDraft(t *testing.T) {
 	}
 }
 
-// --- Task 5: edit-mode View ---
-
-func TestPRCompose_ViewEditMode_ContainsHeaderAndTitle(t *testing.T) {
-	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode
-	v := m.View()
-	if !strings.Contains(v, "PR DRAFT") {
-		t.Errorf("edit view missing 'PR DRAFT', got: %q", v)
-	}
-	// titleInput.View() must appear: value set in makePRComposeForTest.
-	if !strings.Contains(v, "Initial title") {
-		t.Errorf("edit view missing titleInput.View() output, got: %q", v)
-	}
-	// bodyArea.View() must appear: value set in makePRComposeForTest.
-	if !strings.Contains(v, "Initial body line 1") {
-		t.Errorf("edit view missing bodyArea.View() output, got: %q", v)
-	}
-}
-
-// --- Task 4: submit, cancel, draft toggle across modes ---
-
 func TestPRCompose_CtrlEnterInEditMode_Submits(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i')) // enter edit mode
@@ -281,6 +260,38 @@ func TestPRCompose_CtrlD_TogglesDraftInEditMode(t *testing.T) {
 	m.Update(keyCtrlRune('d'))
 	if m.draft {
 		t.Error("ctrl+d in edit mode did not toggle draft off")
+	}
+}
+
+func TestPRCompose_CtrlEnter_EmptyTitle_NoOp_EditMode(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.Update(keyRune('i')) // enter edit mode
+	m.titleInput.SetValue("   ")
+	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
+	if cmd != nil {
+		t.Fatalf("empty title in edit mode should be a no-op; got cmd %T", cmd())
+	}
+	if !m.Active() {
+		t.Error("modal should stay open when title is empty in edit mode")
+	}
+}
+
+// --- Task 5: edit-mode View ---
+
+func TestPRCompose_ViewEditMode_ContainsHeaderAndTitle(t *testing.T) {
+	m := makePRComposeForTest(t)
+	m.Update(keyRune('i')) // enter edit mode
+	v := m.View()
+	if !strings.Contains(v, "PR DRAFT") {
+		t.Errorf("edit view missing 'PR DRAFT', got: %q", v)
+	}
+	// titleInput.View() must appear: value set in makePRComposeForTest.
+	if !strings.Contains(v, "Initial title") {
+		t.Errorf("edit view missing titleInput.View() output, got: %q", v)
+	}
+	// bodyArea.View() must appear: value set in makePRComposeForTest.
+	if !strings.Contains(v, "Initial body line 1") {
+		t.Errorf("edit view missing bodyArea.View() output, got: %q", v)
 	}
 }
 
