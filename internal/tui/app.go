@@ -1004,7 +1004,7 @@ func (a App) View() tea.View {
 		if rp := a.modals.Review(); rp != nil {
 			var panelStr string
 			if a.prComposeModal.Active() {
-				panelStr = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
+				panelStr = a.prComposeModal.View()
 			} else {
 				panelStr = rp.View(a.panelServices())
 			}
@@ -1067,7 +1067,7 @@ func (a App) View() tea.View {
 		}
 		// PR compose modal overlay.
 		if a.prComposeModal.Active() {
-			body = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.prComposeModal.View())
+			body = a.prComposeModal.View()
 		}
 		// Agent-limit modal overlay: replace body with centered modal when active.
 		if a.sessionLimitModalActive {
