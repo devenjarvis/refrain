@@ -160,10 +160,10 @@ func (m *prComposeModal) updateScroll(msg tea.Msg) tea.Cmd {
 			m.scrollOff--
 		}
 	case "pgdown":
-		m.scrollOff += m.scrollBodyHeight() / 2
+		m.scrollOff += m.bodyHeight() / 2
 		m.clampScroll()
 	case "pgup":
-		m.scrollOff -= m.scrollBodyHeight() / 2
+		m.scrollOff -= m.bodyHeight() / 2
 		if m.scrollOff < 0 {
 			m.scrollOff = 0
 		}
@@ -276,7 +276,7 @@ func (m *prComposeModal) renderScrollBody() string {
 		bodyContent = pad + StyleSubtle.Render("(no body)")
 	} else {
 		rendered := m.renderer.RenderLines(bodyVal, m.contentWidth())
-		bh := m.scrollBodyHeight()
+		bh := m.bodyHeight()
 		start := m.scrollOff
 		if start > len(rendered) {
 			start = len(rendered)
@@ -348,7 +348,7 @@ func (m *prComposeModal) displayLeftPad() int {
 	return pad
 }
 
-func (m *prComposeModal) scrollBodyHeight() int {
+func (m *prComposeModal) bodyHeight() int {
 	h := m.height - 7
 	if h < 1 {
 		h = 1
@@ -369,7 +369,7 @@ func (m *prComposeModal) clampScroll() {
 		return
 	}
 	rendered := m.renderer.RenderLines(m.bodyArea.Value(), m.contentWidth())
-	maxOff := len(rendered) - m.scrollBodyHeight()
+	maxOff := len(rendered) - m.bodyHeight()
 	if maxOff < 0 {
 		maxOff = 0
 	}
