@@ -109,6 +109,8 @@ func TestPRCompose_ScrollKeyG_GoesToTop(t *testing.T) {
 	}
 }
 
+// --- Task 4: scroll mode submit, cancel, and draft toggle ---
+
 func TestPRCompose_EscCancels(t *testing.T) {
 	m := makePRComposeForTest(t)
 	cmd := m.Update(keyNamed(tea.KeyEscape))
@@ -159,6 +161,28 @@ func TestPRCompose_CtrlEnter_EmptyTitle_NoOp(t *testing.T) {
 	}
 	if !m.Active() {
 		t.Error("modal should stay open when title is empty")
+	}
+}
+
+func TestPRCompose_CtrlD_ScrollMode_TogglesAndDraftReflectedOnSubmit(t *testing.T) {
+	m := makePRComposeForTest(t)
+	if !m.draft {
+		t.Fatal("prereq: draft should start true")
+	}
+	m.Update(keyCtrlRune('d')) // toggle to ready
+	if m.draft {
+		t.Fatal("ctrl+d did not toggle draft off in scroll mode")
+	}
+	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("expected submit cmd")
+	}
+	got, ok := cmd().(prComposeSubmitMsg)
+	if !ok {
+		t.Fatalf("got %T, want prComposeSubmitMsg", cmd())
+	}
+	if got.draft {
+		t.Error("submitted draft flag should be false after ctrl+d toggle")
 	}
 }
 
