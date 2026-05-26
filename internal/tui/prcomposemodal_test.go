@@ -45,8 +45,8 @@ func TestPRCompose_OpenSeedsFieldsAndFocusesTitle(t *testing.T) {
 	if m.draft {
 		t.Error("draft should be false when Open passes draft=false")
 	}
-	if m.focused != 0 {
-		t.Errorf("focused = %d, want 0 (title)", m.focused)
+	if m.titleInput.Focused() {
+		t.Error("title input should not be focused in scroll mode after Open")
 	}
 	_ = cmd // Open returns nil in scroll mode; we only verify state here.
 }
@@ -173,8 +173,8 @@ func TestPRCompose_I_EntersEditModeAndFocusesTitle(t *testing.T) {
 	if m.mode != prComposeModeEdit {
 		t.Errorf("after i: mode=%v, want prComposeModeEdit", m.mode)
 	}
-	if m.focused != 0 {
-		t.Errorf("after i: focused=%d, want 0 (title)", m.focused)
+	if !m.titleInput.Focused() {
+		t.Error("after i: title input should be focused")
 	}
 }
 
@@ -195,17 +195,17 @@ func TestPRCompose_EscInEditMode_ReturnsToScroll(t *testing.T) {
 
 func TestPRCompose_Tab_SwitchesFocusToBodyInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode; focused=0 (title)
-	if m.focused != 0 {
-		t.Fatalf("prereq: focused=%d, want 0 after i", m.focused)
+	m.Update(keyRune('i')) // enter edit mode; title focused first
+	if !m.titleInput.Focused() {
+		t.Fatal("prereq: title input should be focused after i")
 	}
 	m.Update(keyNamed(tea.KeyTab))
-	if m.focused != 1 {
-		t.Errorf("after tab: focused=%d, want 1 (body)", m.focused)
+	if !m.bodyArea.Focused() {
+		t.Error("after tab: body should be focused")
 	}
 	m.Update(keyNamed(tea.KeyTab))
-	if m.focused != 0 {
-		t.Errorf("after second tab: focused=%d, want 0 (title)", m.focused)
+	if !m.titleInput.Focused() {
+		t.Error("after second tab: title should be focused again")
 	}
 }
 
@@ -213,8 +213,8 @@ func TestPRCompose_ShiftTab_SwitchesFocusInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i')) // enter edit mode
 	m.Update(keyShiftNamed(tea.KeyTab))
-	if m.focused != 1 {
-		t.Errorf("after shift+tab: focused=%d, want 1", m.focused)
+	if !m.bodyArea.Focused() {
+		t.Error("after shift+tab: body should be focused")
 	}
 }
 
@@ -289,8 +289,8 @@ func TestPRCompose_CtrlD_TogglesDraftInEditMode(t *testing.T) {
 func TestPRCompose_PasteInEditMode_TitleFocused_UpdatesTitle(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i')) // enter edit mode, title focused
-	if m.focused != 0 {
-		t.Fatalf("prereq: focused=%d, want 0 (title)", m.focused)
+	if !m.titleInput.Focused() {
+		t.Fatal("prereq: title input should be focused after i")
 	}
 	cmd := m.Update(tea.PasteMsg{Content: "pasted-title"})
 	if cmd != nil {
@@ -305,8 +305,8 @@ func TestPRCompose_PasteInEditMode_BodyFocused_UpdatesBody(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i'))         // enter edit mode
 	m.Update(keyNamed(tea.KeyTab)) // switch to body
-	if m.focused != 1 {
-		t.Fatalf("prereq: focused=%d, want 1 (body)", m.focused)
+	if !m.bodyArea.Focused() {
+		t.Fatal("prereq: body should be focused after tab")
 	}
 	bodyBefore := m.bodyArea.Value()
 	m.Update(tea.PasteMsg{Content: "pasted-body"})
@@ -338,8 +338,8 @@ func TestPRCompose_PrintableKey_RoutedToBodyInEditModeWhenBodyFocused(t *testing
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i'))         // enter edit mode (title focused)
 	m.Update(keyNamed(tea.KeyTab)) // switch to body
-	if m.focused != 1 {
-		t.Fatalf("focused = %d after tab, want 1", m.focused)
+	if !m.bodyArea.Focused() {
+		t.Fatal("body should be focused after tab")
 	}
 	bodyBefore := m.bodyArea.Value()
 	m.Update(keyRune('?'))

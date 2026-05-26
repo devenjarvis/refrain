@@ -26,7 +26,6 @@ type prComposeModal struct {
 	bodyArea   mdtextarea.Model
 	renderer   *mdrender.Renderer
 	mode       prComposeMode
-	focused    int // 0=title, 1=body (meaningful in edit mode)
 	draft      bool
 	width      int
 	height     int
@@ -73,7 +72,6 @@ func (m *prComposeModal) Open(title, body string, draft bool, sessName string) t
 	m.mode = prComposeModeScroll
 	m.scrollOff = 0
 	m.sessName = sessName
-	m.focused = 0
 	m.titleInput.SetValue(title)
 	m.bodyArea.SetValue(body)
 	m.titleInput.Blur()
@@ -110,7 +108,7 @@ func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
 	}
 	if paste, ok := msg.(tea.PasteMsg); ok {
 		if m.mode == prComposeModeEdit {
-			if m.focused == 0 {
+			if m.titleInput.Focused() {
 				var cmd tea.Cmd
 				m.titleInput, cmd = m.titleInput.Update(paste)
 				return cmd
@@ -153,7 +151,6 @@ func (m *prComposeModal) updateScroll(msg tea.Msg) tea.Cmd {
 		m.draft = !m.draft
 	case "i":
 		m.mode = prComposeModeEdit
-		m.focused = 0
 		return m.titleInput.Focus()
 	case "j":
 		m.scrollOff++
@@ -182,7 +179,7 @@ func (m *prComposeModal) updateScroll(msg tea.Msg) tea.Cmd {
 func (m *prComposeModal) updateEdit(msg tea.Msg) tea.Cmd {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
-		if m.focused == 0 {
+		if m.titleInput.Focused() {
 			var cmd tea.Cmd
 			m.titleInput, cmd = m.titleInput.Update(msg)
 			return cmd
@@ -212,16 +209,14 @@ func (m *prComposeModal) updateEdit(msg tea.Msg) tea.Cmd {
 		m.draft = !m.draft
 		return nil
 	case "tab", "shift+tab":
-		if m.focused == 0 {
-			m.focused = 1
+		if m.titleInput.Focused() {
 			m.titleInput.Blur()
 			return m.bodyArea.Focus()
 		}
-		m.focused = 0
 		m.bodyArea.Blur()
 		return m.titleInput.Focus()
 	}
-	if m.focused == 0 {
+	if m.titleInput.Focused() {
 		var cmd tea.Cmd
 		m.titleInput, cmd = m.titleInput.Update(msg)
 		return cmd
@@ -251,7 +246,7 @@ func (m *prComposeModal) renderEditBody() string {
 
 	titleLabel := StyleSubtle.Render("Title")
 	bodyLabel := StyleSubtle.Render("Body")
-	if m.focused == 0 {
+	if m.titleInput.Focused() {
 		titleLabel = StyleTitle.Render("Title")
 	} else {
 		bodyLabel = StyleTitle.Render("Body")
