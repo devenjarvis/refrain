@@ -226,7 +226,7 @@ func newPlanEditor(sess *agent.Session, repoPath string, width, height int) plan
 	ta := mdtextarea.New()
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
-	ta.SetWidth(textareaWidth(width))
+	ta.SetWidth(m.contentWidth())
 	ta.SetHeight(textareaHeight(height))
 	m.renderer = mdrender.New(planEditorChromaStyle)
 	ta.SetMarkdownRenderer(m.renderer)
@@ -256,7 +256,7 @@ func newPlanEditor(sess *agent.Session, repoPath string, width, height int) plan
 func (m *planEditorModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	m.textarea.SetWidth(textareaWidth(w))
+	m.textarea.SetWidth(m.contentWidth())
 	m.textarea.SetHeight(textareaHeight(h))
 	m.reviseInput.SetWidth(w - 4)
 	m.questionInput.SetWidth(w - 4)
@@ -892,6 +892,21 @@ func (m *planEditorModel) displayLeftPad() int {
 	return pad
 }
 
+// centeredBlock prepends displayLeftPad() spaces to each line of s, matching
+// the scroll-mode centering applied in displayLines().
+func (m *planEditorModel) centeredBlock(s string) string {
+	pad := m.displayLeftPad()
+	if pad == 0 {
+		return s
+	}
+	prefix := strings.Repeat(" ", pad)
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = prefix + l
+	}
+	return strings.Join(lines, "\n")
+}
+
 // styledScrollLines wraps and styles a source line for scroll-mode display,
 // applying fence-block bar prefixes that are omitted in edit mode to keep
 // mdtextarea cursor-splice math unaffected.
@@ -980,7 +995,7 @@ func (m *planEditorModel) View() string {
 
 	switch m.mode {
 	case planEditorModeEdit:
-		lines = append(lines, m.textarea.View())
+		lines = append(lines, m.centeredBlock(m.textarea.View()))
 	case planEditorModeReviseInput:
 		lines = append(lines, m.renderBody())
 		lines = append(lines, "")
