@@ -278,8 +278,11 @@ func TestRenderReviewPanel_FullWidthStack(t *testing.T) {
 	sess := agent.NewSessionForTest("sess-wide", "fix-auth")
 	sess.SetOriginalPrompt("Fix auth")
 	sess.MarkDone()
+	// Long task text that would be truncated in the old 40%-width left pane but
+	// must appear in full in the new full-width stacked layout.
+	longTaskText := "Add authentication middleware with token validation and redirect"
 	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
+		tasks: []agent.PlanTask{{Index: 1, Text: longTaskText}},
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
 			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
@@ -300,9 +303,16 @@ func TestRenderReviewPanel_FullWidthStack(t *testing.T) {
 	}
 	// In stacked mode, PLAN TASKS and Task 1: are never on the same line.
 	for _, line := range strings.Split(output, "\n") {
-		if strings.Contains(line, "PLAN TASKS") && strings.Contains(line, "Task 1:") {
+		stripped := ansi.Strip(line)
+		if strings.Contains(stripped, "PLAN TASKS") && strings.Contains(stripped, "Task 1:") {
 			t.Errorf("in stacked mode panes must not be side-by-side; found both on one line: %q", line)
 		}
+	}
+	// Full-width: the long task name must not be truncated. In the old 40%-width
+	// left pane, text beyond ~48 chars was cut. At width=120 the list pane is
+	// now 118 chars wide, so the full task text must appear.
+	if !strings.Contains(ansi.Strip(output), "token validation and redirect") {
+		t.Errorf("full-width stacked layout must not truncate long task text; got:\n%s", output)
 	}
 }
 
