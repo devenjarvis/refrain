@@ -24,7 +24,7 @@ func TestPRCompose_OpenSetsScrollModeAndHasRenderer(t *testing.T) {
 	if m.mode != prComposeModeScroll {
 		t.Errorf("mode = %v, want prComposeModeScroll", m.mode)
 	}
-	if m.bodyArea.MarkdownRenderer() == nil {
+	if m.doc.textarea.MarkdownRenderer() == nil {
 		t.Error("bodyArea should have a MarkdownRenderer set")
 	}
 }
@@ -39,8 +39,8 @@ func TestPRCompose_OpenSeedsFieldsAndFocusesTitle(t *testing.T) {
 	if m.titleInput.Value() != "My title" {
 		t.Errorf("title = %q, want %q", m.titleInput.Value(), "My title")
 	}
-	if m.bodyArea.Value() != "Body text" {
-		t.Errorf("body = %q, want %q", m.bodyArea.Value(), "Body text")
+	if m.doc.Value() != "Body text" {
+		t.Errorf("body = %q, want %q", m.doc.Value(), "Body text")
 	}
 	if m.draft {
 		t.Error("draft should be false when Open passes draft=false")
@@ -75,37 +75,37 @@ func TestPRCompose_ViewScrollMode_ContainsHeaderAndTitle(t *testing.T) {
 
 func TestPRCompose_ScrollKeyJ_IncrementsScrollOff(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.bodyArea.SetValue(strings.Repeat("line\n", 50))
+	m.doc.SetValue(strings.Repeat("line\n", 50))
 	m.SetSize(120, 40)
-	before := m.scrollOff
+	before := m.doc.scrollOff
 	m.Update(keyRune('j'))
-	if m.scrollOff <= before {
-		t.Errorf("j did not increment scrollOff: before=%d after=%d", before, m.scrollOff)
+	if m.doc.scrollOff <= before {
+		t.Errorf("j did not increment scrollOff: before=%d after=%d", before, m.doc.scrollOff)
 	}
 }
 
 func TestPRCompose_ScrollKeyK_DecrementsScrollOff(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.bodyArea.SetValue(strings.Repeat("line\n", 50))
+	m.doc.SetValue(strings.Repeat("line\n", 50))
 	m.SetSize(120, 40)
 	m.Update(keyRune('j'))
 	m.Update(keyRune('j'))
-	after := m.scrollOff
+	after := m.doc.scrollOff
 	m.Update(keyRune('k'))
-	if m.scrollOff >= after {
-		t.Errorf("k did not decrement scrollOff: before=%d after=%d", after, m.scrollOff)
+	if m.doc.scrollOff >= after {
+		t.Errorf("k did not decrement scrollOff: before=%d after=%d", after, m.doc.scrollOff)
 	}
 }
 
 func TestPRCompose_ScrollKeyG_GoesToTop(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.bodyArea.SetValue(strings.Repeat("line\n", 50))
+	m.doc.SetValue(strings.Repeat("line\n", 50))
 	m.SetSize(120, 40)
 	m.Update(keyRune('j'))
 	m.Update(keyRune('j'))
 	m.Update(keyRune('g'))
-	if m.scrollOff != 0 {
-		t.Errorf("g did not reset scrollOff to 0, got %d", m.scrollOff)
+	if m.doc.scrollOff != 0 {
+		t.Errorf("g did not reset scrollOff to 0, got %d", m.doc.scrollOff)
 	}
 }
 
@@ -128,7 +128,7 @@ func TestPRCompose_EscCancels(t *testing.T) {
 func TestPRCompose_CtrlEnterSubmitsTrimmedValues(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.titleInput.SetValue("  trimmed title  ")
-	m.bodyArea.SetValue("\nbody with leading newline\n")
+	m.doc.SetValue("\nbody with leading newline\n")
 
 	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
 	if cmd == nil {
@@ -224,7 +224,7 @@ func TestPRCompose_Tab_SwitchesFocusToBodyInEditMode(t *testing.T) {
 		t.Fatal("prereq: title input should be focused after i")
 	}
 	m.Update(keyNamed(tea.KeyTab))
-	if !m.bodyArea.Focused() {
+	if !m.doc.Focused() {
 		t.Error("after tab: body should be focused")
 	}
 	m.Update(keyNamed(tea.KeyTab))
@@ -237,7 +237,7 @@ func TestPRCompose_ShiftTab_SwitchesFocusInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i')) // enter edit mode
 	m.Update(keyShiftNamed(tea.KeyTab))
-	if !m.bodyArea.Focused() {
+	if !m.doc.Focused() {
 		t.Error("after shift+tab: body should be focused")
 	}
 }
@@ -340,12 +340,12 @@ func TestPRCompose_PasteInEditMode_BodyFocused_UpdatesBody(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i'))         // enter edit mode
 	m.Update(keyNamed(tea.KeyTab)) // switch to body
-	if !m.bodyArea.Focused() {
+	if !m.doc.Focused() {
 		t.Fatal("prereq: body should be focused after tab")
 	}
-	bodyBefore := m.bodyArea.Value()
+	bodyBefore := m.doc.Value()
 	m.Update(tea.PasteMsg{Content: "pasted-body"})
-	if got := m.bodyArea.Value(); got == bodyBefore {
+	if got := m.doc.Value(); got == bodyBefore {
 		t.Error("paste in body-focused edit mode did not update body")
 	}
 }
@@ -373,12 +373,12 @@ func TestPRCompose_PrintableKey_RoutedToBodyInEditModeWhenBodyFocused(t *testing
 	m := makePRComposeForTest(t)
 	m.Update(keyRune('i'))         // enter edit mode (title focused)
 	m.Update(keyNamed(tea.KeyTab)) // switch to body
-	if !m.bodyArea.Focused() {
+	if !m.doc.Focused() {
 		t.Fatal("body should be focused after tab")
 	}
-	bodyBefore := m.bodyArea.Value()
+	bodyBefore := m.doc.Value()
 	m.Update(keyRune('?'))
-	if m.bodyArea.Value() == bodyBefore {
+	if m.doc.Value() == bodyBefore {
 		t.Error("typing in body did not change body value")
 	}
 	if !strings.HasPrefix(m.titleInput.Value(), "Initial title") {
