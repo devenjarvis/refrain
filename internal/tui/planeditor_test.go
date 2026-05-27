@@ -263,7 +263,7 @@ func TestPlanEditor_ScrollAndEditModeUseSameWidth(t *testing.T) {
 	_ = sess.WritePlan("# H\nshort\n")
 
 	t.Run("narrow", func(t *testing.T) {
-		// textareaWidth(70) = 68, which is below planEditorMaxMeasure (72).
+		// textareaWidth(70) = 68, which is below docEditorMaxMeasure (72).
 		// contentWidth() == 68 == textarea.Width().
 		editor := newPlanEditor(sess, "", 70, 30)
 		if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
@@ -272,14 +272,14 @@ func TestPlanEditor_ScrollAndEditModeUseSameWidth(t *testing.T) {
 	})
 
 	t.Run("wide", func(t *testing.T) {
-		// textareaWidth(120) = 118, but contentWidth() is capped at planEditorMaxMeasure (72).
+		// textareaWidth(120) = 118, but contentWidth() is capped at docEditorMaxMeasure (72).
 		// textarea.Width() must also be 72 so wrap columns match.
 		editor := newPlanEditor(sess, "", 120, 30)
 		if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
-			t.Errorf("contentWidth=%d, textarea.Width()=%d; on wide terminals both must equal planEditorMaxMeasure (%d)", got, want, planEditorMaxMeasure)
+			t.Errorf("contentWidth=%d, textarea.Width()=%d; on wide terminals both must equal docEditorMaxMeasure (%d)", got, want, docEditorMaxMeasure)
 		}
-		if editor.contentWidth() != planEditorMaxMeasure {
-			t.Errorf("contentWidth()=%d, want planEditorMaxMeasure=%d on wide terminal", editor.contentWidth(), planEditorMaxMeasure)
+		if editor.contentWidth() != docEditorMaxMeasure {
+			t.Errorf("contentWidth()=%d, want docEditorMaxMeasure=%d on wide terminal", editor.contentWidth(), docEditorMaxMeasure)
 		}
 	})
 }
@@ -295,7 +295,7 @@ func TestPlanEditor_EditModeCenteredOnWideTerminal(t *testing.T) {
 
 	// textarea.Width() must be capped at contentWidth() (72), not textareaWidth(120)=118.
 	if got, want := editor.textarea.Width(), editor.contentWidth(); got != want {
-		t.Errorf("textarea.Width()=%d, want contentWidth()=%d; edit mode must cap at planEditorMaxMeasure on wide terminals",
+		t.Errorf("textarea.Width()=%d, want contentWidth()=%d; edit mode must cap at docEditorMaxMeasure on wide terminals",
 			got, want)
 	}
 

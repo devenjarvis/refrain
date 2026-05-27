@@ -52,7 +52,7 @@ func newPRComposeModal() prComposeModal {
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
 
-	renderer := mdrender.New(planEditorChromaStyle)
+	renderer := mdrender.New(docEditorChromaStyle)
 	ta.SetMarkdownRenderer(renderer)
 
 	return prComposeModal{
@@ -339,12 +339,12 @@ func (m *prComposeModal) renderHeader() string {
 }
 
 func (m *prComposeModal) contentWidth() int {
-	w, _ := mdrender.ContentMeasure(m.width, planEditorMaxMeasure)
+	w, _ := mdrender.ContentMeasure(m.width, docEditorMaxMeasure)
 	return w
 }
 
 func (m *prComposeModal) displayLeftPad() int {
-	_, pad := mdrender.ContentMeasure(m.width, planEditorMaxMeasure)
+	_, pad := mdrender.ContentMeasure(m.width, docEditorMaxMeasure)
 	return pad
 }
 

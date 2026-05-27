@@ -3,7 +3,6 @@ package tui
 import (
 	"crypto/sha256"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,14 +14,6 @@ import (
 	"github.com/devenjarvis/refrain/internal/tui/mdrender"
 	"github.com/devenjarvis/refrain/internal/tui/mdtextarea"
 )
-
-// planEditorChromaStyle is the chroma style used by the markdown renderer.
-// Hardcoded for now — a follow-up will plumb this through config.Settings.
-const planEditorChromaStyle = "monokai"
-
-// planEditorMaxMeasure is the maximum content column width for plan text.
-// On wider terminals the plan is centered with equal left/right margins.
-const planEditorMaxMeasure = 72
 
 // planSection represents one H1 or H2 ATX section in the plan. headingLine is
 // the 0-based source-line index of the `#`/`##` line; nextLine is the index of
@@ -228,7 +219,7 @@ func newPlanEditor(sess *agent.Session, repoPath string, width, height int) plan
 	ta.ShowLineNumbers = false
 	ta.SetWidth(m.contentWidth())
 	ta.SetHeight(textareaHeight(height))
-	m.renderer = mdrender.New(planEditorChromaStyle)
+	m.renderer = mdrender.New(docEditorChromaStyle)
 	ta.SetMarkdownRenderer(m.renderer)
 	m.textarea = ta
 
@@ -880,15 +871,15 @@ func (m *planEditorModel) displayLines() []string {
 }
 
 // contentWidth returns the effective column width for wrap and styling.
-// Capped at planEditorMaxMeasure so wide terminals produce comfortable margins.
+// Capped at docEditorMaxMeasure so wide terminals produce comfortable margins.
 func (m *planEditorModel) contentWidth() int {
-	measure, _ := mdrender.ContentMeasure(textareaWidth(m.width), planEditorMaxMeasure)
+	measure, _ := mdrender.ContentMeasure(textareaWidth(m.width), docEditorMaxMeasure)
 	return measure
 }
 
 // displayLeftPad returns the left-margin padding to center content on wide terminals.
 func (m *planEditorModel) displayLeftPad() int {
-	_, pad := mdrender.ContentMeasure(textareaWidth(m.width), planEditorMaxMeasure)
+	_, pad := mdrender.ContentMeasure(textareaWidth(m.width), docEditorMaxMeasure)
 	return pad
 }
 
@@ -1162,28 +1153,3 @@ func (m *planEditorModel) renderQuestionBody() string {
 	return b.String()
 }
 
-// textareaWidth/textareaHeight reserve space for header, divider, status,
-// and footer when sizing the embedded textarea.
-func textareaWidth(w int) int {
-	if w < 8 {
-		return 8
-	}
-	return w - 2
-}
-
-func textareaHeight(h int) int {
-	if h < 6 {
-		return 1
-	}
-	return h - 5
-}
-
-func fmtSeconds(s int) string {
-	if s < 0 {
-		s = 0
-	}
-	if s < 60 {
-		return strconv.Itoa(s) + "s"
-	}
-	return strconv.Itoa(s/60) + "m" + strconv.Itoa(s%60) + "s"
-}
