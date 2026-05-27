@@ -937,9 +937,10 @@ func TestRenderReviewHeader_NoGoalWhenNoPlan(t *testing.T) {
 	}
 }
 
-// TestRenderReviewPanel_HintsIncludeSpecAndScroll verifies that the footer hints
-// include ? (spec) and pgdn/pgup (scroll), and no longer show "view task diff".
-func TestRenderReviewPanel_HintsIncludeSpecAndScroll(t *testing.T) {
+// TestRenderReviewPanel_HintsIncludeSpecAndEnter verifies that the footer hints
+// include ? (spec) and enter (open task diff), and no longer show "view task diff"
+// or "pgdn/pgup" (the inline diff viewport was removed).
+func TestRenderReviewPanel_HintsIncludeSpecAndEnter(t *testing.T) {
 	sess := agent.NewSessionForTest("sess-hints", "fix-auth")
 	sess.SetOriginalPrompt("Fix auth")
 	sess.MarkDone()
@@ -955,15 +956,19 @@ func TestRenderReviewPanel_HintsIncludeSpecAndScroll(t *testing.T) {
 	}
 
 	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0)
+	stripped := ansi.Strip(output)
 
-	if !strings.Contains(output, "?") {
+	if !strings.Contains(stripped, "?") {
 		t.Error("footer must include '?' hint for spec overlay")
 	}
-	if !strings.Contains(output, "pgdn") {
-		t.Error("footer must include 'pgdn' hint for scroll")
+	if !strings.Contains(stripped, "enter") {
+		t.Error("footer must include 'enter' hint for opening task diff")
+	}
+	if strings.Contains(stripped, "pgdn") {
+		t.Error("footer must not include 'pgdn' hint (inline viewport removed)")
 	}
 	if strings.Contains(output, "view task diff") {
-		t.Error("footer must not include 'view task diff' hint (removed in favor of inline diff)")
+		t.Error("footer must not include 'view task diff' hint (removed in favor of full-screen diff viewer)")
 	}
 }
 
