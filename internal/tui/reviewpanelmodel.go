@@ -153,6 +153,28 @@ func (m *reviewPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel, t
 // handleKey is the per-key dispatch extracted from app.go's monolithic
 // Update. Spec overlay intercepts all keys while active.
 func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (PanelModel, tea.Cmd) {
+	// Tab-switching keys work even while spec overlay is open.
+	switch msg.String() {
+	case "1":
+		m.activeTab = reviewTabTasks
+		return m, nil
+	case "2":
+		m.activeTab = reviewTabDiff
+		return m, nil
+	case "3":
+		m.activeTab = reviewTabChecks
+		return m, nil
+	case "4":
+		m.activeTab = reviewTabValidate
+		return m, nil
+	case "tab":
+		m.activeTab = (m.activeTab + 1) % 4
+		return m, nil
+	case "shift+tab":
+		m.activeTab = (m.activeTab + 3) % 4
+		return m, nil
+	}
+
 	if m.specOverlay {
 		switch msg.String() {
 		case "esc":
@@ -218,15 +240,17 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		reviewOpenIDECmd(m.session, m.repoPath, svc)
 		return m, nil
 	case "j", "down":
-		if entry := svc.ReviewCache(m.repoPath, m.session.ID); entry != nil {
-			maxIdx := reviewTaskCount(entry) - 1
-			if m.taskCursor < maxIdx {
-				m.taskCursor++
+		if m.activeTab == reviewTabTasks {
+			if entry := svc.ReviewCache(m.repoPath, m.session.ID); entry != nil {
+				maxIdx := reviewTaskCount(entry) - 1
+				if m.taskCursor < maxIdx {
+					m.taskCursor++
+				}
 			}
 		}
 		return m, nil
 	case "k", "up":
-		if m.taskCursor > 0 {
+		if m.activeTab == reviewTabTasks && m.taskCursor > 0 {
 			m.taskCursor--
 		}
 		return m, nil

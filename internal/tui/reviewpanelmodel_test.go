@@ -68,6 +68,54 @@ type testServiceState struct {
 	killSessionCalled  bool
 }
 
+// TestReviewPanelModel_TabSwitching verifies 1–4 and tab/shift+tab change activeTab.
+func TestReviewPanelModel_TabSwitching(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	panel := newReviewPanel(sess, "", 120, 40)
+	svc, _ := newTestSvc()
+
+	press := func(msg tea.KeyPressMsg) {
+		t.Helper()
+		_, _ = panel.Update(msg, svc)
+	}
+
+	// Numeric keys jump directly.
+	press(keyRune('2'))
+	if panel.activeTab != reviewTabDiff {
+		t.Errorf("'2': activeTab=%d, want %d (Diff)", panel.activeTab, reviewTabDiff)
+	}
+	press(keyRune('3'))
+	if panel.activeTab != reviewTabChecks {
+		t.Errorf("'3': activeTab=%d, want %d (Checks)", panel.activeTab, reviewTabChecks)
+	}
+	press(keyRune('4'))
+	if panel.activeTab != reviewTabValidate {
+		t.Errorf("'4': activeTab=%d, want %d (Validate)", panel.activeTab, reviewTabValidate)
+	}
+	press(keyRune('1'))
+	if panel.activeTab != reviewTabTasks {
+		t.Errorf("'1': activeTab=%d, want %d (Tasks)", panel.activeTab, reviewTabTasks)
+	}
+
+	// tab increments with wrap.
+	press(keyNamed(tea.KeyTab))
+	if panel.activeTab != reviewTabDiff {
+		t.Errorf("tab: activeTab=%d, want %d (Diff)", panel.activeTab, reviewTabDiff)
+	}
+	press(keyNamed(tea.KeyTab))
+	press(keyNamed(tea.KeyTab))
+	press(keyNamed(tea.KeyTab)) // wraps from Validate back to Tasks
+	if panel.activeTab != reviewTabTasks {
+		t.Errorf("tab wrap: activeTab=%d, want %d (Tasks)", panel.activeTab, reviewTabTasks)
+	}
+
+	// shift+tab decrements with wrap.
+	press(keyShiftNamed(tea.KeyTab))
+	if panel.activeTab != reviewTabValidate {
+		t.Errorf("shift+tab: activeTab=%d, want %d (Validate)", panel.activeTab, reviewTabValidate)
+	}
+}
+
 // TestReviewPanelModel_DefaultTab confirms that newReviewPanel initialises
 // activeTab to 0 (Tasks tab). Zero-value initialisation covers this, but the
 // test pins the contract so a future refactor can't silently break it.
