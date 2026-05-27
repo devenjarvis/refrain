@@ -142,6 +142,15 @@ func renderReviewHeader(sess *agent.Session, width int) []string {
 	return lines
 }
 
+// renderReviewPlaceholderTab renders a height-line placeholder body for tabs
+// that haven't been implemented yet. The label is centered on the first line.
+func renderReviewPlaceholderTab(label string, width, height int) []string {
+	lines := make([]string, height)
+	centered := StyleSubtle.Render("(" + label + ")")
+	lines[0] = centered
+	return lines
+}
+
 // renderReviewTabBar renders the 2-line tab bar for the review panel.
 // Line 0: tab labels separated by two spaces; active tab in ColorSecondary bold,
 // inactive tabs in StyleSubtle. Line 1: a subtle horizontal divider.
@@ -165,9 +174,13 @@ func renderReviewTabBar(activeTab, width int) []string {
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
 // cursor is the currently selected task row index (0-based among all task rows).
 // prDraftInFlight, when true, shows a spinner status line and disables the p hint.
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool) string {
+// activeTab selects which tab body to render (0=Tasks, 1=Diff, 2=Checks, 3=Validate).
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, activeTab int) string {
 	// Header (3–4 lines depending on prompt length).
 	headerLines := renderReviewHeader(sess, width)
+
+	// Tab bar: 2 lines (labels + divider).
+	const tabBarH = 2
 
 	// Footer: blank + divider + hints = 3 lines; +1 when draft in flight.
 	footerLineCount := 3
@@ -175,16 +188,30 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	if prDraftInFlight {
 		draftLineCount = 1
 	}
-	bodyH := height - len(headerLines) - footerLineCount - draftLineCount
+	bodyH := height - len(headerLines) - tabBarH - footerLineCount - draftLineCount
 	if bodyH < 4 {
 		bodyH = 4
 	}
 
-	// Build body lines: full-width stacked layout at all terminal widths.
+	// Build body lines based on active tab.
 	var bodyLines []string
-	if entry == nil {
+	switch {
+	case activeTab != reviewTabTasks:
+		// Non-Tasks tabs: placeholder.
+		var label string
+		switch activeTab {
+		case reviewTabDiff:
+			label = "full diff browser coming soon"
+		case reviewTabChecks:
+			label = "local checks coming soon"
+		case reviewTabValidate:
+			label = "manual validation coming soon"
+		}
+		bodyLines = renderReviewPlaceholderTab(label, width, bodyH)
+	case entry == nil:
 		bodyLines = append(bodyLines, StyleSubtle.Render("loading diff stats…"))
-	} else {
+	default:
+		// Tasks tab: full-width stacked layout.
 		listH := bodyH * 2 / 5
 		detailH := bodyH - listH - 1
 		if listH < 2 {
@@ -202,6 +229,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	// Assemble full panel.
 	var lines []string
 	lines = append(lines, headerLines...)
+	lines = append(lines, renderReviewTabBar(activeTab, width)...)
 	lines = append(lines, bodyLines...)
 
 	// In-flight PR draft status line.

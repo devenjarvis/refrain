@@ -328,5 +328,5 @@ func (m *reviewPanelModel) View(svc PanelServices) string {
 	}
 	entry := svc.ReviewCache(m.repoPath, m.session.ID)
 	prDraftInFlight := svc.prDraftInFlightFor(m.session.ID, m.repoPath)
-	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight)
+	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.activeTab)
 }
