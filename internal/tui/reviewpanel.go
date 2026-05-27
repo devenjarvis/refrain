@@ -142,6 +142,25 @@ func renderReviewHeader(sess *agent.Session, width int) []string {
 	return lines
 }
 
+// renderReviewTabBar renders the 2-line tab bar for the review panel.
+// Line 0: tab labels separated by two spaces; active tab in ColorSecondary bold,
+// inactive tabs in StyleSubtle. Line 1: a subtle horizontal divider.
+func renderReviewTabBar(activeTab, width int) []string {
+	labels := []string{"Tasks", "Diff", "Checks", "Validate"}
+	activeStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
+	var parts []string
+	for i, label := range labels {
+		if i == activeTab {
+			parts = append(parts, activeStyle.Render(label))
+		} else {
+			parts = append(parts, StyleSubtle.Render(label))
+		}
+	}
+	labelLine := "  " + strings.Join(parts, "  ")
+	divider := StyleSubtle.Render(strings.Repeat("─", width-2))
+	return []string{labelLine, divider}
+}
+
 // renderReviewPanel renders the fullscreen review panel for a session.
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
 // cursor is the currently selected task row index (0-based among all task rows).

@@ -1286,6 +1286,29 @@ func TestRenderTaskListPane_HeaderUsesHeadingColor(t *testing.T) {
 	}
 }
 
+// TestRenderReviewTabBar_HighlightsActiveTab verifies that renderReviewTabBar
+// returns 2 lines and contains all four tab labels in the first line.
+func TestRenderReviewTabBar_HighlightsActiveTab(t *testing.T) {
+	tabNames := []string{"Tasks", "Diff", "Checks", "Validate"}
+
+	for activeIdx := range tabNames {
+		lines := renderReviewTabBar(activeIdx, 120)
+		if len(lines) != 2 {
+			t.Fatalf("activeTab=%d: expected 2 lines, got %d", activeIdx, len(lines))
+		}
+		stripped := ansi.Strip(lines[0])
+		for _, name := range tabNames {
+			if !strings.Contains(stripped, name) {
+				t.Errorf("activeTab=%d: label line must contain %q; got: %q", activeIdx, name, stripped)
+			}
+		}
+		// Second line must be a divider.
+		if !strings.Contains(ansi.Strip(lines[1]), "─") {
+			t.Errorf("activeTab=%d: line 1 must be a divider; got: %q", activeIdx, lines[1])
+		}
+	}
+}
+
 // TestRenderReviewPanel_NoDiffTask verifies that when a task group has an
 // empty rawDiff, the panel renders without panic and shows the "no diff found"
 // verdict badge in the detail pane. There is no inline diff placeholder since
