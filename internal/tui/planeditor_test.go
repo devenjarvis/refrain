@@ -254,18 +254,70 @@ func TestPlanEditor_ReviseInputEmitsCritique(t *testing.T) {
 	}
 }
 
-// TestPlanEditor_ScrollAndEditModeUseSameWidth pins that on terminals narrower
-// than planEditorMaxMeasure, scroll-mode and edit-mode wrap at the same column.
-// On wide terminals scroll-mode intentionally caps at planEditorMaxMeasure for
-// centering; edit-mode keeps the full textarea width so cursor math is unaffected.
+// TestPlanEditor_ScrollAndEditModeUseSameWidth pins that contentWidth() ==
+// textarea.Width() on all terminal widths — both narrow and wide terminals now
+// produce matching widths so the visible wrap column is consistent across mode
+// switches.
 func TestPlanEditor_ScrollAndEditModeUseSameWidth(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("# H\nshort\n")
-	// textareaWidth(70) = 68, which is below planEditorMaxMeasure (72).
-	// On such terminals contentWidth() must equal textarea.Width().
-	editor := newPlanEditor(sess, "", 70, 30)
-	if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
-		t.Errorf("contentWidth=%d, textarea.Width()=%d; on narrow terminals both modes must wrap at the same column", got, want)
+
+	t.Run("narrow", func(t *testing.T) {
+		// textareaWidth(70) = 68, which is below planEditorMaxMeasure (72).
+		// contentWidth() == 68 == textarea.Width().
+		editor := newPlanEditor(sess, "", 70, 30)
+		if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
+			t.Errorf("contentWidth=%d, textarea.Width()=%d; on narrow terminals both modes must wrap at the same column", got, want)
+		}
+	})
+
+	t.Run("wide", func(t *testing.T) {
+		// textareaWidth(120) = 118, but contentWidth() is capped at planEditorMaxMeasure (72).
+		// textarea.Width() must also be 72 so wrap columns match.
+		editor := newPlanEditor(sess, "", 120, 30)
+		if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
+			t.Errorf("contentWidth=%d, textarea.Width()=%d; on wide terminals both must equal planEditorMaxMeasure (%d)", got, want, planEditorMaxMeasure)
+		}
+		if editor.contentWidth() != planEditorMaxMeasure {
+			t.Errorf("contentWidth()=%d, want planEditorMaxMeasure=%d on wide terminal", editor.contentWidth(), planEditorMaxMeasure)
+		}
+	})
+}
+
+// TestPlanEditor_EditModeCenteredOnWideTerminal asserts that on wide terminals
+// the textarea is capped at contentWidth (72) and the edit-mode View output
+// prepends displayLeftPad() spaces, matching the scroll-mode centering.
+func TestPlanEditor_EditModeCenteredOnWideTerminal(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	_ = sess.WritePlan("# Goal\nsome plan content here\n")
+
+	editor := newPlanEditor(sess, "", 120, 30)
+
+	// textarea.Width() must be capped at contentWidth() (72), not textareaWidth(120)=118.
+	if got, want := editor.textarea.Width(), editor.contentWidth(); got != want {
+		t.Errorf("textarea.Width()=%d, want contentWidth()=%d; edit mode must cap at planEditorMaxMeasure on wide terminals",
+			got, want)
+	}
+
+	leftPad := editor.displayLeftPad()
+	if leftPad == 0 {
+		t.Fatal("displayLeftPad() == 0 at width 120; test precondition failed")
+	}
+
+	editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	if editor.mode != planEditorModeEdit {
+		t.Fatalf("mode = %v after 'i', want planEditorModeEdit", editor.mode)
+	}
+
+	view := testutil.StripANSI(editor.View())
+	viewLines := strings.Split(view, "\n")
+	// viewLines[0]=header, viewLines[1]=divider, viewLines[2]=first textarea line.
+	if len(viewLines) < 3 {
+		t.Fatalf("view has only %d lines, expected header+divider+content", len(viewLines))
+	}
+	prefix := strings.Repeat(" ", leftPad)
+	if !strings.HasPrefix(viewLines[2], prefix) {
+		t.Errorf("first edit-mode content line does not start with %d-space left pad:\n%q", leftPad, viewLines[2])
 	}
 }
 
