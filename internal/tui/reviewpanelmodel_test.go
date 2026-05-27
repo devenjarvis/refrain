@@ -372,29 +372,78 @@ func TestReviewPanelModel_BKey_WithFlag_EmitsReworkMsg(t *testing.T) {
 	}
 }
 
-func TestReviewPanelModel_EnterAndSpace_AreNoOp(t *testing.T) {
-	// Pinned: reviewpanelmodel.go:315 has an explicit `case "enter", "space"`
-	// that returns nil. A future refactor that "uses" these keys should be
-	// noticed.
+// TestReviewPanelModel_EnterEmitsDiffMsg verifies that pressing enter on a task
+// with a non-empty rawDiff returns a cmd that produces reviewOpenTaskDiffMsg.
+func TestReviewPanelModel_EnterEmitsDiffMsg(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+	panel := newReviewPanel(sess, "", 120, 40)
+	rawDiff := "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,4 @@\n package main\n \n+// marker\n func A() {}\n"
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 3, Text: "Add tab-switching keys"}},
+		groups: []taskReviewGroup{{
+			taskIndex: 3,
+			rawDiff:   rawDiff,
+		}},
+		verdicts: map[int]*taskVerdictRecord{3: {state: verdictPending}},
+	}
+	svc, state := newTestSvc()
+	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
+
+	_, cmd := panel.Update(keyNamed(tea.KeyEnter), svc)
+
+	if cmd == nil {
+		t.Fatal("enter on task with rawDiff must return a cmd")
+	}
+	msgs := runCmdAll(t, cmd)
+	diffMsg, found := findMsg[reviewOpenTaskDiffMsg](msgs)
+	if !found {
+		t.Fatalf("expected reviewOpenTaskDiffMsg in cmd output; got: %v", msgs)
+	}
+	if diffMsg.rawDiff != rawDiff {
+		t.Errorf("rawDiff mismatch: got %q, want %q", diffMsg.rawDiff, rawDiff)
+	}
+	if diffMsg.taskLabel != "[3] Add tab-switching keys" {
+		t.Errorf("taskLabel = %q, want %q", diffMsg.taskLabel, "[3] Add tab-switching keys")
+	}
+	if state.closed {
+		t.Error("enter must not close the review panel")
+	}
+}
+
+// TestReviewPanelModel_EnterNoopOnEmptyDiff verifies that enter on a task with
+// no rawDiff produces no command.
+func TestReviewPanelModel_EnterNoopOnEmptyDiff(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+	panel := newReviewPanel(sess, "", 120, 40)
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "task one"}},
+		groups: []taskReviewGroup{{taskIndex: 1, rawDiff: ""}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+	svc, _ := newTestSvc()
+	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
+
+	_, cmd := panel.Update(keyNamed(tea.KeyEnter), svc)
+	if cmd != nil {
+		t.Errorf("enter on task with no rawDiff must be a no-op, got cmd %T", cmd())
+	}
+}
+
+// TestReviewPanelModel_SpaceIsNoOp verifies that space still produces no cmd.
+func TestReviewPanelModel_SpaceIsNoOp(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	panel := newReviewPanel(sess, "", 120, 40)
 	svc, state := newTestSvc()
 
-	for _, k := range []tea.KeyPressMsg{
-		{Code: tea.KeyEnter},
-		{Code: ' ', Text: " "},
-	} {
-		_, cmd := panel.Update(k, svc)
-		if cmd != nil {
-			t.Errorf("%v should be a no-op, got cmd %T", k, cmd())
-		}
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: ' ', Text: " "}, svc)
+	if cmd != nil {
+		t.Errorf("space should be a no-op, got cmd %T", cmd())
 	}
 	if state.closed {
-		t.Error("enter/space must not close the panel")
-	}
-	if sess.LifecyclePhase() != agent.LifecycleInReview {
-		t.Errorf("enter/space changed phase to %v", sess.LifecyclePhase())
+		t.Error("space must not close the panel")
 	}
 }
 

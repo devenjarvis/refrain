@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 
@@ -285,7 +286,32 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		return m, func() tea.Msg {
 			return reviewReworkRequestMsg{sessionID: sessID, repoPath: repoPath, prompt: prompt}
 		}
-	case "enter", "space":
+	case "enter":
+		if m.activeTab == reviewTabTasks {
+			entry := svc.ReviewCache(m.repoPath, m.session.ID)
+			group := reviewTaskGroupAtCursor(entry, m.taskCursor)
+			if group == nil || group.rawDiff == "" {
+				return m, nil
+			}
+			// Build "[N] task text" label using same row order as the list pane.
+			label := "Other changes"
+			if entry != nil {
+				row := 0
+				for _, t := range entry.tasks {
+					if row == m.taskCursor {
+						label = fmt.Sprintf("[%d] %s", t.Index, t.Text)
+						break
+					}
+					row++
+				}
+			}
+			rawDiff := group.rawDiff
+			return m, func() tea.Msg {
+				return reviewOpenTaskDiffMsg{rawDiff: rawDiff, taskLabel: label}
+			}
+		}
+		return m, nil
+	case "space":
 		return m, nil
 	case "?":
 		if m.session.HasPlan() {

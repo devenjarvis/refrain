@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
 	"github.com/devenjarvis/refrain/internal/git"
 	"github.com/devenjarvis/refrain/internal/github"
 )
@@ -673,6 +674,24 @@ func (a App) reviewTaskCmd(sess *agent.Session, repoPath string, group taskRevie
 		})
 		return reviewVerdictMsg{sessionID: sessID, repoPath: repoPath, taskIndex: taskIndex, verdict: verdict, err: err}
 	}
+}
+
+// handleReviewOpenTaskDiff handles reviewOpenTaskDiffMsg by parsing the task's
+// raw diff and opening the full-screen diff viewer scoped to that task. The
+// review modal is preserved — diffCloseMsg returns to ViewDashboard where the
+// modal is still open.
+func (a App) handleReviewOpenTaskDiff(msg reviewOpenTaskDiffMsg) (tea.Model, tea.Cmd) {
+	if msg.rawDiff == "" {
+		return a, nil
+	}
+	m, err := diffmodel.Parse(msg.rawDiff)
+	if err != nil || m == nil {
+		a.setError("could not parse task diff")
+		return a, nil
+	}
+	a.view = ViewDiff
+	a.diff = newDiffModel(msg.taskLabel, m, a.width, a.height-1)
+	return a, nil
 }
 
 // ensureGitignore adds .refrain/ to .gitignore in the given path if not already present.

@@ -4860,21 +4860,21 @@ func TestNewApp_InitsFeedbackTriage(t *testing.T) {
 	}
 }
 
-// TestReviewPanel_EnterDoesNotChangeView verifies that pressing enter or space
-// while focusReview is active does not transition to ViewDiff. The inline diff
-// is now shown inline, so the fullscreen hop is removed.
-func TestReviewPanel_EnterDoesNotChangeView(t *testing.T) {
+// TestReviewPanel_EnterOpensDiffViewer verifies that pressing enter on a task
+// with a non-empty rawDiff transitions to ViewDiff with the review modal preserved.
+func TestReviewPanel_EnterOpensDiffViewer(t *testing.T) {
 	sessR := agent.NewSessionForTest("r", "review-r")
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
 	sessR.SetOriginalPrompt("Fix auth")
 	sessR.MarkDone()
 
+	rawDiff := "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,4 @@\n package main\n \n+// marker\n func A() {}\n"
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
 			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
-			rawDiff:   "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,4 @@\n package main\n \n+// marker\n func A() {}\n",
+			rawDiff:   rawDiff,
 		}},
 		verdicts: map[int]*taskVerdictRecord{
 			1: {state: verdictPending},
@@ -4887,19 +4887,63 @@ func TestReviewPanel_EnterDoesNotChangeView(t *testing.T) {
 	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
 	app.reviewDiffCache[cacheKey("", sessR.ID)] = entry
 
-	for _, key := range []string{"enter", "space"} {
-		msg := tea.KeyPressMsg{Code: tea.KeyEnter, Text: key}
-		if key == "space" {
-			msg = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
-		}
-		model, _ := app.Update(msg)
-		updated := model.(App)
-		if updated.view != ViewDashboard {
-			t.Errorf("%s: expected view=ViewDashboard, got %v", key, updated.view)
-		}
-		if updated.dashboard.panelFocus != focusReview {
-			t.Errorf("%s: expected panelFocus=focusReview, got %v", key, updated.dashboard.panelFocus)
-		}
+	// Press enter: panel emits reviewOpenTaskDiffMsg, app handles it next tick.
+	model, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated := model.(App)
+
+	// After the key press the view hasn't changed yet (cmd is pending).
+	if updated.view != ViewDashboard {
+		t.Errorf("after enter key: expected view=ViewDashboard (cmd pending), got %v", updated.view)
+	}
+	if updated.modals.Review() == nil {
+		t.Error("review modal must remain open after enter")
+	}
+
+	// Run the cmd to deliver reviewOpenTaskDiffMsg.
+	if cmd == nil {
+		t.Fatal("expected a cmd from enter press")
+	}
+	model2, _ := updated.Update(cmd())
+	updated2 := model2.(App)
+	if updated2.view != ViewDiff {
+		t.Errorf("after cmd delivery: expected ViewDiff, got %v", updated2.view)
+	}
+	// Review modal must survive the transition.
+	if updated2.modals.Review() == nil {
+		t.Error("review modal must survive the ViewDiff transition")
+	}
+}
+
+// TestReviewPanel_SpaceIsNoOp verifies that space does not open the diff viewer.
+func TestReviewPanel_SpaceIsNoOp(t *testing.T) {
+	sessR := agent.NewSessionForTest("r", "review-r")
+	sessR.SetLifecyclePhase(agent.LifecycleInReview)
+	sessR.SetOriginalPrompt("Fix auth")
+	sessR.MarkDone()
+
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
+			rawDiff:   "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,4 @@\n package main\n \n+// marker\n func A() {}\n",
+		}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
+	app.reviewDiffCache[cacheKey("", sessR.ID)] = entry
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	updated := model.(App)
+	if updated.view != ViewDashboard {
+		t.Errorf("space: expected view=ViewDashboard, got %v", updated.view)
+	}
+	if updated.dashboard.panelFocus != focusReview {
+		t.Errorf("space: expected panelFocus=focusReview, got %v", updated.dashboard.panelFocus)
 	}
 }
 

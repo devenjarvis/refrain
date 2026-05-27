@@ -451,6 +451,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleReviewDiff(msg)
 	case reviewVerdictMsg:
 		return a.handleReviewVerdict(msg)
+	case reviewOpenTaskDiffMsg:
+		return a.handleReviewOpenTaskDiff(msg)
 	}
 
 	// Route to the active view.
@@ -1493,6 +1495,14 @@ type reviewDiffEntry struct {
 	tasks    []agent.PlanTask
 	groups   []taskReviewGroup          // per-task + "other" commit groups
 	verdicts map[int]*taskVerdictRecord // keyed by taskIndex (0 = other)
+}
+
+// reviewOpenTaskDiffMsg is emitted by the review panel when the user presses
+// enter on a task row that has a non-empty rawDiff. App opens the full-screen
+// diff viewer scoped to that task without closing the review modal.
+type reviewOpenTaskDiffMsg struct {
+	rawDiff   string
+	taskLabel string
 }
 
 // reviewDiffMsg carries the result of an async review diff fetch.
