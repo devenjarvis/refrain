@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/git"
@@ -1399,11 +1400,13 @@ func TestRenderReviewPlaceholderTab(t *testing.T) {
 }
 
 // TestRenderReviewTabBar_HighlightsActiveTab verifies that renderReviewTabBar
-// returns 2 lines and contains all four tab labels in the first line.
+// returns 2 lines, contains all four tab labels in the first line, and applies
+// the correct styling: active tab in ColorSecondary bold, inactive tabs in StyleSubtle.
 func TestRenderReviewTabBar_HighlightsActiveTab(t *testing.T) {
 	tabNames := []string{"Tasks", "Diff", "Checks", "Validate"}
+	activeStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
 
-	for activeIdx := range tabNames {
+	for activeIdx, activeName := range tabNames {
 		lines := renderReviewTabBar(activeIdx, 120)
 		if len(lines) != 2 {
 			t.Fatalf("activeTab=%d: expected 2 lines, got %d", activeIdx, len(lines))
@@ -1417,6 +1420,23 @@ func TestRenderReviewTabBar_HighlightsActiveTab(t *testing.T) {
 		// Second line must be a divider.
 		if !strings.Contains(ansi.Strip(lines[1]), "─") {
 			t.Errorf("activeTab=%d: line 1 must be a divider; got: %q", activeIdx, lines[1])
+		}
+
+		// Active tab must use ColorSecondary bold; inactive tabs must use StyleSubtle.
+		styledActive := activeStyle.Render(activeName)
+		if !strings.Contains(lines[0], styledActive) {
+			t.Errorf("activeTab=%d: active label %q not styled with ColorSecondary bold;\nraw line: %q",
+				activeIdx, activeName, lines[0])
+		}
+		for i, name := range tabNames {
+			if i == activeIdx {
+				continue
+			}
+			styledInactive := StyleSubtle.Render(name)
+			if !strings.Contains(lines[0], styledInactive) {
+				t.Errorf("activeTab=%d: inactive label %q not styled with StyleSubtle;\nraw line: %q",
+					activeIdx, name, lines[0])
+			}
 		}
 	}
 }
