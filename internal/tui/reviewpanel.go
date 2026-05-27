@@ -17,8 +17,8 @@ import (
 )
 
 // reviewDetailMaxMeasure is the maximum content column width for the right detail
-// pane. Matches planEditorMaxMeasure so typography is consistent across panels.
-const reviewDetailMaxMeasure = 72
+// pane. Matches docEditorMaxMeasure so typography is consistent across panels.
+const reviewDetailMaxMeasure = docEditorMaxMeasure
 
 // reviewRenderer is the markdown renderer used for rationale text in the detail pane.
 var reviewRenderer = mdrender.New(docEditorChromaStyle)
