@@ -955,7 +955,6 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		if _, ok := a.reviewDiffCache[cacheKey(rp, sess.ID)]; !ok {
 			return a.fetchReviewDiffCmd(sess, rp), true
 		}
-		a.modals.Review().RefreshDiffViewport(a.panelServices())
 		return nil, true
 	case focusSectionShipping:
 		a.openShipping(newShippingPanel(sess, items[idx].repoPath, a.width, a.height-1))

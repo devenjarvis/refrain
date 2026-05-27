@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -65,6 +66,27 @@ type testServiceState struct {
 	openInLaunchCalled bool
 	openInLaunchResult bool
 	killSessionCalled  bool
+}
+
+// TestReviewPanelModel_NoDiffViewport confirms that reviewPanelModel has no
+// diffVP or diffCacheByTask fields and no RefreshDiffViewport method — the
+// inline viewport was removed in favour of full-screen drill-in via enter.
+func TestReviewPanelModel_NoDiffViewport(t *testing.T) {
+	var m reviewPanelModel
+	v := reflect.TypeOf(m)
+	if _, found := v.FieldByName("diffVP"); found {
+		t.Error("reviewPanelModel must not have a diffVP field")
+	}
+	if _, found := v.FieldByName("diffCacheByTask"); found {
+		t.Error("reviewPanelModel must not have a diffCacheByTask field")
+	}
+	panel := newReviewPanel(nil, "", 80, 40)
+	type refresher interface {
+		RefreshDiffViewport(PanelServices)
+	}
+	if _, ok := any(panel).(refresher); ok {
+		t.Error("reviewPanelModel must not implement RefreshDiffViewport")
+	}
 }
 
 // TestReviewPanelModel_EscCloses verifies that pressing esc invokes
@@ -318,9 +340,10 @@ func TestReviewPanelModel_EnterAndSpace_AreNoOp(t *testing.T) {
 	}
 }
 
-func TestReviewPanelModel_DiffScrollKeys_DoNotChangeCursorOrClose(t *testing.T) {
-	// pgdown / pgup / ctrl+d / ctrl+u / g / G all act on the diff viewport.
-	// The taskCursor must stay put and the panel must stay open.
+func TestReviewPanelModel_FormerScrollKeys_AreNoOp(t *testing.T) {
+	// pgdown / pgup / ctrl+d / ctrl+u are now unbound no-ops (the inline
+	// viewport was removed). g / G are still unbound. None may change the
+	// cursor or close the panel.
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	panel := newReviewPanel(sess, "", 120, 40)
@@ -337,14 +360,14 @@ func TestReviewPanelModel_DiffScrollKeys_DoNotChangeCursorOrClose(t *testing.T) 
 	for _, k := range keys {
 		_, cmd := panel.Update(k, svc)
 		if cmd != nil {
-			t.Errorf("scroll key %v produced cmd %T, want nil", k, cmd())
+			t.Errorf("formerly-scroll key %v produced cmd %T, want nil", k, cmd())
 		}
 	}
 	if panel.TaskCursor() != 0 {
-		t.Errorf("taskCursor = %d after diff scrolls, want 0", panel.TaskCursor())
+		t.Errorf("taskCursor = %d after keys, want 0", panel.TaskCursor())
 	}
 	if state.closed {
-		t.Error("diff scroll keys must not close the panel")
+		t.Error("these keys must not close the panel")
 	}
 }
 

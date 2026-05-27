@@ -21,10 +21,6 @@ func (a App) handleReviewDiff(msg reviewDiffMsg) (tea.Model, tea.Cmd) {
 			repoPath = a.activeRepo
 		}
 		a.reviewDiffCache[cacheKey(repoPath, msg.sessionID)] = msg.entry
-		// Refresh the inline diff viewport when data arrives for the open session.
-		if rp := a.modals.Review(); rp != nil && rp.SessionID() == msg.sessionID && len(msg.entry.groups) > 0 {
-			rp.RefreshDiffViewport(a.panelServices())
-		}
 		// If the entry has task groups, dispatch a reviewer per group.
 		if len(msg.entry.groups) > 0 {
 			var cmds []tea.Cmd

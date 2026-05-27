@@ -4903,61 +4903,6 @@ func TestReviewPanel_EnterDoesNotChangeView(t *testing.T) {
 	}
 }
 
-// TestReviewPanel_ScrollBindingsAdvanceViewport verifies that pressing pgdown
-// while focusReview is active advances the inline diff viewport's scroll position,
-// confirming the viewport is interactable via the scroll key bindings wired in the
-// focusReview key handler.
-func TestReviewPanel_ScrollBindingsAdvanceViewport(t *testing.T) {
-	// Build a diff with enough added lines to exceed the viewport height at 40 rows.
-	var sb strings.Builder
-	sb.WriteString("diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,53 @@\n package main\n \n")
-	for range 50 {
-		sb.WriteString("+// scroll-test-line\n")
-	}
-	sb.WriteString(" func A() {}\n")
-	rawDiff := sb.String()
-
-	sessR := agent.NewSessionForTest("scroll-vp", "review-scroll")
-	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	sessR.SetOriginalPrompt("Fix auth")
-	sessR.MarkDone()
-
-	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
-		groups: []taskReviewGroup{{
-			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
-			rawDiff:   rawDiff,
-		}},
-		verdicts: map[int]*taskVerdictRecord{
-			1: {state: verdictPending},
-		},
-	}
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
-	app.reviewDiffCache[cacheKey("", sessR.ID)] = entry
-	// Load diff content and set viewport dimensions before sending scroll keys.
-	app.modals.Review().RefreshDiffViewport(app.panelServices())
-
-	if !app.modals.Review().diffVP.AtTop() {
-		t.Fatal("expected viewport at top before scrolling")
-	}
-
-	// pgdown must advance the viewport away from the top.
-	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
-	updated := model.(App)
-
-	if updated.modals.Review().diffVP.AtTop() {
-		t.Error("pgdown: inline diff viewport did not scroll; viewport must advance when diff content exceeds viewport height")
-	}
-	if updated.dashboard.panelFocus != focusReview {
-		t.Error("pgdown: panelFocus must remain focusReview")
-	}
-}
-
 // TestCreateResult_SkipFocusLaunch_StaysOnDashboard verifies that when
 // skipFocusLaunch is true the createResultMsg handler does not enter
 // focusLaunch, but still moves the pipeline cursor to the new session's row.
