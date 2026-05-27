@@ -9,14 +9,22 @@ import (
 	"github.com/devenjarvis/refrain/internal/agent"
 )
 
+const (
+	reviewTabTasks    = 0
+	reviewTabDiff     = 1
+	reviewTabChecks   = 2
+	reviewTabValidate = 3
+)
+
 // reviewPanelModel owns the keyboard, mouse, and view dispatch for the review
-// panel. Per-panel state (cursor, spec overlay toggle) lives here;
+// panel. Per-panel state (cursor, active tab, spec overlay toggle) lives here;
 // cross-panel state (the reviewDiffCache keyed by session ID) stays on App
 // because its lifetime exceeds a single panel session.
 type reviewPanelModel struct {
 	session           *agent.Session
 	repoPath          string
 	taskCursor        int
+	activeTab         int
 	specOverlay       bool
 	specOverlayScroll int
 

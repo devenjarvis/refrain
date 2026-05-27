@@ -68,6 +68,16 @@ type testServiceState struct {
 	killSessionCalled  bool
 }
 
+// TestReviewPanelModel_DefaultTab confirms that newReviewPanel initialises
+// activeTab to 0 (Tasks tab). Zero-value initialisation covers this, but the
+// test pins the contract so a future refactor can't silently break it.
+func TestReviewPanelModel_DefaultTab(t *testing.T) {
+	panel := newReviewPanel(nil, "", 80, 40)
+	if panel.activeTab != 0 {
+		t.Errorf("activeTab = %d, want 0 (Tasks)", panel.activeTab)
+	}
+}
+
 // TestReviewPanelModel_NoDiffViewport confirms that reviewPanelModel has no
 // diffVP or diffCacheByTask fields and no RefreshDiffViewport method — the
 // inline viewport was removed in favour of full-screen drill-in via enter.
