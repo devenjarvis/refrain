@@ -1310,6 +1310,69 @@ func TestRenderReviewPanel_ShowsTabBar(t *testing.T) {
 	}
 }
 
+// TestRenderReviewPanel_DiffTabPlaceholder verifies that when activeTab=1 (Diff)
+// the panel output contains the placeholder text and not the task list header.
+func TestRenderReviewPanel_DiffTabPlaceholder(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-difftab", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+	entry := &reviewDiffEntry{
+		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabDiff)
+	stripped := ansi.Strip(output)
+
+	if !strings.Contains(stripped, "full diff browser coming soon") {
+		t.Errorf("Diff tab must show placeholder; got:\n%s", stripped)
+	}
+	if strings.Contains(stripped, "PLAN TASKS") {
+		t.Errorf("Diff tab must not show task list header; got:\n%s", stripped)
+	}
+}
+
+// TestRenderReviewPanel_TasksTabStillWorks verifies that activeTab=0 (Tasks)
+// still renders the task list as a regression guard.
+func TestRenderReviewPanel_TasksTabStillWorks(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-taskstab", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+	entry := &reviewDiffEntry{
+		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabTasks)
+	stripped := ansi.Strip(output)
+
+	if !strings.Contains(stripped, "PLAN TASKS") {
+		t.Errorf("Tasks tab must show task list header; got:\n%s", stripped)
+	}
+}
+
+// TestRenderReviewPanel_FooterShowsEnterHint verifies that the footer hint
+// says "enter — open task diff" instead of the old "pgdn/pgup — scroll diff".
+func TestRenderReviewPanel_FooterShowsEnterHint(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-footer", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+	entry := &reviewDiffEntry{
+		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabTasks)
+	stripped := ansi.Strip(output)
+
+	if !strings.Contains(stripped, "enter") {
+		t.Errorf("footer must contain 'enter' hint; got:\n%s", stripped)
+	}
+	if strings.Contains(stripped, "pgdn") {
+		t.Errorf("footer must not contain old 'pgdn' hint; got:\n%s", stripped)
+	}
+}
+
 // TestRenderReviewPlaceholderTab verifies that renderReviewPlaceholderTab
 // returns height lines and that the first line contains the label text.
 func TestRenderReviewPlaceholderTab(t *testing.T) {

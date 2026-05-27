@@ -255,7 +255,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 		"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
 		"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
 		"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
-		"  " + StyleActive.Render("pgdn") + StyleSubtle.Render("/") + StyleActive.Render("pgup") + StyleSubtle.Render(" — scroll diff") +
+		"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
 		"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
 		"  " + StyleSubtle.Render("ESC — back to focus")
 	lines = append(lines, hints)
