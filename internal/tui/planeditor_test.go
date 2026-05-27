@@ -96,7 +96,7 @@ func TestPlanEditor_EditModeSavesOnCtrlS(t *testing.T) {
 	}
 
 	// Replace textarea content directly (simulate user typing).
-	editor.textarea.SetValue("rewritten\n")
+	editor.doc.textarea.SetValue("rewritten\n")
 	editor.dirty = true
 
 	cmd = editor.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl, Text: "ctrl+s"})
@@ -128,14 +128,14 @@ func TestPlanEditor_EscFromEditPreservesEdits(t *testing.T) {
 	_ = sess.WritePlan("orig\n")
 	editor := newPlanEditor(sess, "", 80, 30)
 	editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
-	editor.textarea.SetValue("typed but not saved\n")
+	editor.doc.textarea.SetValue("typed but not saved\n")
 	editor.dirty = true
 
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if editor.mode != planEditorModeScroll {
 		t.Errorf("mode = %v, want scroll after esc", editor.mode)
 	}
-	if editor.textarea.Value() != "typed but not saved\n" {
+	if editor.doc.Value() != "typed but not saved\n" {
 		t.Errorf("textarea cleared on esc; want preserved edits")
 	}
 	if !editor.dirty {
@@ -164,7 +164,7 @@ func TestPlanEditor_ApprovePersistsAndEmits(t *testing.T) {
 
 	// User edits, doesn't ctrl+s, esc back, then approves.
 	editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
-	editor.textarea.SetValue("# revised\n- [ ] thing\n")
+	editor.doc.textarea.SetValue("# revised\n- [ ] thing\n")
 	editor.dirty = true
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 
@@ -266,20 +266,20 @@ func TestPlanEditor_ScrollAndEditModeUseSameWidth(t *testing.T) {
 		// textareaWidth(70) = 68, which is below docEditorMaxMeasure (72).
 		// contentWidth() == 68 == textarea.Width().
 		editor := newPlanEditor(sess, "", 70, 30)
-		if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
+		if got, want := editor.doc.ContentWidth(), editor.doc.textarea.Width(); got != want {
 			t.Errorf("contentWidth=%d, textarea.Width()=%d; on narrow terminals both modes must wrap at the same column", got, want)
 		}
 	})
 
 	t.Run("wide", func(t *testing.T) {
-		// textareaWidth(120) = 118, but contentWidth() is capped at docEditorMaxMeasure (72).
+		// textareaWidth(120) = 118, but ContentWidth() is capped at docEditorMaxMeasure (72).
 		// textarea.Width() must also be 72 so wrap columns match.
 		editor := newPlanEditor(sess, "", 120, 30)
-		if got, want := editor.contentWidth(), editor.textarea.Width(); got != want {
+		if got, want := editor.doc.ContentWidth(), editor.doc.textarea.Width(); got != want {
 			t.Errorf("contentWidth=%d, textarea.Width()=%d; on wide terminals both must equal docEditorMaxMeasure (%d)", got, want, docEditorMaxMeasure)
 		}
-		if editor.contentWidth() != docEditorMaxMeasure {
-			t.Errorf("contentWidth()=%d, want docEditorMaxMeasure=%d on wide terminal", editor.contentWidth(), docEditorMaxMeasure)
+		if editor.doc.ContentWidth() != docEditorMaxMeasure {
+			t.Errorf("ContentWidth()=%d, want docEditorMaxMeasure=%d on wide terminal", editor.doc.ContentWidth(), docEditorMaxMeasure)
 		}
 	})
 }
@@ -294,12 +294,12 @@ func TestPlanEditor_EditModeCenteredOnWideTerminal(t *testing.T) {
 	editor := newPlanEditor(sess, "", 120, 30)
 
 	// textarea.Width() must be capped at contentWidth() (72), not textareaWidth(120)=118.
-	if got, want := editor.textarea.Width(), editor.contentWidth(); got != want {
-		t.Errorf("textarea.Width()=%d, want contentWidth()=%d; edit mode must cap at docEditorMaxMeasure on wide terminals",
+	if got, want := editor.doc.textarea.Width(), editor.doc.ContentWidth(); got != want {
+		t.Errorf("textarea.Width()=%d, want ContentWidth()=%d; edit mode must cap at docEditorMaxMeasure on wide terminals",
 			got, want)
 	}
 
-	leftPad := editor.displayLeftPad()
+	leftPad := editor.doc.DisplayLeftPad()
 	if leftPad == 0 {
 		t.Fatal("displayLeftPad() == 0 at width 120; test precondition failed")
 	}
@@ -351,7 +351,7 @@ func TestPlanEditor_DisplayLineCountAgreesWithRenderer(t *testing.T) {
 	editor.invalidateDisplayCache()
 
 	scrollLines := editor.displayLines()
-	directLines := mdrender.New("monokai").RenderLines(editor.textarea.Value(), editor.contentWidth())
+	directLines := mdrender.New("monokai").RenderLines(editor.doc.Value(), editor.doc.ContentWidth())
 	if len(scrollLines) != len(directLines) {
 		t.Errorf("editor.displayLines()=%d vs direct mdrender.RenderLines=%d — scroll and edit modes will desync",
 			len(scrollLines), len(directLines))
@@ -738,13 +738,13 @@ func TestPlanEditor_CtrlD_CtrlU_HalfPage(t *testing.T) {
 	}
 	editor := newPlanEditor(sess, "", 80, 20)
 	editor.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
-	if editor.scrollOff == 0 {
+	if editor.doc.scrollOff == 0 {
 		t.Errorf("ctrl+d did not scroll")
 	}
-	pre := editor.scrollOff
+	pre := editor.doc.scrollOff
 	editor.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	if editor.scrollOff >= pre {
-		t.Errorf("ctrl+u did not reverse scroll: pre=%d post=%d", pre, editor.scrollOff)
+	if editor.doc.scrollOff >= pre {
+		t.Errorf("ctrl+u did not reverse scroll: pre=%d post=%d", pre, editor.doc.scrollOff)
 	}
 }
 
@@ -761,22 +761,22 @@ func TestPlanEditor_GHomeAndShiftGEnd_Jump(t *testing.T) {
 	editor := newPlanEditor(sess, "", 80, 20)
 	// G jumps to bottom.
 	editor.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
-	if editor.scrollOff == 0 {
+	if editor.doc.scrollOff == 0 {
 		t.Errorf("G did not move scroll")
 	}
 	// g jumps back to top.
 	editor.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
-	if editor.scrollOff != 0 {
-		t.Errorf("g did not jump to top, got %d", editor.scrollOff)
+	if editor.doc.scrollOff != 0 {
+		t.Errorf("g did not jump to top, got %d", editor.doc.scrollOff)
 	}
 	// home/end aliases.
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
-	if editor.scrollOff == 0 {
+	if editor.doc.scrollOff == 0 {
 		t.Errorf("end did not move scroll")
 	}
 	editor.Update(tea.KeyPressMsg{Code: tea.KeyHome})
-	if editor.scrollOff != 0 {
-		t.Errorf("home did not jump to top, got %d", editor.scrollOff)
+	if editor.doc.scrollOff != 0 {
+		t.Errorf("home did not jump to top, got %d", editor.doc.scrollOff)
 	}
 }
 
@@ -802,7 +802,7 @@ func TestPlanEditor_DraftingState_BlocksAllExceptEscAndQ(t *testing.T) {
 	}
 	editor := newPlanEditor(sess, "", 80, 20)
 	editor.drafting = true
-	editor.scrollOff = 0
+	editor.doc.scrollOff = 0
 
 	// Try a bunch of keys; they should all be no-ops.
 	for _, k := range []tea.KeyPressMsg{
@@ -818,8 +818,8 @@ func TestPlanEditor_DraftingState_BlocksAllExceptEscAndQ(t *testing.T) {
 	} {
 		editor.Update(k)
 	}
-	if editor.scrollOff != 0 {
-		t.Errorf("scroll changed during drafting, got %d", editor.scrollOff)
+	if editor.doc.scrollOff != 0 {
+		t.Errorf("scroll changed during drafting, got %d", editor.doc.scrollOff)
 	}
 	if editor.sectionCursor != 0 {
 		t.Errorf("sectionCursor changed during drafting, got %d", editor.sectionCursor)
@@ -884,7 +884,7 @@ func TestPlanEditor_ScrollMode_UnknownKey_NoOp(t *testing.T) {
 		mode   planEditorMode
 		err    string
 		dirty  bool
-	}{editor.scrollOff, editor.mode, editor.errMsg, editor.dirty}
+	}{editor.doc.scrollOff, editor.mode, editor.errMsg, editor.dirty}
 	cmd := editor.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
 	if cmd != nil {
 		t.Errorf("unknown key produced cmd %T, want nil", cmd())
@@ -894,7 +894,7 @@ func TestPlanEditor_ScrollMode_UnknownKey_NoOp(t *testing.T) {
 		mode   planEditorMode
 		err    string
 		dirty  bool
-	}{editor.scrollOff, editor.mode, editor.errMsg, editor.dirty}
+	}{editor.doc.scrollOff, editor.mode, editor.errMsg, editor.dirty}
 	if before != after {
 		t.Errorf("unknown key changed state: before=%+v after=%+v", before, after)
 	}
@@ -1040,10 +1040,10 @@ func TestPlanEditor_JK_MoveSectionCursor(t *testing.T) {
 	editor.displayLines()
 	cursor := editor.sectionCursor
 	headingLine := editor.sectionDisplayStart[cursor]
-	body := editor.bodyHeight()
-	if headingLine < editor.scrollOff || headingLine >= editor.scrollOff+body {
+	body := editor.doc.BodyHeight(5)
+	if headingLine < editor.doc.scrollOff || headingLine >= editor.doc.scrollOff+body {
 		t.Errorf("heading line %d not in viewport [%d, %d)",
-			headingLine, editor.scrollOff, editor.scrollOff+body)
+			headingLine, editor.doc.scrollOff, editor.doc.scrollOff+body)
 	}
 }
 
