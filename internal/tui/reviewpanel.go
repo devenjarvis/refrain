@@ -143,11 +143,16 @@ func renderReviewHeader(sess *agent.Session, width int) []string {
 }
 
 // renderReviewPlaceholderTab renders a height-line placeholder body for tabs
-// that haven't been implemented yet. The label is centered on the first line.
+// that haven't been implemented yet. The label is horizontally centered on
+// the first line; remaining lines are empty strings.
 func renderReviewPlaceholderTab(label string, width, height int) []string {
 	lines := make([]string, height)
-	centered := StyleSubtle.Render("(" + label + ")")
-	lines[0] = centered
+	text := StyleSubtle.Render("(" + label + ")")
+	pad := (width - ansi.StringWidth(text)) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	lines[0] = strings.Repeat(" ", pad) + text
 	return lines
 }
 

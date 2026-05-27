@@ -1390,16 +1390,24 @@ func TestRenderReviewPanel_FooterShowsEnterHint(t *testing.T) {
 }
 
 // TestRenderReviewPlaceholderTab verifies that renderReviewPlaceholderTab
-// returns height lines and that the first line contains the label text.
+// returns exactly height lines, that the first line contains the label text
+// horizontally centered, and that remaining lines are empty.
 func TestRenderReviewPlaceholderTab(t *testing.T) {
 	label := "full diff browser coming soon"
-	lines := renderReviewPlaceholderTab(label, 80, 20)
+	const width = 80
+	lines := renderReviewPlaceholderTab(label, width, 20)
 	if len(lines) != 20 {
 		t.Fatalf("expected 20 lines, got %d", len(lines))
 	}
 	stripped := ansi.Strip(lines[0])
 	if !strings.Contains(stripped, label) {
 		t.Errorf("first line must contain label %q; got: %q", label, stripped)
+	}
+	// Centered: the first line must have leading spaces pushing the label toward
+	// the middle. With width=80 and the label shorter than width, there should be
+	// at least one leading space.
+	if !strings.HasPrefix(lines[0], " ") {
+		t.Errorf("first line must be horizontally centered (leading spaces expected); got: %q", lines[0])
 	}
 	// Remaining lines are empty.
 	for i := 1; i < 20; i++ {
