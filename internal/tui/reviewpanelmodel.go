@@ -330,21 +330,18 @@ func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg, svc PanelServices)
 		return
 	}
 	entry := svc.ReviewCache(m.repoPath, m.session.ID)
-	if entry == nil || m.width < 80 {
+	if entry == nil {
 		return
 	}
 	headerH := len(renderReviewHeader(m.session, m.width))
-	leftW := m.width * 4 / 10
-	if leftW < 32 {
-		leftW = 32
-	}
-	paneTop := svc.DashboardTopY + headerH
-	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, leftW)
+	const tabBarH = 2
+	paneTop := svc.DashboardTopY + headerH + tabBarH
+	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, m.width-2)
 	if rowIdx < 0 {
 		return
 	}
 	footerLines := 3
-	bodyH := m.height - svc.DashboardTopY - headerH - footerLines
+	bodyH := m.height - svc.DashboardTopY - headerH - tabBarH - footerLines
 	if bodyH < 4 {
 		bodyH = 4
 	}

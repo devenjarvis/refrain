@@ -447,6 +447,46 @@ func TestReviewPanelModel_SpaceIsNoOp(t *testing.T) {
 	}
 }
 
+// TestReviewPanelModel_ClickWithTabBarOffset verifies that a mouse click on the
+// task list pane accounts for the 2-line tab bar inserted between the header
+// and the pane body. Without the +2 offset the click lands 2 rows too high,
+// causing the cursor to land on the wrong task or be ignored as out-of-bounds.
+func TestReviewPanelModel_ClickWithTabBarOffset(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+	// Panel width 120; DashboardTopY defaults to 0 in newTestSvc.
+	// renderReviewHeader returns 3 lines for this session (title+prompt+divider) → headerH=3.
+	// Tab bar adds 2 lines → paneTop should be 5.
+	// listHeaderLines=2 → first task row at Y=7.
+	panel := newReviewPanel(sess, "", 120, 40)
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "task one"},
+			{Index: 2, Text: "task two"},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictPending},
+			2: {state: verdictPending},
+		},
+	}
+	svc, _ := newTestSvc()
+	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
+
+	// Move cursor to row 1 first so we can verify the click brings it back to 0.
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, svc)
+	if panel.TaskCursor() != 1 {
+		t.Fatalf("precondition: cursor should be 1 after j, got %d", panel.TaskCursor())
+	}
+
+	// Click at the first task row: Y=7 (headerH=3 + tabBarH=2 + listHeaderLines=2).
+	click := tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 7}
+	_, _ = panel.Update(click, svc)
+
+	if panel.TaskCursor() != 0 {
+		t.Errorf("click at Y=7 should move cursor to row 0, got %d (tab bar offset missing?)", panel.TaskCursor())
+	}
+}
+
 func TestReviewPanelModel_FormerScrollKeys_AreNoOp(t *testing.T) {
 	// pgdown / pgup / ctrl+d / ctrl+u are now unbound no-ops (the inline
 	// viewport was removed). g / G are still unbound. None may change the
