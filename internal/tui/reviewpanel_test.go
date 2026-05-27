@@ -1310,6 +1310,26 @@ func TestRenderReviewPanel_ShowsTabBar(t *testing.T) {
 	}
 }
 
+// TestRenderReviewPlaceholderTab verifies that renderReviewPlaceholderTab
+// returns height lines and that the first line contains the label text.
+func TestRenderReviewPlaceholderTab(t *testing.T) {
+	label := "full diff browser coming soon"
+	lines := renderReviewPlaceholderTab(label, 80, 20)
+	if len(lines) != 20 {
+		t.Fatalf("expected 20 lines, got %d", len(lines))
+	}
+	stripped := ansi.Strip(lines[0])
+	if !strings.Contains(stripped, label) {
+		t.Errorf("first line must contain label %q; got: %q", label, stripped)
+	}
+	// Remaining lines are empty.
+	for i := 1; i < 20; i++ {
+		if lines[i] != "" {
+			t.Errorf("line %d: expected empty, got %q", i, lines[i])
+		}
+	}
+}
+
 // TestRenderReviewTabBar_HighlightsActiveTab verifies that renderReviewTabBar
 // returns 2 lines and contains all four tab labels in the first line.
 func TestRenderReviewTabBar_HighlightsActiveTab(t *testing.T) {
