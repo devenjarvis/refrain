@@ -131,7 +131,8 @@ func renderChecksTab(cs *checksTabState, width, height int) []string {
 			nameStyle = lipgloss.NewStyle()
 		}
 
-		line := fmt.Sprintf("  %s %s %s%s%s",
+		line := fmt.Sprintf(
+			"  %s %s %s%s%s",
 			cursor,
 			iconStr,
 			nameStyle.Render(ch.Name),
