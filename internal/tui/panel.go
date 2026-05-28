@@ -70,6 +70,16 @@ type PanelServices struct {
 	// this to render the "Drafting PR…" footer hint.
 	prDraftInFlightFor func(sessionID, repoPath string) bool
 
+	// ValidationRuns returns the live validation run state for a session, or
+	// nil when no run has been started. The Checks tab uses this to render
+	// check rows and output; it is keyed by session ID (run state lives on App
+	// so results survive panel close/reopen).
+	ValidationRuns func(sessID string) *validationRunState
+	// TriggerValidationRerun starts a new validation run for sessID, resetting
+	// all results to checkRunning and returning a batched tea.Cmd that fires
+	// one runValidationCheckCmd per check.
+	TriggerValidationRerun func(sessID, repoPath, worktreePath string, checks []config.ValidationCheck) tea.Cmd
+
 	// Shipping-panel feedback triage state. Reads return the live map (or
 	// nil); the setters lazily allocate and apply the same cleanup rules as
 	// the original App methods (neutral+empty -> delete entry). Keyed by

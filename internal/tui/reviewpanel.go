@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/git"
 	"github.com/devenjarvis/refrain/internal/tui/mdrender"
 )
@@ -68,6 +69,109 @@ func verdictBadge(rec *taskVerdictRecord) (icon, label string, style lipgloss.St
 		return "⊘", "no diff found", StyleSubtle
 	}
 	return "⋯", "Pending", StyleSubtle
+}
+
+// checkBadge returns the icon and lipgloss style for a validation check result.
+// Modeled on verdictBadge to keep icon/style language consistent.
+func checkBadge(result validationCheckResult) (icon string, style lipgloss.Style) {
+	switch result.state {
+	case checkPending:
+		return "⋯", StyleSubtle
+	case checkRunning:
+		return reviewSpinnerFrame(), lipgloss.NewStyle().Foreground(ColorPrimary)
+	case checkPassed:
+		return "✓", StyleSuccess
+	case checkFailed:
+		return "✗", StyleError
+	case checkError:
+		return "✗", StyleError
+	}
+	return "⋯", StyleSubtle
+}
+
+// renderChecksTab renders the Checks tab body: a compact check list on top and
+// the selected check's combined output below. cs must not be nil.
+func renderChecksTab(cs *checksTabState, width, height int) []string {
+	if height < 4 {
+		height = 4
+	}
+
+	listH := height * 2 / 5
+	if listH < 2 {
+		listH = 2
+	}
+	outputH := height - listH - 1
+	if outputH < 2 {
+		outputH = 2
+	}
+
+	// Build list pane.
+	header := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("CHECKS")
+	listLines := make([]string, 0, len(cs.checks)+1)
+	listLines = append(listLines, header)
+	for i, ch := range cs.checks {
+		var result validationCheckResult
+		if i < len(cs.results) {
+			result = cs.results[i]
+		}
+		icon, iconStyle := checkBadge(result)
+		iconStr := iconStyle.Render(icon)
+
+		duration := ""
+		if result.state == checkPassed || result.state == checkFailed || result.state == checkError {
+			if result.duration > 0 {
+				duration = "  " + StyleSubtle.Render(result.duration.Round(time.Millisecond).String())
+			}
+		}
+
+		cursor := " "
+		nameStyle := StyleSubtle
+		if i == cs.cursor {
+			cursor = "›"
+			nameStyle = lipgloss.NewStyle()
+		}
+
+		line := fmt.Sprintf(
+			"  %s %s %s%s%s",
+			cursor,
+			iconStr,
+			nameStyle.Render(ch.Name),
+			duration,
+			"",
+		)
+		listLines = append(listLines, line)
+	}
+	listLines = capLines(listLines, listH)
+
+	// Build output pane.
+	var outputLines []string
+	outputLines = append(outputLines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	if cs.cursor < len(cs.results) {
+		result := cs.results[cs.cursor]
+		out := result.output
+		if result.err != nil {
+			out += "\n" + result.err.Error()
+		}
+		if out == "" {
+			if result.state == checkRunning {
+				out = "(running…)"
+			} else {
+				out = "(no output)"
+			}
+		}
+		outLines := strings.Split(out, "\n")
+		// Apply scroll offset.
+		if cs.scroll > 0 && cs.scroll < len(outLines) {
+			outLines = outLines[cs.scroll:]
+		}
+		outputLines = append(outputLines, capLines(outLines, outputH-1)...)
+	}
+	outputLines = capLines(outputLines, outputH)
+
+	var lines []string
+	lines = append(lines, listLines...)
+	lines = append(lines, outputLines...)
+	return lines
 }
 
 // renderReviewHeader returns the 4-line collapsed header:
@@ -158,7 +262,7 @@ func renderReviewPlaceholderTab(label string, width, height int) []string {
 // Line 0: tab labels separated by two spaces; active tab in ColorSecondary bold,
 // inactive tabs in StyleSubtle. Line 1: a subtle horizontal divider.
 func renderReviewTabBar(activeTab, width int) []string {
-	labels := []string{"Tasks", "Diff", "Checks", "Validate"}
+	labels := []string{"Tasks", "Diff", "Checks"}
 	activeStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
 	var parts []string
 	for i, label := range labels {
@@ -173,12 +277,24 @@ func renderReviewTabBar(activeTab, width int) []string {
 	return []string{labelLine, divider}
 }
 
+// checksTabState carries the data needed to render the Checks tab body.
+// checks and results are sourced from App-level validationRunState; cursor
+// and scroll are panel-local since they don't need to survive panel close.
+type checksTabState struct {
+	checks  []config.ValidationCheck
+	results []validationCheckResult
+	cursor  int
+	scroll  int
+}
+
 // renderReviewPanel renders the fullscreen review panel for a session.
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
 // cursor is the currently selected task row index (0-based among all task rows).
 // prDraftInFlight, when true, shows a spinner status line and disables the p hint.
-// activeTab selects which tab body to render (0=Tasks, 1=Diff, 2=Checks, 3=Validate).
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, activeTab int) string {
+// activeTab selects which tab body to render (0=Tasks, 1=Diff, 2=Checks).
+// checkState is non-nil when validation checks are configured and their results
+// are available; nil when no checks are configured or the run state is absent.
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, activeTab int, checkState *checksTabState) string {
 	// Header (3–4 lines depending on prompt length).
 	headerLines := renderReviewHeader(sess, width)
 
@@ -199,18 +315,14 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	// Build body lines based on active tab.
 	var bodyLines []string
 	switch {
-	case activeTab != reviewTabTasks:
-		// Non-Tasks tabs: placeholder.
-		var label string
-		switch activeTab {
-		case reviewTabDiff:
-			label = "full diff browser coming soon"
-		case reviewTabChecks:
-			label = "local checks coming soon"
-		case reviewTabValidate:
-			label = "manual validation coming soon"
+	case activeTab == reviewTabDiff:
+		bodyLines = renderReviewPlaceholderTab("full diff browser coming soon", width, bodyH)
+	case activeTab == reviewTabChecks:
+		if checkState != nil {
+			bodyLines = renderChecksTab(checkState, width, bodyH)
+		} else {
+			bodyLines = renderReviewPlaceholderTab("No validation checks configured — add them in .refrain/config.json", width, bodyH)
 		}
-		bodyLines = renderReviewPlaceholderTab(label, width, bodyH)
 	case entry == nil:
 		bodyLines = append(bodyLines, StyleSubtle.Render("loading diff stats…"))
 	default:
@@ -250,17 +362,28 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	} else {
 		pHint = StyleActive.Render("p") + StyleSubtle.Render(" — create or open PR")
 	}
-	hints := "  " +
-		pHint +
-		"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
-		"  " + StyleWarning.Render("b") + StyleSubtle.Render(" — back to build") +
-		"  " + StyleActive.Render("f") + StyleSubtle.Render(" — flag task") +
-		"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
-		"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
-		"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
-		"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
-		"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
-		"  " + StyleSubtle.Render("ESC — back to focus")
+	var hints string
+	if activeTab == reviewTabChecks {
+		hints = "  " +
+			pHint +
+			"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
+			"  " + StyleActive.Render("r") + StyleSubtle.Render(" — run checks") +
+			"  " + StyleActive.Render("pgdn/pgup") + StyleSubtle.Render(" — scroll output") +
+			"  " + StyleActive.Render("j/k") + StyleSubtle.Render(" — select check") +
+			"  " + StyleSubtle.Render("ESC — back to focus")
+	} else {
+		hints = "  " +
+			pHint +
+			"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
+			"  " + StyleWarning.Render("b") + StyleSubtle.Render(" — back to build") +
+			"  " + StyleActive.Render("f") + StyleSubtle.Render(" — flag task") +
+			"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
+			"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
+			"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
+			"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
+			"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
+			"  " + StyleSubtle.Render("ESC — back to focus")
+	}
 	lines = append(lines, hints)
 
 	return strings.Join(lines, "\n")

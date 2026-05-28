@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/diffmodel"
 	"github.com/devenjarvis/refrain/internal/git"
 	"github.com/devenjarvis/refrain/internal/github"
@@ -73,6 +75,26 @@ func (a App) handleReviewVerdict(msg reviewVerdictMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return a, nil
+}
+
+// handleValidationCheckResult processes a validationCheckResultMsg. It looks
+// up the validationRunState by sessionID, verifies the runID matches (dropping
+// stale results), then updates the result at checkIndex.
+func (a *App) handleValidationCheckResult(msg validationCheckResultMsg) {
+	run := a.validationRuns[msg.sessionID]
+	if run == nil || run.runID != msg.runID {
+		return
+	}
+	if msg.checkIndex < 0 || msg.checkIndex >= len(run.results) {
+		return
+	}
+	run.results[msg.checkIndex] = validationCheckResult{
+		state:    msg.state,
+		output:   msg.output,
+		exitCode: msg.exitCode,
+		duration: msg.duration,
+		err:      msg.err,
+	}
 }
 
 func reviewTaskGroupAtCursor(entry *reviewDiffEntry, cursor int) *taskReviewGroup {
@@ -692,6 +714,113 @@ func (a App) handleReviewOpenTaskDiff(msg reviewOpenTaskDiffMsg) (tea.Model, tea
 	a.view = ViewDiff
 	a.diff = newDiffModel(msg.taskLabel, m, a.width, a.height-1)
 	return a, nil
+}
+
+// startValidationChecksCmd resolves ValidationChecks from settings and, when
+// non-empty, calls triggerValidationRun to initialise the run state and return
+// a batched tea.Cmd. Returns nil when no checks are configured or the session
+// has no worktree.
+func (a App) startValidationChecksCmd(sess *agent.Session, repoPath string) tea.Cmd {
+	resolved := a.resolvedCache[repoPath]
+	if len(resolved.ValidationChecks) == 0 {
+		return nil
+	}
+	worktreePath := ""
+	if sess.Worktree != nil {
+		worktreePath = sess.Worktree.Path
+	}
+	return triggerValidationRun(&a, sess.ID, repoPath, worktreePath, resolved.ValidationChecks)
+}
+
+// runValidationCheckCmd returns a tea.Cmd that executes one validation check
+// via `sh -c <command>` with Dir set to worktreePath, with a 5-minute timeout.
+// The result is a validationCheckResultMsg carrying the exit code, combined
+// output, and final state. runID is forwarded so stale results can be discarded.
+func runValidationCheckCmd(sessionID, repoPath, worktreePath string, checkIndex, runID int, command string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		start := time.Now()
+		cmd := exec.CommandContext(ctx, "sh", "-c", command)
+		cmd.Dir = worktreePath
+
+		out, err := cmd.CombinedOutput()
+		dur := time.Since(start)
+		output := string(out)
+
+		if err == nil {
+			return validationCheckResultMsg{
+				sessionID:  sessionID,
+				repoPath:   repoPath,
+				checkIndex: checkIndex,
+				runID:      runID,
+				state:      checkPassed,
+				output:     output,
+				exitCode:   0,
+				duration:   dur,
+			}
+		}
+
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return validationCheckResultMsg{
+				sessionID:  sessionID,
+				repoPath:   repoPath,
+				checkIndex: checkIndex,
+				runID:      runID,
+				state:      checkFailed,
+				output:     output,
+				exitCode:   exitErr.ExitCode(),
+				duration:   dur,
+			}
+		}
+
+		// Command not found, timeout, or other execution error.
+		return validationCheckResultMsg{
+			sessionID:  sessionID,
+			repoPath:   repoPath,
+			checkIndex: checkIndex,
+			runID:      runID,
+			state:      checkError,
+			output:     output,
+			exitCode:   -1,
+			duration:   dur,
+			err:        err,
+		}
+	}
+}
+
+// triggerValidationRun creates or replaces the validationRuns entry for
+// sessionID, increments the runID, sets all results to checkRunning, and
+// returns a batched tea.Cmd with one runValidationCheckCmd per check.
+func triggerValidationRun(a *App, sessionID, repoPath, worktreePath string, checks []config.ValidationCheck) tea.Cmd {
+	if len(checks) == 0 {
+		return nil
+	}
+
+	prior := a.validationRuns[sessionID]
+	runID := 1
+	if prior != nil {
+		runID = prior.runID + 1
+	}
+
+	results := make([]validationCheckResult, len(checks))
+	for i := range results {
+		results[i] = validationCheckResult{state: checkRunning}
+	}
+
+	a.validationRuns[sessionID] = &validationRunState{
+		checks:  checks,
+		results: results,
+		runID:   runID,
+	}
+
+	cmds := make([]tea.Cmd, len(checks))
+	for i, ch := range checks {
+		cmds[i] = runValidationCheckCmd(sessionID, repoPath, worktreePath, i, runID, ch.Command)
+	}
+	return tea.Batch(cmds...)
 }
 
 // ensureGitignore adds .refrain/ to .gitignore in the given path if not already present.

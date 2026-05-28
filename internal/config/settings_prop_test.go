@@ -31,6 +31,9 @@ func TestResolve_DefaultsProperty(t *testing.T) {
 		{"PRDraftByDefault", r.PRDraftByDefault, config.DefaultPRDraftByDefault},
 		{"AutoOpenPRInBrowser", r.AutoOpenPRInBrowser, config.DefaultAutoOpenPRInBrowser},
 	}
+	if len(r.ValidationChecks) != 0 {
+		t.Errorf("ValidationChecks = %v, want empty slice", r.ValidationChecks)
+	}
 	for _, c := range checks {
 		if c.got != c.want {
 			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)

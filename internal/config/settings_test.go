@@ -667,3 +667,29 @@ func TestResolve_MergeMethod_NormalizesAndValidates(t *testing.T) {
 		}
 	}
 }
+
+func TestResolve_ValidationChecks_RepoOverridesEmpty(t *testing.T) {
+	repo := &config.RepoSettings{
+		ValidationChecks: []config.ValidationCheck{
+			{Name: "Tests", Command: "go test ./..."},
+			{Name: "Vet", Command: "go vet ./..."},
+		},
+	}
+	r := config.Resolve(nil, repo)
+	if len(r.ValidationChecks) != 2 {
+		t.Fatalf("ValidationChecks: got %d entries, want 2", len(r.ValidationChecks))
+	}
+	if r.ValidationChecks[0].Name != "Tests" {
+		t.Errorf("ValidationChecks[0].Name = %q, want Tests", r.ValidationChecks[0].Name)
+	}
+	if r.ValidationChecks[1].Name != "Vet" {
+		t.Errorf("ValidationChecks[1].Name = %q, want Vet", r.ValidationChecks[1].Name)
+	}
+}
+
+func TestResolve_ValidationChecks_DefaultEmpty(t *testing.T) {
+	r := config.Resolve(nil, nil)
+	if len(r.ValidationChecks) != 0 {
+		t.Errorf("ValidationChecks: got %d entries, want 0", len(r.ValidationChecks))
+	}
+}

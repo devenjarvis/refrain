@@ -1151,7 +1151,10 @@ func (a App) handlePipelineMarkReady() (App, tea.Cmd, bool) {
 	}
 	sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
 	a.cursor.SetIndex(focusSectionReview, 0)
-	return a, a.fetchReviewDiffCmd(sess, repoPath), true
+	return a, tea.Batch(
+		a.fetchReviewDiffCmd(sess, repoPath),
+		a.startValidationChecksCmd(sess, repoPath),
+	), true
 }
 
 // handlePipelineOpenReview opens the review panel on the cursor-selected
@@ -1171,7 +1174,14 @@ func (a App) handlePipelineOpenReview() (App, tea.Cmd, bool) {
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	a.openReview(newReviewPanel(sess, item.repoPath, a.width, a.height))
 	if _, ok := a.reviewDiffCache[cacheKey(item.repoPath, sess.ID)]; !ok {
-		return a, a.fetchReviewDiffCmd(sess, item.repoPath), true
+		return a, tea.Batch(
+			a.fetchReviewDiffCmd(sess, item.repoPath),
+			a.startValidationChecksCmd(sess, item.repoPath),
+		), true
+	}
+	// Diff already cached; start validation if not already running.
+	if a.validationRuns[sess.ID] == nil {
+		return a, a.startValidationChecksCmd(sess, item.repoPath), true
 	}
 	return a, nil, true
 }

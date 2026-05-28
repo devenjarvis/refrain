@@ -8,13 +8,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 const (
-	reviewTabTasks    = 0
-	reviewTabDiff     = 1
-	reviewTabChecks   = 2
-	reviewTabValidate = 3
+	reviewTabTasks  = 0
+	reviewTabDiff   = 1
+	reviewTabChecks = 2
 )
 
 // reviewPanelModel owns the keyboard, mouse, and view dispatch for the review
@@ -28,6 +28,8 @@ type reviewPanelModel struct {
 	activeTab         int
 	specOverlay       bool
 	specOverlayScroll int
+	checksCursor      int // cursor position in the Checks tab list
+	checksScroll      int // scroll offset for the Checks tab output pane
 
 	width, height int
 }
@@ -165,14 +167,11 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 	case "3":
 		m.activeTab = reviewTabChecks
 		return m, nil
-	case "4":
-		m.activeTab = reviewTabValidate
-		return m, nil
 	case "tab":
-		m.activeTab = (m.activeTab + 1) % 4
+		m.activeTab = (m.activeTab + 1) % 3
 		return m, nil
 	case "shift+tab":
-		m.activeTab = (m.activeTab + 3) % 4
+		m.activeTab = (m.activeTab + 2) % 3
 		return m, nil
 	}
 
@@ -241,18 +240,70 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		reviewOpenIDECmd(m.session, m.repoPath, svc)
 		return m, nil
 	case "j", "down":
-		if m.activeTab == reviewTabTasks {
+		switch m.activeTab {
+		case reviewTabTasks:
 			if entry := svc.ReviewCache(m.repoPath, m.session.ID); entry != nil {
 				maxIdx := reviewTaskCount(entry) - 1
 				if m.taskCursor < maxIdx {
 					m.taskCursor++
 				}
 			}
+		case reviewTabChecks:
+			if svc.ValidationRuns != nil {
+				if run := svc.ValidationRuns(m.session.ID); run != nil {
+					maxIdx := len(run.results) - 1
+					if m.checksCursor < maxIdx {
+						m.checksCursor++
+					}
+				}
+			}
 		}
 		return m, nil
 	case "k", "up":
-		if m.activeTab == reviewTabTasks && m.taskCursor > 0 {
-			m.taskCursor--
+		switch m.activeTab {
+		case reviewTabTasks:
+			if m.taskCursor > 0 {
+				m.taskCursor--
+			}
+		case reviewTabChecks:
+			if m.checksCursor > 0 {
+				m.checksCursor--
+			}
+		}
+		return m, nil
+	case "r":
+		if m.activeTab == reviewTabChecks && svc.TriggerValidationRerun != nil {
+			var run *validationRunState
+			if svc.ValidationRuns != nil {
+				run = svc.ValidationRuns(m.session.ID)
+			}
+			var checks []config.ValidationCheck
+			if run != nil {
+				checks = run.checks
+			} else if svc.Resolved != nil {
+				checks = svc.Resolved(m.repoPath).ValidationChecks
+			}
+			if len(checks) == 0 {
+				return m, nil
+			}
+			var worktreePath string
+			if m.session.Worktree != nil {
+				worktreePath = m.session.Worktree.Path
+			}
+			return m, svc.TriggerValidationRerun(m.session.ID, m.repoPath, worktreePath, checks)
+		}
+		return m, nil
+	case "pgdown":
+		if m.activeTab == reviewTabChecks {
+			m.checksScroll += m.height - 4
+		}
+		return m, nil
+	case "pgup":
+		if m.activeTab == reviewTabChecks {
+			m.checksScroll -= m.height - 4
+			if m.checksScroll < 0 {
+				m.checksScroll = 0
+			}
 		}
 		return m, nil
 	case "f":
@@ -375,5 +426,16 @@ func (m *reviewPanelModel) View(svc PanelServices) string {
 	}
 	entry := svc.ReviewCache(m.repoPath, m.session.ID)
 	prDraftInFlight := svc.prDraftInFlightFor(m.session.ID, m.repoPath)
-	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.activeTab)
+	var checkState *checksTabState
+	if svc.ValidationRuns != nil {
+		if run := svc.ValidationRuns(m.session.ID); run != nil {
+			checkState = &checksTabState{
+				checks:  run.checks,
+				results: run.results,
+				cursor:  m.checksCursor,
+				scroll:  m.checksScroll,
+			}
+		}
+	}
+	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.activeTab, checkState)
 }
