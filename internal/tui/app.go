@@ -455,6 +455,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleReviewVerdict(msg)
 	case reviewOpenTaskDiffMsg:
 		return a.handleReviewOpenTaskDiff(msg)
+	case validationCheckResultMsg:
+		a.handleValidationCheckResult(msg)
+		return a, nil
 	}
 
 	// Route to the active view.

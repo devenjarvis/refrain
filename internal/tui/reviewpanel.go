@@ -173,12 +173,31 @@ func renderReviewTabBar(activeTab, width int) []string {
 	return []string{labelLine, divider}
 }
 
+// checksTabState carries the data needed to render the Checks tab body.
+// checks and results are sourced from App-level validationRunState; cursor
+// and scroll are panel-local since they don't need to survive panel close.
+type checksTabState struct {
+	checks  []validationCheck
+	results []validationCheckResult
+	cursor  int
+	scroll  int
+}
+
+// validationCheck mirrors config.ValidationCheck, defined here so the render
+// layer doesn't import config (config is imported by the App layer).
+type validationCheck struct {
+	Name    string
+	Command string
+}
+
 // renderReviewPanel renders the fullscreen review panel for a session.
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
 // cursor is the currently selected task row index (0-based among all task rows).
 // prDraftInFlight, when true, shows a spinner status line and disables the p hint.
-// activeTab selects which tab body to render (0=Tasks, 1=Diff, 2=Checks, 3=Validate).
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, activeTab int) string {
+// activeTab selects which tab body to render (0=Tasks, 1=Diff, 2=Checks).
+// checkState is non-nil when validation checks are configured and their results
+// are available; nil when no checks are configured or the run state is absent.
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, activeTab int, checkState *checksTabState) string {
 	// Header (3–4 lines depending on prompt length).
 	headerLines := renderReviewHeader(sess, width)
 
@@ -242,17 +261,28 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	} else {
 		pHint = StyleActive.Render("p") + StyleSubtle.Render(" — create or open PR")
 	}
-	hints := "  " +
-		pHint +
-		"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
-		"  " + StyleWarning.Render("b") + StyleSubtle.Render(" — back to build") +
-		"  " + StyleActive.Render("f") + StyleSubtle.Render(" — flag task") +
-		"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
-		"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
-		"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
-		"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
-		"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
-		"  " + StyleSubtle.Render("ESC — back to focus")
+	var hints string
+	if activeTab == reviewTabChecks {
+		hints = "  " +
+			pHint +
+			"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
+			"  " + StyleActive.Render("r") + StyleSubtle.Render(" — run checks") +
+			"  " + StyleActive.Render("pgdn/pgup") + StyleSubtle.Render(" — scroll output") +
+			"  " + StyleActive.Render("j/k") + StyleSubtle.Render(" — select check") +
+			"  " + StyleSubtle.Render("ESC — back to focus")
+	} else {
+		hints = "  " +
+			pHint +
+			"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
+			"  " + StyleWarning.Render("b") + StyleSubtle.Render(" — back to build") +
+			"  " + StyleActive.Render("f") + StyleSubtle.Render(" — flag task") +
+			"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
+			"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
+			"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
+			"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
+			"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
+			"  " + StyleSubtle.Render("ESC — back to focus")
+	}
 	lines = append(lines, hints)
 
 	return strings.Join(lines, "\n")

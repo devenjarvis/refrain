@@ -77,6 +77,26 @@ func (a App) handleReviewVerdict(msg reviewVerdictMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// handleValidationCheckResult processes a validationCheckResultMsg. It looks
+// up the validationRunState by sessionID, verifies the runID matches (dropping
+// stale results), then updates the result at checkIndex.
+func (a *App) handleValidationCheckResult(msg validationCheckResultMsg) {
+	run := a.validationRuns[msg.sessionID]
+	if run == nil || run.runID != msg.runID {
+		return
+	}
+	if msg.checkIndex < 0 || msg.checkIndex >= len(run.results) {
+		return
+	}
+	run.results[msg.checkIndex] = validationCheckResult{
+		state:    msg.state,
+		output:   msg.output,
+		exitCode: msg.exitCode,
+		duration: msg.duration,
+		err:      msg.err,
+	}
+}
+
 func reviewTaskGroupAtCursor(entry *reviewDiffEntry, cursor int) *taskReviewGroup {
 	if entry == nil {
 		return nil

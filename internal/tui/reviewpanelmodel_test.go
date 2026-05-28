@@ -111,6 +111,67 @@ func TestReviewPanelModel_TabSwitching(t *testing.T) {
 	}
 }
 
+// TestHandleValidationResult_MatchingRunID verifies that a result message with
+// the correct runID updates the matching check result without touching others.
+func TestHandleValidationResult_MatchingRunID(t *testing.T) {
+	app := NewApp()
+	app.validationRuns["s1"] = &validationRunState{
+		runID: 1,
+		checks: []config.ValidationCheck{
+			{Name: "A", Command: "echo a"},
+			{Name: "B", Command: "echo b"},
+		},
+		results: []validationCheckResult{
+			{state: checkRunning},
+			{state: checkRunning},
+		},
+	}
+
+	msg := validationCheckResultMsg{
+		sessionID:  "s1",
+		checkIndex: 0,
+		runID:      1,
+		state:      checkPassed,
+		output:     "ok",
+		exitCode:   0,
+	}
+	app.handleValidationCheckResult(msg)
+
+	run := app.validationRuns["s1"]
+	if run.results[0].state != checkPassed {
+		t.Errorf("results[0].state = %v, want checkPassed", run.results[0].state)
+	}
+	if run.results[1].state != checkRunning {
+		t.Errorf("results[1].state = %v, want checkRunning (independent)", run.results[1].state)
+	}
+}
+
+// TestHandleValidationResult_StaleRunID verifies that a result with a stale
+// runID is silently discarded.
+func TestHandleValidationResult_StaleRunID(t *testing.T) {
+	app := NewApp()
+	app.validationRuns["s1"] = &validationRunState{
+		runID: 2,
+		checks: []config.ValidationCheck{{Name: "A", Command: "echo a"}},
+		results: []validationCheckResult{
+			{state: checkRunning},
+		},
+	}
+
+	msg := validationCheckResultMsg{
+		sessionID:  "s1",
+		checkIndex: 0,
+		runID:      1, // stale
+		state:      checkPassed,
+	}
+	app.handleValidationCheckResult(msg)
+
+	run := app.validationRuns["s1"]
+	if run.results[0].state != checkRunning {
+		t.Errorf("stale result should be discarded; results[0].state = %v, want checkRunning", run.results[0].state)
+	}
+}
+
 // TestReviewPanelModel_ChecksFieldsZeroValue confirms that newReviewPanel
 // initialises checksCursor and checksScroll to 0.
 func TestReviewPanelModel_ChecksFieldsZeroValue(t *testing.T) {
