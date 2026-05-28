@@ -56,6 +56,10 @@ func newTestSvc() (PanelServices, *testServiceState) {
 		SetFeedbackVerdict: func(string, string, string, feedbackVerdict) {},
 		SetFeedbackNote:    func(string, string, string, string) {},
 		prDraftInFlightFor: func(string, string) bool { return false },
+		ValidationRuns:     func(string) *validationRunState { return nil },
+		TriggerValidationRerun: func(string, string, string, []config.ValidationCheck) tea.Cmd {
+			return nil
+		},
 	}
 	return svc, state
 }
@@ -108,6 +112,100 @@ func TestReviewPanelModel_TabSwitching(t *testing.T) {
 	press(keyShiftNamed(tea.KeyTab))
 	if panel.activeTab != reviewTabChecks {
 		t.Errorf("shift+tab from Tasks: activeTab=%d, want %d (Checks)", panel.activeTab, reviewTabChecks)
+	}
+}
+
+// TestReviewPanelModel_ChecksTab_JKMovesCursor verifies j/k navigate the checks list.
+func TestReviewPanelModel_ChecksTab_JKMovesCursor(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+	panel := newReviewPanel(sess, "", 120, 40)
+	svc, _ := newTestSvc()
+
+	app := NewApp()
+	app.validationRuns[sess.ID] = &validationRunState{
+		runID: 1,
+		checks: []config.ValidationCheck{
+			{Name: "A", Command: "echo a"},
+			{Name: "B", Command: "echo b"},
+			{Name: "C", Command: "echo c"},
+		},
+		results: []validationCheckResult{
+			{state: checkRunning},
+			{state: checkRunning},
+			{state: checkRunning},
+		},
+	}
+	svc.ValidationRuns = func(sessID string) *validationRunState {
+		return app.validationRuns[sessID]
+	}
+
+	// Switch to Checks tab.
+	_, _ = panel.Update(tea.KeyPressMsg{Code: '3', Text: "3"}, svc)
+
+	// Press j twice.
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, svc)
+	if panel.checksCursor != 1 {
+		t.Errorf("after j: checksCursor = %d, want 1", panel.checksCursor)
+	}
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, svc)
+	if panel.checksCursor != 2 {
+		t.Errorf("after j j: checksCursor = %d, want 2", panel.checksCursor)
+	}
+	// Press k.
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'k', Text: "k"}, svc)
+	if panel.checksCursor != 1 {
+		t.Errorf("after k: checksCursor = %d, want 1", panel.checksCursor)
+	}
+}
+
+// TestReviewPanelModel_ChecksTab_RKeyTriggersRerun verifies r starts a new run.
+func TestReviewPanelModel_ChecksTab_RKeyTriggersRerun(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+	panel := newReviewPanel(sess, "/repo", 120, 40)
+	svc, _ := newTestSvc()
+
+	app := NewApp()
+	app.resolvedCache["/repo"] = config.ResolvedSettings{
+		ValidationChecks: []config.ValidationCheck{
+			{Name: "Tests", Command: "echo test"},
+		},
+	}
+	if sess.Worktree == nil {
+		// Set up a mock worktree path so triggerValidationRun can find it.
+	}
+	app.validationRuns[sess.ID] = &validationRunState{
+		runID:   1,
+		checks:  []config.ValidationCheck{{Name: "Tests", Command: "echo test"}},
+		results: []validationCheckResult{{state: checkPassed}},
+	}
+	svc.ValidationRuns = func(sessID string) *validationRunState {
+		return app.validationRuns[sessID]
+	}
+	svc.TriggerValidationRerun = func(sessID, repoPath, worktreePath string, checks []config.ValidationCheck) tea.Cmd {
+		run := app.validationRuns[sessID]
+		if run != nil {
+			run.runID++
+			for i := range run.results {
+				run.results[i] = validationCheckResult{state: checkRunning}
+			}
+		}
+		return func() tea.Msg { return nil }
+	}
+
+	// Switch to Checks tab.
+	_, _ = panel.Update(tea.KeyPressMsg{Code: '3', Text: "3"}, svc)
+
+	priorRunID := app.validationRuns[sess.ID].runID
+
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'r', Text: "r"}, svc)
+	if cmd == nil {
+		t.Fatal("r on Checks tab must return a non-nil cmd")
+	}
+
+	if app.validationRuns[sess.ID].runID <= priorRunID {
+		t.Errorf("runID should have incremented; got %d, prior %d", app.validationRuns[sess.ID].runID, priorRunID)
 	}
 }
 

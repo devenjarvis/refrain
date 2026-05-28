@@ -689,6 +689,12 @@ func (a *App) panelServices() PanelServices {
 		prDraftInFlightFor: func(sessionID, repoPath string) bool {
 			return a.prDraftInFlight && a.prDraftSessionID == sessionID && a.prDraftRepoPath == repoPath
 		},
+		ValidationRuns: func(sessID string) *validationRunState {
+			return a.validationRuns[sessID]
+		},
+		TriggerValidationRerun: func(sessID, repoPath, worktreePath string, checks []config.ValidationCheck) tea.Cmd {
+			return triggerValidationRun(a, sessID, repoPath, worktreePath, checks)
+		},
 		FeedbackTriage: func(repoPath, sessionID string) map[string]*feedbackTriageEntry {
 			return a.feedbackTriage[cacheKey(repoPath, sessionID)]
 		},

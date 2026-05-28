@@ -246,11 +246,51 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 					m.taskCursor++
 				}
 			}
+		} else if m.activeTab == reviewTabChecks {
+			if svc.ValidationRuns != nil {
+				if run := svc.ValidationRuns(m.session.ID); run != nil {
+					maxIdx := len(run.results) - 1
+					if m.checksCursor < maxIdx {
+						m.checksCursor++
+					}
+				}
+			}
 		}
 		return m, nil
 	case "k", "up":
 		if m.activeTab == reviewTabTasks && m.taskCursor > 0 {
 			m.taskCursor--
+		} else if m.activeTab == reviewTabChecks && m.checksCursor > 0 {
+			m.checksCursor--
+		}
+		return m, nil
+	case "r":
+		if m.activeTab == reviewTabChecks && svc.TriggerValidationRerun != nil {
+			var run *validationRunState
+			if svc.ValidationRuns != nil {
+				run = svc.ValidationRuns(m.session.ID)
+			}
+			if run == nil {
+				return m, nil
+			}
+			var worktreePath string
+			if m.session.Worktree != nil {
+				worktreePath = m.session.Worktree.Path
+			}
+			return m, svc.TriggerValidationRerun(m.session.ID, m.repoPath, worktreePath, run.checks)
+		}
+		return m, nil
+	case "pgdown":
+		if m.activeTab == reviewTabChecks {
+			m.checksScroll += m.height - 4
+		}
+		return m, nil
+	case "pgup":
+		if m.activeTab == reviewTabChecks {
+			m.checksScroll -= m.height - 4
+			if m.checksScroll < 0 {
+				m.checksScroll = 0
+			}
 		}
 		return m, nil
 	case "f":
@@ -373,5 +413,16 @@ func (m *reviewPanelModel) View(svc PanelServices) string {
 	}
 	entry := svc.ReviewCache(m.repoPath, m.session.ID)
 	prDraftInFlight := svc.prDraftInFlightFor(m.session.ID, m.repoPath)
-	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.activeTab, nil)
+	var checkState *checksTabState
+	if svc.ValidationRuns != nil {
+		if run := svc.ValidationRuns(m.session.ID); run != nil {
+			checkState = &checksTabState{
+				checks:  run.checks,
+				results: run.results,
+				cursor:  m.checksCursor,
+				scroll:  m.checksScroll,
+			}
+		}
+	}
+	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.activeTab, checkState)
 }
