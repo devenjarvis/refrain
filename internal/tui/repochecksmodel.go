@@ -214,7 +214,8 @@ func (m *repoChecksModel) View() string {
 				} else {
 					cmdLabel = StyleActive.Render("Command ")
 				}
-				rows = append(rows,
+				rows = append(
+					rows,
 					StyleActive.Render("› ")+fmt.Sprintf("%d.", i+1),
 					"    "+nameLabel+m.nameInput.View(),
 					"    "+cmdLabel+m.cmdInput.View(),
@@ -234,7 +235,8 @@ func (m *repoChecksModel) View() string {
 			} else {
 				cmd = cmdStyle.Render(cmd)
 			}
-			rows = append(rows,
+			rows = append(
+				rows,
 				cursor+fmt.Sprintf("%d. ", i+1)+name,
 				"    "+cmd,
 			)
