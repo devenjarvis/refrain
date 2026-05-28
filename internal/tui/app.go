@@ -207,7 +207,7 @@ type App struct {
 	reviewDiffCache map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
 	validationRuns  map[string]*validationRunState             // keyed by sessionID; lifetime exceeds panel
 	feedbackTriage  map[string]map[string]*feedbackTriageEntry // keyed by cacheKey(repoPath, sessionID) → itemKey
-	promptModal     promptModalModel                           // overlay for plan-first new-session prompt
+	newSession      newSessionModel  // full-viewport new-session composition screen
 
 	// closingAgents and closingSessions track in-flight kill requests so the
 	// dashboard can render a "closing…" indicator while the async teardown runs.
@@ -344,7 +344,7 @@ func NewApp() App {
 		closingAgents:   make(map[string]bool),
 		closingSessions: make(map[string]bool),
 		feedbackTriage:  make(map[string]map[string]*feedbackTriageEntry),
-		promptModal:     newPromptModal(),
+		newSession:      newNewSessionModel(),
 		prComposeModal:  newPRComposeModal(),
 	}
 }
@@ -450,8 +450,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case planEditorApproveMsg:
 		return a.approvePlanAndSpawn(msg)
 	case promptModalCancelMsg:
-		// User dismissed the modal — nothing else to do.
-		_ = msg
+		// Restore whichever view was active before the new-session screen opened.
+		a.view = a.newSession.returnTo
 		return a, nil
 	case promptModalSubmitMsg:
 		return a.submitPromptModal(msg)
@@ -497,6 +497,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.updateBranchPicker(msg)
 	case ViewRepoPicker:
 		return a.updateRepoPicker(msg)
+	case ViewNewSession:
+		return a.updateNewSession(msg)
 	}
 
 	return a, nil
@@ -588,6 +590,22 @@ func (a App) activeRepoDisplayName() string {
 		}
 	}
 	return filepath.Base(a.activeRepo)
+}
+
+// openNewSession transitions to ViewNewSession, populates repo/branch metadata,
+// and returns the focus cmd from the new-session model.
+func (a *App) openNewSession(returnTo ViewMode) tea.Cmd {
+	a.view = ViewNewSession
+	a.newSession.repoName = a.activeRepoDisplayName()
+	a.newSession.baseBranch, _ = git.BaseBranch(a.activeRepo)
+	a.newSession.SetSize(a.width, a.height-1)
+	return a.newSession.Open(returnTo)
+}
+
+// updateNewSession routes messages to the new-session model while in ViewNewSession.
+func (a App) updateNewSession(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmd := a.newSession.Update(msg)
+	return a, cmd
 }
 
 // focusLaunchTermHeight returns the terminal height for the focusLaunch view,
@@ -1097,12 +1115,6 @@ func (a App) View() tea.View {
 				}
 			}
 		}
-		// Prompt modal overlay (plan-first new-session input). Centered over
-		// the body, replaces it while active so the dashboard does not
-		// receive input.
-		if a.promptModal.Active() {
-			body = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, a.promptModal.View())
-		}
 		// PR compose modal overlay.
 		if a.prComposeModal.Active() {
 			body = a.prComposeModal.View()
@@ -1160,6 +1172,10 @@ func (a App) View() tea.View {
 			hints = repoPickerManageHints
 		}
 		statusbar := renderStatusBar(hints, a.width)
+		content = lipgloss.JoinVertical(lipgloss.Left, body, statusbar)
+	case ViewNewSession:
+		body := a.newSession.View()
+		statusbar := renderStatusBar(newSessionHints, a.width)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, statusbar)
 	}
 
