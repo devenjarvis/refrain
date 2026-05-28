@@ -27,6 +27,8 @@ type reviewPanelModel struct {
 	activeTab         int
 	specOverlay       bool
 	specOverlayScroll int
+	checksCursor      int // cursor position in the Checks tab list
+	checksScroll      int // scroll offset for the Checks tab output pane
 
 	width, height int
 }

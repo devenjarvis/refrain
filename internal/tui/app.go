@@ -198,8 +198,9 @@ type App struct {
 	// openConfig / openLaunch / closeModal helpers (which keep the dashboard
 	// mirror fields in sync).
 	modals          Modals
-	reviewDiffCache map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
-	feedbackTriage  map[string]map[string]*feedbackTriageEntry // keyed by cacheKey(repoPath, sessionID) → itemKey
+	reviewDiffCache  map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
+	validationRuns   map[string]*validationRunState            // keyed by sessionID; lifetime exceeds panel
+	feedbackTriage   map[string]map[string]*feedbackTriageEntry // keyed by cacheKey(repoPath, sessionID) → itemKey
 	promptModal     promptModalModel                           // overlay for plan-first new-session prompt
 
 	// closingAgents and closingSessions track in-flight kill requests so the
@@ -314,6 +315,7 @@ func NewApp() App {
 		lastKnownStatus: make(map[string]agent.Status),
 		diffStatsCache:  make(map[string]*diffStatsEntry),
 		reviewDiffCache: make(map[string]*reviewDiffEntry),
+		validationRuns:  make(map[string]*validationRunState),
 		prCache:         make(map[string]*prCacheEntry),
 		prPollStates:    make(map[string]*prSessionState),
 		closingAgents:   make(map[string]bool),
@@ -1465,6 +1467,46 @@ const (
 	verdictErr                         // reviewer subprocess errored
 	verdictNoDiff                      // task has no matching commits — nothing to review
 )
+
+// validationCheckState tracks the lifecycle of one validation check run.
+type validationCheckState int
+
+const (
+	checkPending validationCheckState = iota
+	checkRunning
+	checkPassed
+	checkFailed
+	checkError
+)
+
+// validationCheckResult holds the result of one completed (or pending) check.
+type validationCheckResult struct {
+	state    validationCheckState
+	output   string
+	exitCode int
+	duration time.Duration
+	err      error
+}
+
+// validationCheckResultMsg is emitted by a check goroutine when it finishes.
+type validationCheckResultMsg struct {
+	sessionID  string
+	repoPath   string
+	checkIndex int
+	runID      int
+	state      validationCheckState
+	output     string
+	exitCode   int
+	duration   time.Duration
+	err        error
+}
+
+// validationRunState holds the current run of validation checks for a session.
+type validationRunState struct {
+	checks  []config.ValidationCheck
+	results []validationCheckResult
+	runID   int
+}
 
 // taskVerdictRecord holds the verdict state for one task row.
 type taskVerdictRecord struct {

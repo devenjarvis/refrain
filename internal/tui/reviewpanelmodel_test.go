@@ -111,6 +111,19 @@ func TestReviewPanelModel_TabSwitching(t *testing.T) {
 	}
 }
 
+// TestReviewPanelModel_ChecksFieldsZeroValue confirms that newReviewPanel
+// initialises checksCursor and checksScroll to 0.
+func TestReviewPanelModel_ChecksFieldsZeroValue(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	panel := newReviewPanel(sess, "", 120, 40)
+	if panel.checksCursor != 0 {
+		t.Errorf("checksCursor = %d, want 0", panel.checksCursor)
+	}
+	if panel.checksScroll != 0 {
+		t.Errorf("checksScroll = %d, want 0", panel.checksScroll)
+	}
+}
+
 // TestReviewPanelModel_DefaultTab confirms that newReviewPanel initialises
 // activeTab to 0 (Tasks tab). Zero-value initialisation covers this, but the
 // test pins the contract so a future refactor can't silently break it.
