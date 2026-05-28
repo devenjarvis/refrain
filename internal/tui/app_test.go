@@ -5583,6 +5583,29 @@ func TestManualMarkReady_TriggersValidation(t *testing.T) {
 	}
 }
 
+// TestRecordInput_NonDashboardView verifies that a key press routed through the
+// non-dashboard view handler (e.g. the validation-checks sub-editor) also
+// records input so idle decay doesn't accumulate while the user is in settings.
+func TestRecordInput_NonDashboardView(t *testing.T) {
+	const tol = 500 * time.Millisecond
+	app := NewApp()
+	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
+	app.wellness.lastInputAt = time.Now().Add(-4 * time.Minute) // 1 min past grace
+
+	// Open the checks editor to put the app into the focusRepoChecks path.
+	// We use openRepoChecksEditor directly to bypass the normal init path.
+	editor := newRepoChecksModel("repo", nil)
+	app.openRepoChecksEditor(editor, "/repo")
+	app.syncModalsToDashboard()
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	app = model.(App)
+
+	if app.wellness.idleDebt < 1*time.Minute-tol || app.wellness.idleDebt > 1*time.Minute+tol {
+		t.Errorf("idleDebt = %v after non-dashboard KeyPress, want ~1m", app.wellness.idleDebt)
+	}
+}
+
 // TestRecordInput_KeyPress verifies that a tea.KeyPressMsg on the dashboard
 // locks the idle gap into idleDebt and resets lastInputAt so EffectiveElapsed
 // reflects the reduced active time.
