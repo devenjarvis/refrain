@@ -4223,6 +4223,53 @@ func TestNewSessionFlow_EscReturnsToDashboard(t *testing.T) {
 	}
 }
 
+func TestNewSessionFlow_SubmitReturnsToDashboard(t *testing.T) {
+	dir, err := os.MkdirTemp("", "refrain-tui-newsession-submit-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "t@t.com"},
+		{"git", "config", "user.name", "T"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup %v: %v\n%s", args, err, out)
+		}
+	}
+
+	resolved := config.ResolvedSettings{BypassPermissions: true, AgentProgram: "bash"}
+	mgr := agent.NewManager(dir, resolved)
+	defer mgr.Shutdown()
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	app.view = ViewNewSession
+	app.newSession.returnTo = ViewDashboard
+
+	// Planning path (skipPlanning=false) should return to dashboard.
+	model, _ := app.Update(promptModalSubmitMsg{prompt: "add dark mode", skipPlanning: false})
+	if p, ok := model.(*App); ok {
+		app = *p
+	} else {
+		app = model.(App)
+	}
+	if app.view != ViewDashboard {
+		t.Errorf("after planning-path submit, view = %v, want ViewDashboard", app.view)
+	}
+}
+
 // TestCreateResult_SessionsCreatedCount_OnlyIncrementsForNewSession asserts
 // the wellness counter increments exactly once per new session, regardless
 // of whether the session was born via the legacy `n` path, the skip path,

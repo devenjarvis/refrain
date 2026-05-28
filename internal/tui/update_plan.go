@@ -291,6 +291,7 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		// spawn the real agent immediately with the user's prompt as the
 		// initial Task. Lifecycle starts at LifecycleInProgress so the row
 		// shows up in BUILDING, not Planning.
+		a.view = ViewDashboard
 		cfg := agent.Config{
 			Rows:              fixedH,
 			Cols:              fixedW,
@@ -339,6 +340,7 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	// when approvePlanAndSpawn fires (and the skip path counts via its own
 	// createResultMsg with isNewSession=true), so each approved/skipped
 	// session is logged exactly once.
+	a.view = ViewDashboard
 	a.refreshAgentList()
 	// Stay on the dashboard while the draft runs in the background — the
 	// planning card shows the "drafting…" badge. The user can press
