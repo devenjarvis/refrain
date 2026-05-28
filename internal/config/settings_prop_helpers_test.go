@@ -166,6 +166,17 @@ func genRepoSettings(t *rapid.T) *config.RepoSettings {
 		v := genMergeMethod(t)
 		r.MergeMethod = &v
 	}
+	if rapid.Bool().Draw(t, "r_validation_checks") {
+		n := rapid.IntRange(0, 4).Draw(t, "r_validation_checks_n")
+		checks := make([]config.ValidationCheck, n)
+		for i := range checks {
+			checks[i] = config.ValidationCheck{
+				Name:    rapid.String().Draw(t, fmt.Sprintf("r_check_name_%d", i)),
+				Command: rapid.String().Draw(t, fmt.Sprintf("r_check_cmd_%d", i)),
+			}
+		}
+		r.ValidationChecks = checks
+	}
 	return r
 }
 

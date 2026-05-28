@@ -153,6 +153,13 @@ type GlobalSettings struct {
 	MergeMethod *string `json:"merge_method,omitempty"`
 }
 
+// ValidationCheck defines a named shell command to run against the session's
+// worktree during the Checks tab of the review panel.
+type ValidationCheck struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+}
+
 // RepoSettings holds per-repo overrides stored at <repo>/.refrain/config.json.
 // Fields here override the corresponding GlobalSettings value.
 type RepoSettings struct {
@@ -174,6 +181,9 @@ type RepoSettings struct {
 	PRDraftByDefault    *bool   `json:"pr_draft_by_default,omitempty"`
 	AutoOpenPRInBrowser *bool   `json:"auto_open_pr_in_browser,omitempty"`
 	MergeMethod         *string `json:"merge_method,omitempty"`
+
+	// ValidationChecks are shell commands run against the worktree during review.
+	ValidationChecks []ValidationCheck `json:"validation_checks,omitempty"`
 }
 
 // ResolvedSettings is the fully merged configuration with no nil pointers.
@@ -220,6 +230,10 @@ type ResolvedSettings struct {
 	// MergeMethod is how PRs are merged from the shipping panel.
 	// "squash" | "merge" | "rebase" — defaults to "squash".
 	MergeMethod string
+
+	// ValidationChecks are the shell commands to run during the Checks tab.
+	// Sourced from per-repo settings only; empty slice means no checks configured.
+	ValidationChecks []ValidationCheck
 }
 
 // Resolve merges global and repo settings over built-in defaults.
@@ -361,6 +375,9 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if repo.MergeMethod != nil {
 			r.MergeMethod = *repo.MergeMethod
+		}
+		if repo.ValidationChecks != nil {
+			r.ValidationChecks = repo.ValidationChecks
 		}
 	}
 
