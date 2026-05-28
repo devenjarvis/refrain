@@ -88,11 +88,11 @@ type planEditorModel struct {
 
 	doc docEditor // shared textarea, renderer, dimensions, scrollOff
 
-	mode    planEditorMode
-	plan    string // last-loaded plan content; used in scroll mode
-	dirty   bool   // textarea has unsaved edits relative to file
-	saveNote  string // transient confirmation ("saved") or error
-	saveAt    time.Time
+	mode     planEditorMode
+	plan     string // last-loaded plan content; used in scroll mode
+	dirty    bool   // textarea has unsaved edits relative to file
+	saveNote string // transient confirmation ("saved") or error
+	saveAt   time.Time
 
 	reviseInput textinput.Model
 	drafting    bool // session is currently in LifecycleDrafting; show placeholder
@@ -1053,4 +1053,3 @@ func (m *planEditorModel) renderQuestionBody() string {
 	b.WriteString(StyleActive.Render("answer:") + " " + m.questionInput.View())
 	return b.String()
 }
-
