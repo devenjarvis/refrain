@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"math/rand/v2"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -8,6 +9,46 @@ import (
 	xlipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// promptModalSubmitMsg fires when the user accepts the prompt. SkipPlanning
+// is true for the ctrl+enter "do today's flow" path, false for the default
+// enter path that runs through the plan-first drafting/editor flow.
+type promptModalSubmitMsg struct {
+	prompt       string
+	skipPlanning bool
+}
+
+// promptModalCancelMsg fires on `esc`.
+type promptModalCancelMsg struct{}
+
+const promptModalCharLimit = 4000
+
+// promptModalTitles rotate through the screen header. Short and imperative,
+// each one nudges toward Refrain's one-primary-goal-per-block frame.
+var promptModalTitles = []string{
+	"What do you want to build?",
+	"What's today's primary goal?",
+	"What's the one thing?",
+	"What does done look like?",
+	"What's the next move?",
+	"What should we ship?",
+	"What would make this block count?",
+	"Define the goal.",
+}
+
+// promptModalPlaceholders show concrete task shapes inside the textarea so
+// a first-time user has a model of what a planner-friendly prompt looks like.
+var promptModalPlaceholders = []string{
+	"e.g. Add a dark-mode toggle to the settings page",
+	"e.g. Fix the flaky test in foo_test.go",
+	"e.g. Migrate auth from sessions to JWT",
+	"e.g. Wire up file upload to S3",
+	"e.g. Add unit tests for the shutdown sequence",
+	"e.g. Refactor the dashboard render path",
+}
+
+// pickPrompt is the indirection tests use to make rotation deterministic.
+var pickPrompt = func(n int) int { return rand.IntN(n) }
 
 const (
 	newSessionSidebarWidth  = 28
@@ -17,7 +58,7 @@ const (
 )
 
 // newSessionModel is the full-viewport new-session composition screen.
-// It replaces the promptModalModel overlay when PlanFirstEnabled is on.
+// It replaces the old centered overlay modal when PlanFirstEnabled is on.
 type newSessionModel struct {
 	active         bool
 	textarea       textarea.Model
@@ -38,6 +79,8 @@ func newNewSessionModel() newSessionModel {
 	// Strip bubbles' default focused CursorLine background.
 	styles := ta.Styles()
 	styles.Focused.CursorLine = xlipgloss.NewStyle()
+	// ColorPrimary is a v1 lipgloss.Color; it satisfies the v2
+	// CursorStyle.Color field (image/color.Color) via its RGBA() method.
 	styles.Cursor.Color = ColorPrimary
 	ta.SetStyles(styles)
 	// Extend InsertNewline to include ctrl+j and alt+enter so newlines work
