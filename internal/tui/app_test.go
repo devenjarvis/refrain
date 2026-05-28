@@ -5583,6 +5583,51 @@ func TestManualMarkReady_TriggersValidation(t *testing.T) {
 	}
 }
 
+// TestRecordInput_KeyPress verifies that a tea.KeyPressMsg on the dashboard
+// locks the idle gap into idleDebt and resets lastInputAt so EffectiveElapsed
+// reflects the reduced active time.
+func TestRecordInput_KeyPress(t *testing.T) {
+	const tol = 500 * time.Millisecond
+	app := NewApp()
+	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
+	app.wellness.lastInputAt = time.Now().Add(-4 * time.Minute) // 1 min past grace
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	app = model.(App)
+
+	// idleDebt should be ≈ 1 min (4min gap − 3min grace)
+	if app.wellness.idleDebt < 1*time.Minute-tol || app.wellness.idleDebt > 1*time.Minute+tol {
+		t.Errorf("idleDebt = %v after KeyPress, want ~1m", app.wellness.idleDebt)
+	}
+	// EffectiveElapsed ≈ 5min − 1min idleDebt − 0 currentExtendedIdle = 4min
+	got := app.wellness.EffectiveElapsed()
+	want := 4 * time.Minute
+	if got < want-tol || got > want+tol {
+		t.Errorf("EffectiveElapsed() = %v, want ~%v after KeyPress records input", got, want)
+	}
+}
+
+// TestRecordInput_MouseClick verifies that a tea.MouseClickMsg on the dashboard
+// records input the same way as a key press.
+func TestRecordInput_MouseClick(t *testing.T) {
+	const tol = 500 * time.Millisecond
+	app := NewApp()
+	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
+	app.wellness.lastInputAt = time.Now().Add(-4 * time.Minute)
+
+	model, _ := app.Update(tea.MouseClickMsg{})
+	app = model.(App)
+
+	if app.wellness.idleDebt < 1*time.Minute-tol || app.wellness.idleDebt > 1*time.Minute+tol {
+		t.Errorf("idleDebt = %v after MouseClick, want ~1m", app.wellness.idleDebt)
+	}
+	got := app.wellness.EffectiveElapsed()
+	want := 4 * time.Minute
+	if got < want-tol || got > want+tol {
+		t.Errorf("EffectiveElapsed() = %v, want ~%v after MouseClick records input", got, want)
+	}
+}
+
 // TestInit_SeedsLastInputAt verifies that handleInit populates lastInputAt so
 // the idle-decay path starts from a known reference rather than the zero value.
 func TestInit_SeedsLastInputAt(t *testing.T) {

@@ -32,9 +32,13 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.updateRepoChecks(msg)
 
 	case tea.PasteMsg:
+		a.wellness.RecordInput()
 		return a.handleDashboardPaste(msg)
 
 	case tea.KeyPressMsg:
+		// Record input before any modal early-returns so every human keypress
+		// counts toward inactivity tracking — including those absorbed by modals.
+		a.wellness.RecordInput()
 		// Prompt modal consumes all keys while open (it's a modal overlay).
 		// Submit/cancel emit dedicated messages handled below.
 		if a.promptModal.Active() {
@@ -128,18 +132,22 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg, ok := msg.(tea.MouseClickMsg); ok {
+		a.wellness.RecordInput()
 		return a.handleMouseClick(msg)
 	}
 
 	if msg, ok := msg.(tea.MouseMotionMsg); ok {
+		a.wellness.RecordInput()
 		return a.handleMouseMotion(msg)
 	}
 
 	if _, ok := msg.(tea.MouseReleaseMsg); ok {
+		a.wellness.RecordInput()
 		return a.handleMouseRelease()
 	}
 
 	if msg, ok := msg.(tea.MouseWheelMsg); ok {
+		a.wellness.RecordInput()
 		return a.handleMouseWheel(msg)
 	}
 
