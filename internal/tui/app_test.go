@@ -5488,3 +5488,97 @@ func TestCleanStaleCaches_ScopesByRepo(t *testing.T) {
 		t.Error("repoB's dead cache entry survived cleanup (it should be evicted)")
 	}
 }
+
+// TestAutoPromoteToReview_TriggersValidation verifies that auto-promoting a
+// session to LifecycleReadyForReview initialises a validationRunState when the
+// repo has ValidationChecks configured.
+func TestAutoPromoteToReview_TriggersValidation(t *testing.T) {
+	dir, mgr := setupAutoPromoteRepo(t)
+
+	sess, err := mgr.CreateSessionForPlanning(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
+	if err != nil {
+		t.Fatalf("CreateSessionForPlanning: %v", err)
+	}
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	ag := sess.AddTestAgent("ag-idle-val-1", false, agent.StatusIdle)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = config.ResolvedSettings{
+		ValidationChecks: []config.ValidationCheck{
+			{Name: "Tests", Command: "echo test"},
+			{Name: "Vet", Command: "echo vet"},
+		},
+	}
+
+	app.Update(agentEventMsg{ //nolint:errcheck
+		event: agent.Event{
+			Type:      agent.EventStatusChanged,
+			AgentID:   ag.ID,
+			SessionID: sess.ID,
+			Status:    agent.StatusIdle,
+		},
+		repoPath: dir,
+	})
+
+	run := app.validationRuns[sess.ID]
+	if run == nil {
+		t.Fatal("validationRuns[sess.ID] is nil — validation was not triggered")
+	}
+	if len(run.results) != 2 {
+		t.Errorf("len(results) = %d, want 2", len(run.results))
+	}
+	for i, r := range run.results {
+		if r.state != checkRunning {
+			t.Errorf("results[%d].state = %v, want checkRunning", i, r.state)
+		}
+	}
+}
+
+// TestManualMarkReady_TriggersValidation verifies that pressing 'm' on a
+// finished Building session with configured checks starts a validation run.
+func TestManualMarkReady_TriggersValidation(t *testing.T) {
+	dir, mgr := setupAutoPromoteRepo(t)
+
+	sess, err := mgr.CreateSessionForPlanning(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
+	if err != nil {
+		t.Fatalf("CreateSessionForPlanning: %v", err)
+	}
+	sess.SetLifecyclePhase(agent.LifecycleInProgress)
+	ag := sess.AddTestAgent("ag-idle-m-1", false, agent.StatusIdle)
+	_ = ag
+	sess.MarkDone()
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = config.ResolvedSettings{
+		ValidationChecks: []config.ValidationCheck{
+			{Name: "Lint", Command: "echo lint"},
+		},
+	}
+	// Populate the dashboard so the m-key handler can find the session.
+	app.refreshAgentList()
+	// Move cursor to the Building section.
+	app.cursor.SetSection(focusSectionBuilding)
+	app.cursor.SetIndex(focusSectionBuilding, 0)
+
+	app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"}) //nolint:errcheck
+
+	run := app.validationRuns[sess.ID]
+	if run == nil {
+		t.Fatal("validationRuns[sess.ID] is nil — validation was not triggered on manual m")
+	}
+	if len(run.results) != 1 {
+		t.Errorf("len(results) = %d, want 1", len(run.results))
+	}
+}

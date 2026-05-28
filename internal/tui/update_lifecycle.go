@@ -400,7 +400,10 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 						}
 						if promote {
 							sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
-							autoPromoteCmd = a.fetchReviewDiffCmd(sess, msg.repoPath)
+							autoPromoteCmd = tea.Batch(
+								a.fetchReviewDiffCmd(sess, msg.repoPath),
+								a.startValidationChecksCmd(sess, msg.repoPath),
+							)
 						}
 					}
 					// Mark session done when all non-shell agents have exited.

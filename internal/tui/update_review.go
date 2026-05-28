@@ -696,6 +696,22 @@ func (a App) handleReviewOpenTaskDiff(msg reviewOpenTaskDiffMsg) (tea.Model, tea
 	return a, nil
 }
 
+// startValidationChecksCmd resolves ValidationChecks from settings and, when
+// non-empty, calls triggerValidationRun to initialise the run state and return
+// a batched tea.Cmd. Returns nil when no checks are configured or the session
+// has no worktree.
+func (a App) startValidationChecksCmd(sess *agent.Session, repoPath string) tea.Cmd {
+	resolved := a.resolvedCache[repoPath]
+	if len(resolved.ValidationChecks) == 0 {
+		return nil
+	}
+	worktreePath := ""
+	if sess.Worktree != nil {
+		worktreePath = sess.Worktree.Path
+	}
+	return triggerValidationRun(&a, sess.ID, repoPath, worktreePath, resolved.ValidationChecks)
+}
+
 // runValidationCheckCmd returns a tea.Cmd that executes one validation check
 // via `sh -c <command>` with Dir set to worktreePath, with a 5-minute timeout.
 // The result is a validationCheckResultMsg carrying the exit code, combined
