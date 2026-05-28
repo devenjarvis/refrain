@@ -3096,6 +3096,44 @@ func TestTick_BreakEntersOnPipeline(t *testing.T) {
 	}
 }
 
+// TestTick_BreakDoesNotFireWhenIdleDecayBringsElapsedUnderThreshold verifies
+// that a user who walked away for a long time does not get a surprise auto-break
+// on return: if idleDebt / currentExtendedIdle brings EffectiveElapsed below
+// the session threshold, the break should NOT fire even though wall-clock
+// time.Since(sessionStart) would exceed it.
+func TestTick_BreakDoesNotFireWhenIdleDecayBringsElapsedUnderThreshold(t *testing.T) {
+	app := NewApp()
+	app.wellness.focusSessionMinutes = 90
+	app.wellness.sessionStart = time.Now().Add(-100 * time.Minute)
+	// 60 min idle: currentExtendedIdle = 60min - 3min grace = 57min
+	// EffectiveElapsed = 100min - 0 - 57min = 43min < 90min → no break
+	app.wellness.lastInputAt = time.Now().Add(-60 * time.Minute)
+
+	model, _ := app.Update(tickMsg(time.Now()))
+	app = model.(App)
+
+	if app.wellness.focusBreakMode {
+		t.Error("break fired despite EffectiveElapsed being under threshold; idle decay must suppress it")
+	}
+}
+
+// TestTick_BreakFiresWhenEffectiveElapsedExceedsThreshold is the complementary
+// positive case: when lastInputAt is recent (within grace), EffectiveElapsed
+// matches wall-clock elapsed and the break fires normally.
+func TestTick_BreakFiresWhenEffectiveElapsedExceedsThreshold(t *testing.T) {
+	app := NewApp()
+	app.wellness.focusSessionMinutes = 1
+	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
+	app.wellness.lastInputAt = time.Now() // recent — no idle decay
+
+	model, _ := app.Update(tickMsg(time.Now()))
+	app = model.(App)
+
+	if !app.wellness.focusBreakMode {
+		t.Error("break did not fire despite EffectiveElapsed exceeding threshold with recent lastInputAt")
+	}
+}
+
 // TestActivateFocusCursor_Shipping_OpensShippingPanel verifies that pressing
 // enter on a Shipping row opens the shipping panel (focusShipping) regardless
 // of whether a PR URL is cached. The browser is reached via the 'p' key inside

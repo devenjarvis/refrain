@@ -226,7 +226,7 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 		}
 	} else if a.wellness.focusSessionMinutes > 0 &&
 		a.modals.IsList() &&
-		time.Since(a.wellness.sessionStart) >= time.Duration(a.wellness.focusSessionMinutes)*time.Minute {
+		a.wellness.EffectiveElapsed() >= time.Duration(a.wellness.focusSessionMinutes)*time.Minute {
 		// Auto-enter break when the work block elapses. The asymmetry
 		// with break-end (which waits for explicit `b`) is intentional:
 		// end-of-block SHOULD interrupt the user — that's the whole
