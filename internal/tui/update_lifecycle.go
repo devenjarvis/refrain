@@ -61,6 +61,7 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 	now := time.Now()
 	a.wellness.appStart = now
 	a.wellness.sessionStart = now
+	a.wellness.lastInputAt = now
 
 	// Load global settings and run one-time migration.
 	globalSettings, err := config.LoadGlobalSettings()

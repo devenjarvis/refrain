@@ -413,6 +413,8 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			// Break is fully elapsed; user is opting back in. Exit
 			// without any "are you sure" friction.
 			a.wellness.sessionStart = time.Now()
+			a.wellness.idleDebt = 0
+			a.wellness.lastInputAt = time.Now()
 			a.wellness.focusBlockCount++
 			a.wellness.focusBreakMode = false
 			a.wellness.focusBreakShortWarning = false
@@ -424,6 +426,8 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			// Third b press while still inside the break window:
 			// override the short-break guard and end early.
 			a.wellness.sessionStart = time.Now()
+			a.wellness.idleDebt = 0
+			a.wellness.lastInputAt = time.Now()
 			a.wellness.focusBlockCount++
 			a.wellness.focusBreakMode = false
 			a.wellness.focusBreakShortWarning = false

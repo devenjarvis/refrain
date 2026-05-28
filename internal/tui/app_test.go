@@ -5582,3 +5582,73 @@ func TestManualMarkReady_TriggersValidation(t *testing.T) {
 		t.Errorf("len(results) = %d, want 1", len(run.results))
 	}
 }
+
+// TestInit_SeedsLastInputAt verifies that handleInit populates lastInputAt so
+// the idle-decay path starts from a known reference rather than the zero value.
+func TestInit_SeedsLastInputAt(t *testing.T) {
+	app := NewApp()
+	before := time.Now()
+	model, _ := app.Update(initAppMsg{cfg: &config.Config{}})
+	after := time.Now()
+	app = model.(App)
+
+	if app.wellness.lastInputAt.IsZero() {
+		t.Fatal("handleInit must set lastInputAt to a non-zero time")
+	}
+	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
+		t.Errorf("lastInputAt %v is not within [%v, %v]", app.wellness.lastInputAt, before, after)
+	}
+}
+
+// TestBreakExit_TimerUp_ResetsIdleDebt verifies that the timer-up break-exit
+// path (single 'b' press) resets idleDebt and refreshes lastInputAt.
+func TestBreakExit_TimerUp_ResetsIdleDebt(t *testing.T) {
+	app, _, _, _, _ := makeFourPhaseApp(t)
+	app.wellness.focusBreakMode = true
+	app.wellness.focusBreakTimerUp = true
+	app.wellness.idleDebt = 5 * time.Minute
+	app.wellness.lastInputAt = time.Now().Add(-10 * time.Minute)
+
+	before := time.Now()
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	after := time.Now()
+	app = model.(App)
+
+	if app.wellness.focusBreakMode {
+		t.Fatal("expected break mode to exit on timer-up 'b' press")
+	}
+	if app.wellness.idleDebt != 0 {
+		t.Errorf("idleDebt = %v after break exit, want 0", app.wellness.idleDebt)
+	}
+	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
+		t.Errorf("lastInputAt %v not refreshed on break exit; want within [%v, %v]",
+			app.wellness.lastInputAt, before, after)
+	}
+}
+
+// TestBreakExit_ShortBreakOverride_ResetsIdleDebt verifies that the double-press
+// early-exit path also resets idleDebt and refreshes lastInputAt.
+func TestBreakExit_ShortBreakOverride_ResetsIdleDebt(t *testing.T) {
+	app, _, _, _, _ := makeFourPhaseApp(t)
+	app.wellness.focusBreakMode = true
+	app.wellness.focusBreakTimerUp = false
+	app.wellness.focusBreakShortWarning = true // second 'b' press: override
+	app.wellness.idleDebt = 3 * time.Minute
+	app.wellness.lastInputAt = time.Now().Add(-8 * time.Minute)
+
+	before := time.Now()
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	after := time.Now()
+	app = model.(App)
+
+	if app.wellness.focusBreakMode {
+		t.Fatal("expected break mode to exit on short-break override 'b' press")
+	}
+	if app.wellness.idleDebt != 0 {
+		t.Errorf("idleDebt = %v after short-break override, want 0", app.wellness.idleDebt)
+	}
+	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
+		t.Errorf("lastInputAt %v not refreshed on short-break override; want within [%v, %v]",
+			app.wellness.lastInputAt, before, after)
+	}
+}
