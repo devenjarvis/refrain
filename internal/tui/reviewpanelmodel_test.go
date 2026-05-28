@@ -418,8 +418,8 @@ func TestReviewPanelModel_EnterNoopOnEmptyDiff(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "task one"}},
-		groups: []taskReviewGroup{{taskIndex: 1, rawDiff: ""}},
+		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
+		groups:   []taskReviewGroup{{taskIndex: 1, rawDiff: ""}},
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 	svc, _ := newTestSvc()

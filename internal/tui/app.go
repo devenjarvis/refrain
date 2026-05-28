@@ -725,6 +725,7 @@ func (a *App) refreshAgentList() {
 	a.dashboard.cursor = a.cursor
 	a.dashboard.prDraftSessionID = a.prDraftSessionID
 	a.dashboard.prDraftRepoPath = a.prDraftRepoPath
+	a.dashboard.activeRepoName = a.activeRepoDisplayName()
 	a.dashboard.activeRepoPath = a.activeRepo
 	a.syncModalsToDashboard()
 	if a.cfg == nil {

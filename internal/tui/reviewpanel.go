@@ -10,9 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
-	"github.com/devenjarvis/refrain/internal/diffmodel"
 	"github.com/devenjarvis/refrain/internal/git"
-	"github.com/devenjarvis/refrain/internal/tui/diff"
 	"github.com/devenjarvis/refrain/internal/tui/mdrender"
 )
 
@@ -597,20 +595,6 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 	}
 
 	return capAndCenter(lines)
-}
-
-// renderAllFilesUnified renders every file in a diffmodel.Model as unified
-// (non-side-by-side) text at the given width, with files joined by newlines.
-func renderAllFilesUnified(m *diffmodel.Model, width int) string {
-	if m == nil {
-		return ""
-	}
-	parts := make([]string, 0, len(m.Files))
-	for i := range m.Files {
-		r := diff.NewRenderer(&m.Files[i])
-		parts = append(parts, r.Render(width, false))
-	}
-	return strings.Join(parts, "\n")
 }
 
 // capLines returns lines capped to height, with a trailing truncation note if needed.

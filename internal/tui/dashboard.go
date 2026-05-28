@@ -117,6 +117,7 @@ type dashboardModel struct {
 	cursor                 FocusedCursor  // pipeline cursor mirror; synced from App on every refresh
 	prDraftSessionID       string         // session ID whose PR draft is in flight; "" when idle
 	prDraftRepoPath        string         // repo path whose PR draft is in flight; "" when idle
+	activeRepoName         string         // display name of the active repo
 	activeRepoPath         string         // canonical path of the active repo (for pipeline filtering)
 	focusLaunchAgent       *agent.Agent   // agent open in focusLaunch terminal; nil otherwise
 	focusLaunchSession     *agent.Session // session owning focusLaunchAgent; nil otherwise
@@ -1548,7 +1549,11 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		elapsedMin := int(d.sessionElapsed.Minutes())
 		timerStr = barModel.ViewAs(pct) + " " + fmt.Sprintf("%dm/%dm", elapsedMin, d.focusSessionMinutes)
 	}
-	headerLine := title + "  " + timerStr
+	headerLine := title
+	if d.activeRepoName != "" {
+		headerLine += "  " + StyleSubtle.Render(d.activeRepoName)
+	}
+	headerLine += "  " + timerStr
 	lines = append(lines, headerLine)
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
 
