@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
 	"github.com/devenjarvis/refrain/internal/git"
 	"github.com/devenjarvis/refrain/internal/github"
 )
@@ -21,10 +22,6 @@ func (a App) handleReviewDiff(msg reviewDiffMsg) (tea.Model, tea.Cmd) {
 			repoPath = a.activeRepo
 		}
 		a.reviewDiffCache[cacheKey(repoPath, msg.sessionID)] = msg.entry
-		// Refresh the inline diff viewport when data arrives for the open session.
-		if rp := a.modals.Review(); rp != nil && rp.SessionID() == msg.sessionID && len(msg.entry.groups) > 0 {
-			rp.RefreshDiffViewport(a.panelServices())
-		}
 		// If the entry has task groups, dispatch a reviewer per group.
 		if len(msg.entry.groups) > 0 {
 			var cmds []tea.Cmd
@@ -677,6 +674,24 @@ func (a App) reviewTaskCmd(sess *agent.Session, repoPath string, group taskRevie
 		})
 		return reviewVerdictMsg{sessionID: sessID, repoPath: repoPath, taskIndex: taskIndex, verdict: verdict, err: err}
 	}
+}
+
+// handleReviewOpenTaskDiff handles reviewOpenTaskDiffMsg by parsing the task's
+// raw diff and opening the full-screen diff viewer scoped to that task. The
+// review modal is preserved — diffCloseMsg returns to ViewDashboard where the
+// modal is still open.
+func (a App) handleReviewOpenTaskDiff(msg reviewOpenTaskDiffMsg) (tea.Model, tea.Cmd) {
+	if msg.rawDiff == "" {
+		return a, nil
+	}
+	m, err := diffmodel.Parse(msg.rawDiff)
+	if err != nil || m == nil {
+		a.setError("could not parse task diff")
+		return a, nil
+	}
+	a.view = ViewDiff
+	a.diff = newDiffModel(msg.taskLabel, m, a.width, a.height-1)
+	return a, nil
 }
 
 // ensureGitignore adds .refrain/ to .gitignore in the given path if not already present.

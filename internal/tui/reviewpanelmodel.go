@@ -1,26 +1,31 @@
 package tui
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/devenjarvis/refrain/internal/agent"
-	"github.com/devenjarvis/refrain/internal/diffmodel"
+)
+
+const (
+	reviewTabTasks    = 0
+	reviewTabDiff     = 1
+	reviewTabChecks   = 2
+	reviewTabValidate = 3
 )
 
 // reviewPanelModel owns the keyboard, mouse, and view dispatch for the review
-// panel. Per-panel state (cursor, viewport scroll, spec overlay toggle) lives
-// here; cross-panel state (the reviewDiffCache keyed by session ID) stays on
-// App because its lifetime exceeds a single panel session.
+// panel. Per-panel state (cursor, active tab, spec overlay toggle) lives here;
+// cross-panel state (the reviewDiffCache keyed by session ID) stays on App
+// because its lifetime exceeds a single panel session.
 type reviewPanelModel struct {
 	session           *agent.Session
 	repoPath          string
 	taskCursor        int
-	diffVP            viewport.Model
-	diffCacheByTask   map[int]*diffmodel.Model
+	activeTab         int
 	specOverlay       bool
 	specOverlayScroll int
 
@@ -30,16 +35,12 @@ type reviewPanelModel struct {
 // newReviewPanel constructs a review panel for sess at the given size.
 // repoPath pins which repo's manager is used for all key handlers — it must
 // match the repo the session belongs to so multi-repo ID collisions are safe.
-// The diff viewport is fresh; the caller should invoke RefreshDiffViewport
-// after the reviewDiffCache entry lands.
 func newReviewPanel(sess *agent.Session, repoPath string, width, height int) *reviewPanelModel {
 	return &reviewPanelModel{
-		session:         sess,
-		repoPath:        repoPath,
-		diffVP:          viewport.New(),
-		diffCacheByTask: make(map[int]*diffmodel.Model),
-		width:           width,
-		height:          height,
+		session:  sess,
+		repoPath: repoPath,
+		width:    width,
+		height:   height,
 	}
 }
 
@@ -70,65 +71,13 @@ func (m *reviewPanelModel) TaskCursor() int {
 	return m.taskCursor
 }
 
-// Resize updates cached layout dimensions; callers should follow with
-// RefreshDiffViewport so the inner viewport reflects the new size.
+// Resize updates cached layout dimensions.
 func (m *reviewPanelModel) Resize(w, h int) {
 	if m == nil {
 		return
 	}
 	m.width = w
 	m.height = h
-}
-
-// RefreshDiffViewport recomputes the inline diff viewport for the current
-// task. Call this whenever the task cursor moves or the cache entry changes.
-func (m *reviewPanelModel) RefreshDiffViewport(svc PanelServices) {
-	if m == nil || m.session == nil {
-		return
-	}
-	headerLines := len(renderReviewHeader(m.session, m.width))
-	footerH := 3
-	bodyH := m.height - headerLines - footerH
-	if bodyH < 4 {
-		bodyH = 4
-	}
-	maxSummaryH := bodyH / 3
-	if maxSummaryH < 4 {
-		maxSummaryH = 4
-	}
-	diffH := bodyH - maxSummaryH - 1
-	if diffH < 1 {
-		diffH = 1
-	}
-	rightW := m.width*6/10 - 5
-	if rightW < 20 {
-		rightW = 20
-	}
-	m.diffVP.SetHeight(diffH)
-	m.diffVP.SetWidth(rightW)
-	m.diffVP.GotoTop()
-	entry := svc.ReviewCache(m.repoPath, m.session.ID)
-	if entry == nil {
-		m.diffVP.SetContent("")
-		return
-	}
-	group := reviewTaskGroupAtCursor(entry, m.taskCursor)
-	if group == nil || group.rawDiff == "" {
-		m.diffVP.SetContent("(no diff for this task)")
-		return
-	}
-	idx := m.taskCursor
-	mdl, ok := m.diffCacheByTask[idx]
-	if !ok {
-		var err error
-		mdl, err = diffmodel.Parse(group.rawDiff)
-		if err != nil || mdl == nil {
-			m.diffVP.SetContent("(no diff for this task)")
-			return
-		}
-		m.diffCacheByTask[idx] = mdl
-	}
-	m.diffVP.SetContent(renderAllFilesUnified(mdl, rightW))
 }
 
 // closeReviewPanel invokes svc.ClosePanel(), which clears App's reviewPanel
@@ -192,7 +141,6 @@ func (m *reviewPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel, t
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.Resize(msg.Width, msg.Height-1)
-		m.RefreshDiffViewport(svc)
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg, svc)
@@ -206,6 +154,28 @@ func (m *reviewPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel, t
 // handleKey is the per-key dispatch extracted from app.go's monolithic
 // Update. Spec overlay intercepts all keys while active.
 func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (PanelModel, tea.Cmd) {
+	// Tab-switching keys work even while spec overlay is open.
+	switch msg.String() {
+	case "1":
+		m.activeTab = reviewTabTasks
+		return m, nil
+	case "2":
+		m.activeTab = reviewTabDiff
+		return m, nil
+	case "3":
+		m.activeTab = reviewTabChecks
+		return m, nil
+	case "4":
+		m.activeTab = reviewTabValidate
+		return m, nil
+	case "tab":
+		m.activeTab = (m.activeTab + 1) % 4
+		return m, nil
+	case "shift+tab":
+		m.activeTab = (m.activeTab + 3) % 4
+		return m, nil
+	}
+
 	if m.specOverlay {
 		switch msg.String() {
 		case "esc":
@@ -271,18 +241,18 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		reviewOpenIDECmd(m.session, m.repoPath, svc)
 		return m, nil
 	case "j", "down":
-		if entry := svc.ReviewCache(m.repoPath, m.session.ID); entry != nil {
-			maxIdx := reviewTaskCount(entry) - 1
-			if m.taskCursor < maxIdx {
-				m.taskCursor++
-				m.RefreshDiffViewport(svc)
+		if m.activeTab == reviewTabTasks {
+			if entry := svc.ReviewCache(m.repoPath, m.session.ID); entry != nil {
+				maxIdx := reviewTaskCount(entry) - 1
+				if m.taskCursor < maxIdx {
+					m.taskCursor++
+				}
 			}
 		}
 		return m, nil
 	case "k", "up":
-		if m.taskCursor > 0 {
+		if m.activeTab == reviewTabTasks && m.taskCursor > 0 {
 			m.taskCursor--
-			m.RefreshDiffViewport(svc)
 		}
 		return m, nil
 	case "f":
@@ -316,20 +286,33 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		return m, func() tea.Msg {
 			return reviewReworkRequestMsg{sessionID: sessID, repoPath: repoPath, prompt: prompt}
 		}
-	case "enter", "space":
+	case "enter":
+		if m.activeTab == reviewTabTasks {
+			entry := svc.ReviewCache(m.repoPath, m.session.ID)
+			group := reviewTaskGroupAtCursor(entry, m.taskCursor)
+			if group == nil || group.rawDiff == "" {
+				return m, nil
+			}
+			// Build "[N] task text" label using same row order as the list pane.
+			label := "Other changes"
+			if entry != nil {
+				row := 0
+				for _, t := range entry.tasks {
+					if row == m.taskCursor {
+						label = fmt.Sprintf("[%d] %s", t.Index, t.Text)
+						break
+					}
+					row++
+				}
+			}
+			rawDiff := group.rawDiff
+			return m, func() tea.Msg {
+				return reviewOpenTaskDiffMsg{rawDiff: rawDiff, taskLabel: label}
+			}
+		}
 		return m, nil
-	case "pgdown":
-		m.diffVP.PageDown()
-	case "pgup":
-		m.diffVP.PageUp()
-	case "ctrl+d":
-		m.diffVP.HalfPageDown()
-	case "ctrl+u":
-		m.diffVP.HalfPageUp()
-	case "g":
-		m.diffVP.GotoTop()
-	case "G":
-		m.diffVP.GotoBottom()
+	case "space":
+		return m, nil
 	case "?":
 		if m.session.HasPlan() {
 			m.specOverlay = true
@@ -347,21 +330,18 @@ func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg, svc PanelServices)
 		return
 	}
 	entry := svc.ReviewCache(m.repoPath, m.session.ID)
-	if entry == nil || m.width < 80 {
+	if entry == nil {
 		return
 	}
 	headerH := len(renderReviewHeader(m.session, m.width))
-	leftW := m.width * 4 / 10
-	if leftW < 32 {
-		leftW = 32
-	}
-	paneTop := svc.DashboardTopY + headerH
-	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, leftW)
+	const tabBarH = 2
+	paneTop := svc.DashboardTopY + headerH + tabBarH
+	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, m.width-2)
 	if rowIdx < 0 {
 		return
 	}
 	footerLines := 3
-	bodyH := m.height - svc.DashboardTopY - headerH - footerLines
+	bodyH := m.height - svc.DashboardTopY - headerH - tabBarH - footerLines
 	if bodyH < 4 {
 		bodyH = 4
 	}
@@ -382,7 +362,6 @@ func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg, svc PanelServices)
 		}
 	}
 	m.taskCursor = offset + rowIdx
-	m.RefreshDiffViewport(svc)
 }
 
 // View renders the review panel — either the spec overlay or the main panel.
@@ -396,5 +375,5 @@ func (m *reviewPanelModel) View(svc PanelServices) string {
 	}
 	entry := svc.ReviewCache(m.repoPath, m.session.ID)
 	prDraftInFlight := svc.prDraftInFlightFor(m.session.ID, m.repoPath)
-	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.diffVP.View())
+	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.activeTab)
 }

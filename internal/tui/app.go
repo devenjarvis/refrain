@@ -451,6 +451,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleReviewDiff(msg)
 	case reviewVerdictMsg:
 		return a.handleReviewVerdict(msg)
+	case reviewOpenTaskDiffMsg:
+		return a.handleReviewOpenTaskDiff(msg)
 	}
 
 	// Route to the active view.
@@ -723,6 +725,7 @@ func (a *App) refreshAgentList() {
 	a.dashboard.cursor = a.cursor
 	a.dashboard.prDraftSessionID = a.prDraftSessionID
 	a.dashboard.prDraftRepoPath = a.prDraftRepoPath
+	a.dashboard.activeRepoName = a.activeRepoDisplayName()
 	a.dashboard.activeRepoPath = a.activeRepo
 	a.syncModalsToDashboard()
 	if a.cfg == nil {
@@ -955,7 +958,6 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		if _, ok := a.reviewDiffCache[cacheKey(rp, sess.ID)]; !ok {
 			return a.fetchReviewDiffCmd(sess, rp), true
 		}
-		a.modals.Review().RefreshDiffViewport(a.panelServices())
 		return nil, true
 	case focusSectionShipping:
 		a.openShipping(newShippingPanel(sess, items[idx].repoPath, a.width, a.height-1))
@@ -1494,6 +1496,14 @@ type reviewDiffEntry struct {
 	tasks    []agent.PlanTask
 	groups   []taskReviewGroup          // per-task + "other" commit groups
 	verdicts map[int]*taskVerdictRecord // keyed by taskIndex (0 = other)
+}
+
+// reviewOpenTaskDiffMsg is emitted by the review panel when the user presses
+// enter on a task row that has a non-empty rawDiff. App opens the full-screen
+// diff viewer scoped to that task without closing the review modal.
+type reviewOpenTaskDiffMsg struct {
+	rawDiff   string
+	taskLabel string
 }
 
 // reviewDiffMsg carries the result of an async review diff fetch.

@@ -1173,7 +1173,6 @@ func (a App) handlePipelineOpenReview() (App, tea.Cmd, bool) {
 	if _, ok := a.reviewDiffCache[cacheKey(item.repoPath, sess.ID)]; !ok {
 		return a, a.fetchReviewDiffCmd(sess, item.repoPath), true
 	}
-	a.modals.Review().RefreshDiffViewport(a.panelServices())
 	return a, nil, true
 }
 

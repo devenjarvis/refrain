@@ -10,9 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
-	"github.com/devenjarvis/refrain/internal/diffmodel"
 	"github.com/devenjarvis/refrain/internal/git"
-	"github.com/devenjarvis/refrain/internal/tui/diff"
 	"github.com/devenjarvis/refrain/internal/tui/mdrender"
 )
 
@@ -142,16 +140,50 @@ func renderReviewHeader(sess *agent.Session, width int) []string {
 	return lines
 }
 
+// renderReviewPlaceholderTab renders a height-line placeholder body for tabs
+// that haven't been implemented yet. The label is horizontally centered on
+// the first line; remaining lines are empty strings.
+func renderReviewPlaceholderTab(label string, width, height int) []string {
+	lines := make([]string, height)
+	text := StyleSubtle.Render("(" + label + ")")
+	pad := (width - ansi.StringWidth(text)) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	lines[0] = strings.Repeat(" ", pad) + text
+	return lines
+}
+
+// renderReviewTabBar renders the 2-line tab bar for the review panel.
+// Line 0: tab labels separated by two spaces; active tab in ColorSecondary bold,
+// inactive tabs in StyleSubtle. Line 1: a subtle horizontal divider.
+func renderReviewTabBar(activeTab, width int) []string {
+	labels := []string{"Tasks", "Diff", "Checks", "Validate"}
+	activeStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
+	var parts []string
+	for i, label := range labels {
+		if i == activeTab {
+			parts = append(parts, activeStyle.Render(label))
+		} else {
+			parts = append(parts, StyleSubtle.Render(label))
+		}
+	}
+	labelLine := "  " + strings.Join(parts, "  ")
+	divider := StyleSubtle.Render(strings.Repeat("─", width-2))
+	return []string{labelLine, divider}
+}
+
 // renderReviewPanel renders the fullscreen review panel for a session.
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
 // cursor is the currently selected task row index (0-based among all task rows).
 // prDraftInFlight, when true, shows a spinner status line and disables the p hint.
-// vpView is the pre-rendered viewport.View() string for the inline diff. When
-// non-empty it is used directly; when empty (tests / no data) renderInlineDiffPane
-// is called as a fallback with scrollOffset=0.
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, vpView string) string {
+// activeTab selects which tab body to render (0=Tasks, 1=Diff, 2=Checks, 3=Validate).
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, activeTab int) string {
 	// Header (3–4 lines depending on prompt length).
 	headerLines := renderReviewHeader(sess, width)
+
+	// Tab bar: 2 lines (labels + divider).
+	const tabBarH = 2
 
 	// Footer: blank + divider + hints = 3 lines; +1 when draft in flight.
 	footerLineCount := 3
@@ -159,18 +191,31 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	if prDraftInFlight {
 		draftLineCount = 1
 	}
-	bodyH := height - len(headerLines) - footerLineCount - draftLineCount
+	bodyH := height - len(headerLines) - tabBarH - footerLineCount - draftLineCount
 	if bodyH < 4 {
 		bodyH = 4
 	}
 
-	// Build body lines.
+	// Build body lines based on active tab.
 	var bodyLines []string
-	if entry == nil {
+	switch {
+	case activeTab != reviewTabTasks:
+		// Non-Tasks tabs: placeholder.
+		var label string
+		switch activeTab {
+		case reviewTabDiff:
+			label = "full diff browser coming soon"
+		case reviewTabChecks:
+			label = "local checks coming soon"
+		case reviewTabValidate:
+			label = "manual validation coming soon"
+		}
+		bodyLines = renderReviewPlaceholderTab(label, width, bodyH)
+	case entry == nil:
 		bodyLines = append(bodyLines, StyleSubtle.Render("loading diff stats…"))
-	} else if width < 80 {
-		// Narrow: stack list above detail with a divider.
-		listH := bodyH / 2
+	default:
+		// Tasks tab: full-width stacked layout.
+		listH := bodyH * 2 / 5
 		detailH := bodyH - listH - 1
 		if listH < 2 {
 			listH = 2
@@ -178,50 +223,16 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 		if detailH < 2 {
 			detailH = 2
 		}
-		leftW := width - 2
-		bodyLines = append(bodyLines, renderTaskListPane(entry, leftW, listH, cursor)...)
+		paneW := width - 2
+		bodyLines = append(bodyLines, renderTaskListPane(entry, paneW, listH, cursor)...)
 		bodyLines = append(bodyLines, StyleSubtle.Render(strings.Repeat("─", width-2)))
-		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, leftW, detailH)...)
-	} else {
-		// Wide: side-by-side panes with a │ gutter.
-		leftW := width * 4 / 10
-		if leftW < 32 {
-			leftW = 32
-		}
-		// gutter: " │ " = 3 chars, but we also have 2 leading spaces on the outer,
-		// so effective layout: 2sp + leftW + " │ " + rightW
-		rightW := width - leftW - 5
-		if rightW < 20 {
-			rightW = 20
-		}
-		leftPaneLines := renderTaskListPane(entry, leftW, bodyH, cursor)
-		rightPaneLines := buildRightPane(entry, cursor, rightW, bodyH, vpView)
-
-		gutter := " " + StyleSubtle.Render("│") + " "
-		maxRows := len(leftPaneLines)
-		if len(rightPaneLines) > maxRows {
-			maxRows = len(rightPaneLines)
-		}
-		for i := 0; i < maxRows; i++ {
-			l, r := "", ""
-			if i < len(leftPaneLines) {
-				l = leftPaneLines[i]
-			}
-			if i < len(rightPaneLines) {
-				r = rightPaneLines[i]
-			}
-			// Pad left cell to leftW visible columns.
-			padW := leftW - ansi.StringWidth(l)
-			if padW < 0 {
-				padW = 0
-			}
-			bodyLines = append(bodyLines, l+strings.Repeat(" ", padW)+gutter+r)
-		}
+		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, paneW, detailH)...)
 	}
 
 	// Assemble full panel.
 	var lines []string
 	lines = append(lines, headerLines...)
+	lines = append(lines, renderReviewTabBar(activeTab, width)...)
 	lines = append(lines, bodyLines...)
 
 	// In-flight PR draft status line.
@@ -247,7 +258,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 		"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
 		"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
 		"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
-		"  " + StyleActive.Render("pgdn") + StyleSubtle.Render("/") + StyleActive.Render("pgup") + StyleSubtle.Render(" — scroll diff") +
+		"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
 		"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
 		"  " + StyleSubtle.Render("ESC — back to focus")
 	lines = append(lines, hints)
@@ -584,115 +595,6 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 	}
 
 	return capAndCenter(lines)
-}
-
-// renderTaskSummaryPane renders the summary portion of the right pane (verdict,
-// rationale, files, commits) capped to summaryH lines. It is the upper half of
-// the right pane in wide mode; the inline diff viewport occupies the lower half.
-// This is identical to renderTaskDetailPane but without the "enter — open task diff" hint.
-func renderTaskSummaryPane(entry *reviewDiffEntry, cursor, width, summaryH int) []string {
-	return renderTaskDetailPane(entry, cursor, width, summaryH)
-}
-
-// renderAllFilesUnified renders every file in a diffmodel.Model as unified
-// (non-side-by-side) text at the given width, with files joined by newlines.
-func renderAllFilesUnified(m *diffmodel.Model, width int) string {
-	if m == nil {
-		return ""
-	}
-	parts := make([]string, 0, len(m.Files))
-	for i := range m.Files {
-		r := diff.NewRenderer(&m.Files[i])
-		parts = append(parts, r.Render(width, false))
-	}
-	return strings.Join(parts, "\n")
-}
-
-// renderInlineDiffPane renders the diff body for the cursor task's rawDiff,
-// windowed by scrollOffset and capped to height. Returns a placeholder line
-// when the diff is empty.
-func renderInlineDiffPane(entry *reviewDiffEntry, cursor, width, height, scrollOffset int) []string {
-	rawDiff := ""
-	if entry != nil {
-		group := reviewTaskGroupAtCursor(entry, cursor)
-		// For the no-plan overview path (no tasks), fall back to the first group.
-		if group == nil && len(entry.groups) > 0 && len(entry.tasks) == 0 {
-			group = &entry.groups[0]
-		}
-		if group != nil {
-			rawDiff = group.rawDiff
-		}
-	}
-
-	const placeholder = "(no diff for this task)"
-	if rawDiff == "" {
-		if height <= 0 {
-			return []string{StyleSubtle.Render(placeholder)}
-		}
-		out := make([]string, height)
-		out[0] = StyleSubtle.Render(placeholder)
-		return out
-	}
-
-	m, err := diffmodel.Parse(rawDiff)
-	if err != nil || m == nil || len(m.Files) == 0 {
-		out := make([]string, max(1, height))
-		out[0] = StyleSubtle.Render(placeholder)
-		return out
-	}
-
-	content := renderAllFilesUnified(m, width)
-	allLines := strings.Split(content, "\n")
-
-	if scrollOffset < 0 {
-		scrollOffset = 0
-	}
-	if scrollOffset >= len(allLines) {
-		scrollOffset = max(0, len(allLines)-1)
-	}
-	end := scrollOffset + height
-	if end > len(allLines) {
-		end = len(allLines)
-	}
-	result := allLines[scrollOffset:end]
-	// Pad to height so the pane always occupies its allocated rows.
-	for len(result) < height {
-		result = append(result, "")
-	}
-	return result
-}
-
-// buildRightPane composes the right pane for wide mode: summary on top,
-// a horizontal rule, then the inline diff below.
-// vpView is the pre-rendered output from viewport.View(). When non-empty it is
-// used directly for the diff section (no re-parsing); when empty renderInlineDiffPane
-// is called as a fallback (used by tests that don't wire up a viewport).
-func buildRightPane(entry *reviewDiffEntry, cursor, width, bodyH int, vpView string) []string {
-	if entry == nil {
-		return []string{StyleSubtle.Render("loading…")}
-	}
-	maxSummaryH := bodyH / 3
-	if maxSummaryH < 4 {
-		maxSummaryH = 4
-	}
-	summaryLines := renderTaskSummaryPane(entry, cursor, width, maxSummaryH)
-	divider := StyleSubtle.Render(strings.Repeat("─", width))
-	diffH := bodyH - len(summaryLines) - 1
-	if diffH < 1 {
-		diffH = 1
-	}
-	var diffLines []string
-	if vpView != "" {
-		// Use the viewport's pre-rendered content (scroll already applied, no re-parse).
-		diffLines = strings.Split(vpView, "\n")
-	} else {
-		diffLines = renderInlineDiffPane(entry, cursor, width, diffH, 0)
-	}
-	result := make([]string, 0, len(summaryLines)+1+len(diffLines))
-	result = append(result, summaryLines...)
-	result = append(result, divider)
-	result = append(result, diffLines...)
-	return result
 }
 
 // capLines returns lines capped to height, with a trailing truncation note if needed.
