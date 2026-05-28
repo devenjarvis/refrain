@@ -1,0 +1,189 @@
+package tui
+
+import (
+	"strings"
+
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	xlipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/lipgloss"
+)
+
+const (
+	newSessionSidebarWidth  = 28
+	newSessionSidebarMinVP  = 110 // sidebar shown only when viewport width >= this
+	newSessionMaxTextareaW  = 120
+	newSessionVerticalSlack = 8 // rows consumed by header + title + blank rows + footer
+)
+
+// newSessionModel is the full-viewport new-session composition screen.
+// It replaces the promptModalModel overlay when PlanFirstEnabled is on.
+type newSessionModel struct {
+	active         bool
+	textarea       textarea.Model
+	width          int
+	height         int
+	returnTo       ViewMode
+	titleIdx       int
+	placeholderIdx int
+	repoName       string
+	baseBranch     string
+}
+
+func newNewSessionModel() newSessionModel {
+	ta := textarea.New()
+	ta.Prompt = ""
+	ta.ShowLineNumbers = false
+	ta.CharLimit = promptModalCharLimit
+	// Strip bubbles' default focused CursorLine background.
+	styles := ta.Styles()
+	styles.Focused.CursorLine = xlipgloss.NewStyle()
+	styles.Cursor.Color = ColorPrimary
+	ta.SetStyles(styles)
+	// Extend InsertNewline to include ctrl+j and alt+enter so newlines work
+	// on terminals that don't disambiguate shift+enter. The Update method
+	// intercepts plain "enter" for submit before the textarea sees it, so
+	// listing "enter" here is safe — ctrl+j / shift+enter never reach the
+	// submit branch.
+	ta.KeyMap.InsertNewline.SetKeys("enter", "ctrl+m", "ctrl+j", "shift+enter", "alt+enter")
+	return newSessionModel{textarea: ta}
+}
+
+// SetSize updates the model's understanding of the terminal dimensions.
+func (m *newSessionModel) SetSize(w, h int) {
+	m.width = w
+	m.height = h
+	m.textarea.SetWidth(m.textareaWidth())
+	m.textarea.SetHeight(m.textareaHeight())
+}
+
+// Open activates the screen, resets textarea content, and picks a fresh
+// title/placeholder pair. returnTo is the ViewMode to restore on cancel.
+func (m *newSessionModel) Open(returnTo ViewMode) tea.Cmd {
+	m.active = true
+	m.returnTo = returnTo
+	m.textarea.SetValue("")
+	m.titleIdx = pickPrompt(len(promptModalTitles))
+	m.placeholderIdx = pickPrompt(len(promptModalPlaceholders))
+	m.textarea.Placeholder = promptModalPlaceholders[m.placeholderIdx]
+	m.textarea.SetWidth(m.textareaWidth())
+	m.textarea.SetHeight(m.textareaHeight())
+	return m.textarea.Focus()
+}
+
+// Close deactivates the screen and blurs the textarea.
+func (m *newSessionModel) Close() {
+	m.active = false
+	m.textarea.Blur()
+}
+
+// Update routes a tea.Msg. Intercepts esc / enter / ctrl+enter for control;
+// all other messages (including ctrl+j via InsertNewline) go to the textarea.
+func (m *newSessionModel) Update(msg tea.Msg) tea.Cmd {
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "esc":
+			m.Close()
+			return func() tea.Msg { return promptModalCancelMsg{} }
+		case "ctrl+enter":
+			val := strings.TrimSpace(m.textarea.Value())
+			if val == "" {
+				return nil
+			}
+			m.Close()
+			return func() tea.Msg {
+				return promptModalSubmitMsg{prompt: val, skipPlanning: true}
+			}
+		case "enter":
+			val := strings.TrimSpace(m.textarea.Value())
+			if val == "" {
+				return nil
+			}
+			m.Close()
+			return func() tea.Msg {
+				return promptModalSubmitMsg{prompt: val, skipPlanning: false}
+			}
+		}
+	}
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(msg)
+	return cmd
+}
+
+// View renders the full-viewport composition screen.
+func (m *newSessionModel) View() string {
+	// Header: "NEW SESSION" left, "repoName · branch" right.
+	left := StyleSubtle.Render("NEW SESSION")
+	var rightStr string
+	if m.repoName != "" && m.baseBranch != "" {
+		rightStr = StyleSubtle.Render(m.repoName + " · " + m.baseBranch)
+	} else if m.repoName != "" {
+		rightStr = StyleSubtle.Render(m.repoName)
+	}
+	header := rightAlign(left, rightStr, m.width)
+
+	// Rotating title prompt.
+	title := StyleTitle.Render(promptModalTitles[m.titleIdx])
+
+	if m.showSidebar() {
+		tw := m.textareaWidth()
+		textareaCol := lipgloss.NewStyle().Width(tw).Render(m.textarea.View())
+		sidebar := m.renderSidebar()
+		body := lipgloss.JoinHorizontal(lipgloss.Top, textareaCol, "  ", sidebar)
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", title, "", body)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", title, "", m.textarea.View())
+}
+
+func (m *newSessionModel) showSidebar() bool {
+	return m.width >= newSessionSidebarMinVP
+}
+
+func (m *newSessionModel) textareaWidth() int {
+	w := m.width
+	if m.showSidebar() {
+		w = w - newSessionSidebarWidth - 4 // sidebar + padding
+	} else {
+		w = w - 4
+	}
+	if w > newSessionMaxTextareaW {
+		w = newSessionMaxTextareaW
+	}
+	if w < 10 {
+		w = 10
+	}
+	return w
+}
+
+func (m *newSessionModel) textareaHeight() int {
+	h := m.height - newSessionVerticalSlack
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+func (m *newSessionModel) renderSidebar() string {
+	w := newSessionSidebarWidth
+
+	flowLabel := StyleSubtle.Render("FLOW")
+	flow := lipgloss.NewStyle().Foreground(ColorPrimary).Render("Plan → Build → Review → Ship")
+	flowBlock := lipgloss.JoinVertical(lipgloss.Left, flowLabel, flow)
+
+	exLabel := StyleSubtle.Render("EXAMPLES")
+	// Pick three example prompts starting at placeholderIdx.
+	examples := make([]string, 0, 3)
+	for i := 0; i < 3; i++ {
+		idx := (m.placeholderIdx + i) % len(promptModalPlaceholders)
+		ex := promptModalPlaceholders[idx]
+		// Strip leading "e.g. " for brevity in sidebar.
+		ex = strings.TrimPrefix(ex, "e.g. ")
+		ex = lipgloss.NewStyle().Width(w).Render(StyleSubtle.Render("• " + ex))
+		examples = append(examples, ex)
+	}
+	exLines := append([]string{exLabel}, examples...)
+	exBlock := lipgloss.JoinVertical(lipgloss.Left, exLines...)
+
+	return lipgloss.JoinVertical(lipgloss.Left, flowBlock, "", exBlock)
+}
