@@ -1645,3 +1645,27 @@ func TestRenderChecksTab_NilState_ShowsPlaceholder(t *testing.T) {
 		t.Errorf("must show no-checks placeholder; got:\n%s", stripped)
 	}
 }
+
+// TestRenderReviewPanel_ChecksTabWithState verifies that renderReviewPanel routes
+// to renderChecksTab when checkState is non-nil, showing check names in the body.
+func TestRenderReviewPanel_ChecksTabWithState(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-1", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+
+	cs := &checksTabState{
+		checks: []config.ValidationCheck{
+			{Name: "Tests", Command: "go test ./..."},
+		},
+		results: []validationCheckResult{{state: checkPassed}},
+	}
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, cs)
+	stripped := ansi.Strip(output)
+
+	if !strings.Contains(stripped, "Tests") {
+		t.Errorf("renderReviewPanel with non-nil checkState must show check names; got:\n%s", stripped)
+	}
+	if strings.Contains(stripped, "No validation checks configured") {
+		t.Error("must not show placeholder when checkState is non-nil")
+	}
+}
