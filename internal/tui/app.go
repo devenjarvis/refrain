@@ -170,6 +170,12 @@ type App struct {
 	repoSettings   map[string]*config.RepoSettings    // keyed by repo path
 	resolvedCache  map[string]config.ResolvedSettings // keyed by repo path
 
+	// pendingChecks buffers the validation-checks list while the repo settings
+	// form is open. Seeded by initRepoConfigForm, mutated by the repoChecks
+	// sub-editor, and consumed by extractRepoSettings on save. nil between
+	// form sessions.
+	pendingChecks []config.ValidationCheck
+
 	view         ViewMode
 	dashboard    dashboardModel
 	diff         diffModel
@@ -257,6 +263,8 @@ func (a *App) syncModalsToDashboard() {
 	a.dashboard.panelFocus = a.modals.Current()
 	a.dashboard.repoConfigForm = a.modals.Config()
 	a.dashboard.configRepoPath = a.modals.ConfigRepoPath()
+	a.dashboard.repoChecksEditor = a.modals.RepoChecks()
+	a.dashboard.repoChecksRepoPath = a.modals.RepoChecksRepoPath()
 	a.dashboard.focusLaunchAgent = a.modals.LaunchAgent()
 	a.dashboard.focusLaunchSession = a.modals.LaunchSession()
 }
@@ -284,6 +292,21 @@ func (a *App) openPlanEditorPanel(pe *planEditorModel) {
 // openConfigForm opens the per-repo config form for repoPath and syncs.
 func (a *App) openConfigForm(form *configForm, repoPath string) {
 	a.modals.OpenConfig(form, repoPath)
+	a.syncModalsToDashboard()
+}
+
+// openRepoChecksEditor switches focus from the repo config form to the
+// validation-checks sub-editor for the same repo. The parent config form is
+// preserved in modals so the user returns to it on save/cancel.
+func (a *App) openRepoChecksEditor(editor *repoChecksModel, repoPath string) {
+	a.modals.OpenRepoChecks(editor, repoPath)
+	a.syncModalsToDashboard()
+}
+
+// closeRepoChecksEditor pops the checks sub-editor without disturbing the
+// parent config form.
+func (a *App) closeRepoChecksEditor() {
+	a.modals.CloseRepoChecks()
 	a.syncModalsToDashboard()
 }
 
@@ -1044,6 +1067,8 @@ func (a App) View() tea.View {
 		switch a.dashboard.panelFocus {
 		case focusConfig:
 			hints = repoConfigHints
+		case focusRepoChecks:
+			hints = repoChecksHints
 		case focusLaunch:
 			hints = focusLaunchHints
 		}
@@ -1437,6 +1462,10 @@ func panelFocusName(f panelFocus) string {
 		return "launch"
 	case focusPlanEditor:
 		return "plan-editor"
+	case focusRepoChecks:
+		return "repo-checks"
+	case focusShipping:
+		return "shipping"
 	default:
 		return fmt.Sprintf("unknown(%d)", int(f))
 	}

@@ -15,6 +15,7 @@ const (
 	fieldToggle fieldKind = iota
 	fieldText
 	fieldSelect
+	fieldAction
 )
 
 // formField is a single field in a config form.
@@ -26,6 +27,7 @@ type formField struct {
 	editing     bool            // true when text field has cursor active
 	options     []string        // for fieldSelect
 	selected    int             // for fieldSelect
+	actionHint  string          // for fieldAction: right-aligned summary text
 }
 
 // configForm composes toggle and text input fields into a navigable form.
@@ -40,6 +42,11 @@ type configFormSaveMsg struct{}
 
 // configFormCancelMsg is emitted when the user cancels (esc with no text editing).
 type configFormCancelMsg struct{}
+
+// configFormActionMsg is emitted when the user presses enter on a fieldAction
+// row. Routed by label so a single form can carry multiple sub-editor entry
+// points without cross-wiring the model layer.
+type configFormActionMsg struct{ Label string }
 
 // newConfigForm creates a form with the given fields. Width controls text input sizing.
 func newConfigForm(fields []formField, width int) configForm {
@@ -73,6 +80,18 @@ func addSelect(fields []formField, label string, options []string, selected int)
 		kind:     fieldSelect,
 		options:  options,
 		selected: selected,
+	})
+}
+
+// addAction appends a non-editable action row. Pressing enter on it emits a
+// configFormActionMsg{Label: label}, intended to launch a sub-editor for
+// values that don't fit a scalar widget (e.g. a list of structs). The hint
+// renders right-aligned and may carry a summary like "3 configured  ↵ edit".
+func addAction(fields []formField, label, hint string) []formField {
+	return append(fields, formField{
+		label:      label,
+		kind:       fieldAction,
+		actionHint: hint,
 	})
 }
 
@@ -167,6 +186,9 @@ func (f *configForm) Update(msg tea.Msg) tea.Cmd {
 				if len(field.options) > 0 {
 					field.selected = (field.selected + 1) % len(field.options)
 				}
+			case fieldAction:
+				label := field.label
+				return func() tea.Msg { return configFormActionMsg{Label: label} }
 			}
 			return nil
 		case "ctrl+s":
@@ -221,6 +243,8 @@ func (f configForm) View() string {
 				opt = field.options[field.selected]
 			}
 			value = chevronStyle.Render("< ") + opt + chevronStyle.Render(" >")
+		case fieldAction:
+			value = StyleSubtle.Render(field.actionHint)
 		}
 
 		rows = append(rows, cursor+label+" "+value)

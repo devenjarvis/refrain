@@ -14,13 +14,15 @@ import "github.com/devenjarvis/refrain/internal/agent"
 type Modals struct {
 	current panelFocus
 
-	review      *reviewPanelModel
-	shipping    *shippingPanelModel
-	planEditor  *planEditorModel
-	config      *configForm
-	configRepo  string
-	launchAgent *agent.Agent
-	launchSess  *agent.Session
+	review         *reviewPanelModel
+	shipping       *shippingPanelModel
+	planEditor     *planEditorModel
+	config         *configForm
+	configRepo     string
+	repoChecks     *repoChecksModel
+	repoChecksRepo string
+	launchAgent    *agent.Agent
+	launchSess     *agent.Session
 	// launchRepoPath is the repo that owns launchSess. Stored so the
 	// focusLaunch key handlers (ctrl+t shell, ctrl+n agent, ctrl+w kill)
 	// route to the right manager without a first-match session lookup, which
@@ -46,6 +48,8 @@ func (m *Modals) Close() {
 	m.planEditor = nil
 	m.config = nil
 	m.configRepo = ""
+	m.repoChecks = nil
+	m.repoChecksRepo = ""
 	m.launchAgent = nil
 	m.launchSess = nil
 	m.launchRepoPath = ""
@@ -78,6 +82,31 @@ func (m *Modals) OpenConfig(form *configForm, repoPath string) {
 	m.current = focusConfig
 	m.config = form
 	m.configRepo = repoPath
+}
+
+// OpenRepoChecks opens the validation-checks sub-editor without disturbing
+// the parent config form — the config form is preserved so the user returns
+// to it on save/cancel. The caller must hold focusConfig as a precondition,
+// otherwise the call is a no-op.
+func (m *Modals) OpenRepoChecks(editor *repoChecksModel, repoPath string) {
+	if m.current != focusConfig {
+		return
+	}
+	m.current = focusRepoChecks
+	m.repoChecks = editor
+	m.repoChecksRepo = repoPath
+}
+
+// CloseRepoChecks pops the checks editor and returns focus to the underlying
+// repo config form. The parent form pointer was retained across the open, so
+// it's still valid here.
+func (m *Modals) CloseRepoChecks() {
+	if m.current != focusRepoChecks {
+		return
+	}
+	m.repoChecks = nil
+	m.repoChecksRepo = ""
+	m.current = focusConfig
 }
 
 // OpenLaunch opens the fullscreen agent terminal focused on ag (owned by sess
@@ -129,6 +158,24 @@ func (m *Modals) Config() *configForm {
 func (m *Modals) ConfigRepoPath() string {
 	if m.current == focusConfig {
 		return m.configRepo
+	}
+	return ""
+}
+
+// RepoChecks returns the validation-checks editor if focusRepoChecks is
+// current; otherwise nil.
+func (m *Modals) RepoChecks() *repoChecksModel {
+	if m.current == focusRepoChecks {
+		return m.repoChecks
+	}
+	return nil
+}
+
+// RepoChecksRepoPath returns the repo path whose checks are being edited, or
+// "" when focusRepoChecks is not current.
+func (m *Modals) RepoChecksRepoPath() string {
+	if m.current == focusRepoChecks {
+		return m.repoChecksRepo
 	}
 	return ""
 }
