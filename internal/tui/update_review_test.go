@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -29,8 +30,8 @@ func TestRunValidationCheckCmd_PassingCommand(t *testing.T) {
 	if msg.exitCode != 0 {
 		t.Errorf("exitCode = %d, want 0", msg.exitCode)
 	}
-	if msg.output == "" {
-		t.Error("output should contain 'hello'")
+	if !strings.Contains(msg.output, "hello") {
+		t.Errorf("output = %q, want it to contain 'hello'", msg.output)
 	}
 }
 
