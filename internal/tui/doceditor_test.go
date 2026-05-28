@@ -101,7 +101,9 @@ func TestDocEditor_ScrollWindow(t *testing.T) {
 }
 
 func TestDocEditor_RenderLines_NonEmpty(t *testing.T) {
+	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	d := newDocEditor(80, 24)
 	d.SetValue("# Hello\n\nSome content here\n")
 	lines := d.RenderLines()
