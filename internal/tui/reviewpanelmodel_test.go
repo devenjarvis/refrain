@@ -172,9 +172,6 @@ func TestReviewPanelModel_ChecksTab_RKeyTriggersRerun(t *testing.T) {
 			{Name: "Tests", Command: "echo test"},
 		},
 	}
-	if sess.Worktree == nil {
-		// Set up a mock worktree path so triggerValidationRun can find it.
-	}
 	app.validationRuns[sess.ID] = &validationRunState{
 		runID:   1,
 		checks:  []config.ValidationCheck{{Name: "Tests", Command: "echo test"}},

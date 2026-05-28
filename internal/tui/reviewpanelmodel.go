@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 const (
@@ -270,14 +271,20 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 			if svc.ValidationRuns != nil {
 				run = svc.ValidationRuns(m.session.ID)
 			}
-			if run == nil {
+			var checks []config.ValidationCheck
+			if run != nil {
+				checks = run.checks
+			} else if svc.Resolved != nil {
+				checks = svc.Resolved(m.repoPath).ValidationChecks
+			}
+			if len(checks) == 0 {
 				return m, nil
 			}
 			var worktreePath string
 			if m.session.Worktree != nil {
 				worktreePath = m.session.Worktree.Path
 			}
-			return m, svc.TriggerValidationRerun(m.session.ID, m.repoPath, worktreePath, run.checks)
+			return m, svc.TriggerValidationRerun(m.session.ID, m.repoPath, worktreePath, checks)
 		}
 		return m, nil
 	case "pgdown":
