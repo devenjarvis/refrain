@@ -158,7 +158,7 @@ func renderReviewPlaceholderTab(label string, width, height int) []string {
 // Line 0: tab labels separated by two spaces; active tab in ColorSecondary bold,
 // inactive tabs in StyleSubtle. Line 1: a subtle horizontal divider.
 func renderReviewTabBar(activeTab, width int) []string {
-	labels := []string{"Tasks", "Diff", "Checks", "Validate"}
+	labels := []string{"Tasks", "Diff", "Checks"}
 	activeStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
 	var parts []string
 	for i, label := range labels {
@@ -199,18 +199,10 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	// Build body lines based on active tab.
 	var bodyLines []string
 	switch {
-	case activeTab != reviewTabTasks:
-		// Non-Tasks tabs: placeholder.
-		var label string
-		switch activeTab {
-		case reviewTabDiff:
-			label = "full diff browser coming soon"
-		case reviewTabChecks:
-			label = "local checks coming soon"
-		case reviewTabValidate:
-			label = "manual validation coming soon"
-		}
-		bodyLines = renderReviewPlaceholderTab(label, width, bodyH)
+	case activeTab == reviewTabDiff:
+		bodyLines = renderReviewPlaceholderTab("full diff browser coming soon", width, bodyH)
+	case activeTab == reviewTabChecks:
+		bodyLines = renderReviewPlaceholderTab("No validation checks configured — add them in .refrain/config.json", width, bodyH)
 	case entry == nil:
 		bodyLines = append(bodyLines, StyleSubtle.Render("loading diff stats…"))
 	default:

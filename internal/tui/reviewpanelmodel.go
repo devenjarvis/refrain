@@ -11,10 +11,9 @@ import (
 )
 
 const (
-	reviewTabTasks    = 0
-	reviewTabDiff     = 1
-	reviewTabChecks   = 2
-	reviewTabValidate = 3
+	reviewTabTasks  = 0
+	reviewTabDiff   = 1
+	reviewTabChecks = 2
 )
 
 // reviewPanelModel owns the keyboard, mouse, and view dispatch for the review
@@ -165,14 +164,11 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 	case "3":
 		m.activeTab = reviewTabChecks
 		return m, nil
-	case "4":
-		m.activeTab = reviewTabValidate
-		return m, nil
 	case "tab":
-		m.activeTab = (m.activeTab + 1) % 4
+		m.activeTab = (m.activeTab + 1) % 3
 		return m, nil
 	case "shift+tab":
-		m.activeTab = (m.activeTab + 3) % 4
+		m.activeTab = (m.activeTab + 2) % 3
 		return m, nil
 	}
 

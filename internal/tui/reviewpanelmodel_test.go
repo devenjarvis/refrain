@@ -68,7 +68,7 @@ type testServiceState struct {
 	killSessionCalled  bool
 }
 
-// TestReviewPanelModel_TabSwitching verifies 1–4 and tab/shift+tab change activeTab.
+// TestReviewPanelModel_TabSwitching verifies 1–3 and tab/shift+tab change activeTab.
 func TestReviewPanelModel_TabSwitching(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	panel := newReviewPanel(sess, "", 120, 40)
@@ -88,10 +88,6 @@ func TestReviewPanelModel_TabSwitching(t *testing.T) {
 	if panel.activeTab != reviewTabChecks {
 		t.Errorf("'3': activeTab=%d, want %d (Checks)", panel.activeTab, reviewTabChecks)
 	}
-	press(keyRune('4'))
-	if panel.activeTab != reviewTabValidate {
-		t.Errorf("'4': activeTab=%d, want %d (Validate)", panel.activeTab, reviewTabValidate)
-	}
 	press(keyRune('1'))
 	if panel.activeTab != reviewTabTasks {
 		t.Errorf("'1': activeTab=%d, want %d (Tasks)", panel.activeTab, reviewTabTasks)
@@ -103,16 +99,15 @@ func TestReviewPanelModel_TabSwitching(t *testing.T) {
 		t.Errorf("tab: activeTab=%d, want %d (Diff)", panel.activeTab, reviewTabDiff)
 	}
 	press(keyNamed(tea.KeyTab))
-	press(keyNamed(tea.KeyTab))
-	press(keyNamed(tea.KeyTab)) // wraps from Validate back to Tasks
+	press(keyNamed(tea.KeyTab)) // wraps from Checks back to Tasks
 	if panel.activeTab != reviewTabTasks {
 		t.Errorf("tab wrap: activeTab=%d, want %d (Tasks)", panel.activeTab, reviewTabTasks)
 	}
 
-	// shift+tab decrements with wrap.
+	// shift+tab decrements with wrap (from Tasks wraps to Checks).
 	press(keyShiftNamed(tea.KeyTab))
-	if panel.activeTab != reviewTabValidate {
-		t.Errorf("shift+tab: activeTab=%d, want %d (Validate)", panel.activeTab, reviewTabValidate)
+	if panel.activeTab != reviewTabChecks {
+		t.Errorf("shift+tab from Tasks: activeTab=%d, want %d (Checks)", panel.activeTab, reviewTabChecks)
 	}
 }
 

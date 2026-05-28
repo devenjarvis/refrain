@@ -1303,7 +1303,7 @@ func TestRenderTaskListPane_HeaderUsesHeadingColor(t *testing.T) {
 }
 
 // TestRenderReviewPanel_ShowsTabBar verifies that renderReviewPanel includes a
-// tab bar containing all four tab labels.
+// tab bar containing all three tab labels.
 func TestRenderReviewPanel_ShowsTabBar(t *testing.T) {
 	sess := agent.NewSessionForTest("sess-tabs", "fix-auth")
 	sess.SetOriginalPrompt("Fix auth")
@@ -1319,7 +1319,7 @@ func TestRenderReviewPanel_ShowsTabBar(t *testing.T) {
 
 	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0)
 
-	for _, tab := range []string{"Tasks", "Diff", "Checks", "Validate"} {
+	for _, tab := range []string{"Tasks", "Diff", "Checks"} {
 		if !strings.Contains(ansi.Strip(output), tab) {
 			t.Errorf("panel must contain tab label %q; got:\n%s", tab, output)
 		}
@@ -1418,10 +1418,10 @@ func TestRenderReviewPlaceholderTab(t *testing.T) {
 }
 
 // TestRenderReviewTabBar_HighlightsActiveTab verifies that renderReviewTabBar
-// returns 2 lines, contains all four tab labels in the first line, and applies
+// returns 2 lines, contains all three tab labels in the first line, and applies
 // the correct styling: active tab in ColorSecondary bold, inactive tabs in StyleSubtle.
 func TestRenderReviewTabBar_HighlightsActiveTab(t *testing.T) {
-	tabNames := []string{"Tasks", "Diff", "Checks", "Validate"}
+	tabNames := []string{"Tasks", "Diff", "Checks"}
 	activeStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
 
 	for activeIdx, activeName := range tabNames {
