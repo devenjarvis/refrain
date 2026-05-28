@@ -3,7 +3,6 @@ package tui
 import (
 	"crypto/sha256"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,16 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/tui/mdrender"
-	"github.com/devenjarvis/refrain/internal/tui/mdtextarea"
 )
-
-// planEditorChromaStyle is the chroma style used by the markdown renderer.
-// Hardcoded for now — a follow-up will plumb this through config.Settings.
-const planEditorChromaStyle = "monokai"
-
-// planEditorMaxMeasure is the maximum content column width for plan text.
-// On wider terminals the plan is centered with equal left/right margins.
-const planEditorMaxMeasure = 72
 
 // planSection represents one H1 or H2 ATX section in the plan. headingLine is
 // the 0-based source-line index of the `#`/`##` line; nextLine is the index of
@@ -96,24 +86,20 @@ type planEditorModel struct {
 	sess     *agent.Session
 	repoPath string // repo this session belongs to; set at construction to avoid ambiguous cross-repo ID lookup
 
-	mode      planEditorMode
-	plan      string // last-loaded plan content; used in scroll mode
-	scrollOff int    // top line offset in scroll mode
-	dirty     bool   // textarea has unsaved edits relative to file
-	saveNote  string // transient confirmation ("saved") or error
-	saveAt    time.Time
+	doc docEditor // shared textarea, renderer, dimensions, scrollOff
 
-	textarea    mdtextarea.Model
+	mode     planEditorMode
+	plan     string // last-loaded plan content; used in scroll mode
+	dirty    bool   // textarea has unsaved edits relative to file
+	saveNote string // transient confirmation ("saved") or error
+	saveAt   time.Time
+
 	reviseInput textinput.Model
-	width       int
-	height      int
 	drafting    bool // session is currently in LifecycleDrafting; show placeholder
 	revising    bool // a revise call is in flight; lock i/a/ctrl+s
 	revisingFor time.Time
 	statusMsg   string // generic status line under the header (e.g. "Drafting…")
 	errMsg      string // inline error message; cleared on next interaction
-
-	renderer *mdrender.Renderer
 
 	// sections is the ordered list of H1/H2 sections parsed from the current
 	// plan. folds maps section heading name to its current fold state (true =
@@ -219,18 +205,8 @@ func newPlanEditor(sess *agent.Session, repoPath string, width, height int) plan
 		sess:     sess,
 		repoPath: repoPath,
 		mode:     planEditorModeScroll,
-		width:    width,
-		height:   height,
 	}
-
-	ta := mdtextarea.New()
-	ta.Prompt = ""
-	ta.ShowLineNumbers = false
-	ta.SetWidth(m.contentWidth())
-	ta.SetHeight(textareaHeight(height))
-	m.renderer = mdrender.New(planEditorChromaStyle)
-	ta.SetMarkdownRenderer(m.renderer)
-	m.textarea = ta
+	m.doc = newDocEditor(width, height)
 
 	ti := textinput.New()
 	ti.Placeholder = "What should change?"
@@ -254,10 +230,7 @@ func newPlanEditor(sess *agent.Session, repoPath string, width, height int) plan
 // scrollOff above its new max — keeping the clamp out of the View() path is
 // what lets renderBody stay pure.
 func (m *planEditorModel) SetSize(w, h int) {
-	m.width = w
-	m.height = h
-	m.textarea.SetWidth(m.contentWidth())
-	m.textarea.SetHeight(textareaHeight(h))
+	m.doc.SetSize(w, h)
 	m.reviseInput.SetWidth(w - 4)
 	m.questionInput.SetWidth(w - 4)
 	m.clampScroll()
@@ -319,7 +292,7 @@ func (m *planEditorModel) AskQuestion(question string, answerCh chan<- string) t
 	}
 	m.mode = planEditorModeQuestion
 	// Blur other inputs so keystrokes route to the question input only.
-	m.textarea.Blur()
+	m.doc.Blur()
 	m.reviseInput.Blur()
 	return m.questionInput.Focus()
 }
@@ -364,9 +337,9 @@ func (m *planEditorModel) reload() {
 		return
 	}
 	m.plan = plan
-	m.textarea.SetValue(plan)
+	m.doc.SetValue(plan)
 	m.dirty = false
-	m.scrollOff = 0
+	m.doc.scrollOff = 0
 	m.rebuildSections()
 }
 
@@ -378,9 +351,9 @@ func (m *planEditorModel) reload() {
 // same name (non-canonical but user-editable), they collapse/expand together —
 // accepted rather than introducing a positional disambiguator.
 func (m *planEditorModel) rebuildSections() {
-	v := m.textarea.Value()
+	v := m.doc.Value()
 	srcLines := splitPlanLines(v)
-	ctxs := m.renderer.LineContexts(v)
+	ctxs := m.doc.renderer.LineContexts(v)
 	newSections := parsePlanSections(srcLines, ctxs)
 	newFolds := make(map[string]bool, len(newSections))
 	for _, s := range newSections {
@@ -441,9 +414,7 @@ func (m *planEditorModel) Update(msg tea.Msg) tea.Cmd {
 	if !ok {
 		// Forward non-key events to whichever component is active.
 		if m.mode == planEditorModeEdit {
-			var cmd tea.Cmd
-			m.textarea, cmd = m.textarea.Update(msg)
-			return cmd
+			return m.doc.UpdateTextarea(msg)
 		}
 		if m.mode == planEditorModeReviseInput {
 			var cmd tea.Cmd
@@ -504,20 +475,20 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	case "ctrl+d", "pgdown":
-		m.scrollOff += m.bodyHeight() / 2
+		m.doc.scrollOff += m.doc.BodyHeight(5) / 2
 		m.clampScroll()
 		return nil
 	case "ctrl+u", "pgup":
-		m.scrollOff -= m.bodyHeight() / 2
-		if m.scrollOff < 0 {
-			m.scrollOff = 0
+		m.doc.scrollOff -= m.doc.BodyHeight(5) / 2
+		if m.doc.scrollOff < 0 {
+			m.doc.scrollOff = 0
 		}
 		return nil
 	case "g", "home":
-		m.scrollOff = 0
+		m.doc.scrollOff = 0
 		return nil
 	case "G", "end":
-		m.scrollOff = len(m.displayLines())
+		m.doc.scrollOff = len(m.displayLines())
 		m.clampScroll()
 		return nil
 	case "tab":
@@ -563,7 +534,7 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		m.mode = planEditorModeEdit
-		return m.textarea.Focus()
+		return m.doc.Focus()
 	case "r":
 		if m.revising {
 			return nil
@@ -601,7 +572,7 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 		// agent reads exactly what the user saw on screen. Approve is a
 		// no-op on an empty plan; the editor surfaces an inline error and
 		// stays put.
-		val := m.textarea.Value()
+		val := m.doc.Value()
 		if strings.TrimSpace(val) == "" {
 			m.errMsg = "Plan is empty — edit or revise first."
 			return nil
@@ -625,7 +596,7 @@ func (m *planEditorModel) updateEdit(msg tea.KeyPressMsg) tea.Cmd {
 		// Preserve any in-progress edits — esc only blurs the textarea so
 		// the user can scroll and approve without losing typed content. The
 		// dirty indicator stays visible until ctrl+s or `a` writes to disk.
-		m.textarea.Blur()
+		m.doc.Blur()
 		m.rebuildSectionsPreservingFolds()
 		m.mode = planEditorModeScroll
 		return nil
@@ -633,7 +604,7 @@ func (m *planEditorModel) updateEdit(msg tea.KeyPressMsg) tea.Cmd {
 		if m.sess == nil {
 			return nil
 		}
-		val := m.textarea.Value()
+		val := m.doc.Value()
 		if err := m.sess.WritePlan(val); err != nil {
 			m.errMsg = "save plan: " + err.Error()
 			return nil
@@ -646,10 +617,9 @@ func (m *planEditorModel) updateEdit(msg tea.KeyPressMsg) tea.Cmd {
 		sessID := m.sess.ID
 		return func() tea.Msg { return planEditorSavedMsg{sessionID: sessID} }
 	}
-	prev := m.textarea.Value()
-	var cmd tea.Cmd
-	m.textarea, cmd = m.textarea.Update(msg)
-	if m.textarea.Value() != prev {
+	prev := m.doc.Value()
+	cmd := m.doc.UpdateTextarea(msg)
+	if m.doc.Value() != prev {
 		m.dirty = true
 	}
 	return cmd
@@ -764,11 +734,11 @@ func (m *planEditorModel) invalidateDisplayCache() {
 // navigation ([ and ]) and tab-fold detection can look up section positions
 // without re-scanning.
 func (m *planEditorModel) displayLines() []string {
-	v := m.textarea.Value()
+	v := m.doc.Value()
 	if v == "" {
 		return nil
 	}
-	w := m.contentWidth()
+	w := m.doc.ContentWidth()
 	key := displayCacheKey{
 		width:         w,
 		valueHash:     sha256.Sum256([]byte(v)),
@@ -781,7 +751,7 @@ func (m *planEditorModel) displayLines() []string {
 
 	// If there are no sections at all, fall back to the plain renderer path.
 	if len(m.sections) == 0 {
-		out := m.renderer.RenderLines(v, w)
+		out := m.doc.renderer.RenderLines(v, w)
 		m.displayCache = out
 		m.displayCacheKey = key
 		m.sectionDisplayStart = nil
@@ -789,7 +759,7 @@ func (m *planEditorModel) displayLines() []string {
 	}
 
 	srcLines := splitPlanLines(v)
-	ctxs := m.renderer.LineContexts(v)
+	ctxs := m.doc.renderer.LineContexts(v)
 	sectionStarts := make([]int, len(m.sections))
 
 	out := make([]string, 0, len(srcLines))
@@ -801,7 +771,7 @@ func (m *planEditorModel) displayLines() []string {
 		if i < len(ctxs) {
 			ctx = ctxs[i]
 		}
-		out = append(out, m.styledScrollLines(srcLines[i], ctx, w)...)
+		out = append(out, m.doc.StyledScrollLines(srcLines[i], ctx, w)...)
 	}
 
 	// Sections.
@@ -814,7 +784,7 @@ func (m *planEditorModel) displayLines() []string {
 		if s.headingLine < len(ctxs) {
 			headingCtx = ctxs[s.headingLine]
 		}
-		headingSegs := m.renderer.StyleLine(srcLines[s.headingLine], headingCtx, w)
+		headingSegs := m.doc.renderer.StyleLine(srcLines[s.headingLine], headingCtx, w)
 		if len(headingSegs) == 0 {
 			headingSegs = []string{""}
 		}
@@ -847,7 +817,7 @@ func (m *planEditorModel) displayLines() []string {
 		// what RenderLines produces so scroll-mode line counts stay in sync.
 		if !folded && headingCtx.HeadingLevel >= 1 && headingCtx.HeadingLevel <= 2 {
 			headingTextWidth := ansi.StringWidth(srcLines[s.headingLine])
-			out = append(out, m.renderer.HeadingUnderline(headingCtx.HeadingLevel, headingTextWidth, w))
+			out = append(out, m.doc.renderer.HeadingUnderline(headingCtx.HeadingLevel, headingTextWidth, w))
 		}
 
 		if folded {
@@ -860,13 +830,13 @@ func (m *planEditorModel) displayLines() []string {
 			if i < len(ctxs) {
 				ctx = ctxs[i]
 			}
-			out = append(out, m.styledScrollLines(srcLines[i], ctx, w)...)
+			out = append(out, m.doc.StyledScrollLines(srcLines[i], ctx, w)...)
 		}
 	}
 
 	// Apply centering: prepend left-margin padding after all fold glyphs so
 	// the glyph stays at the content edge, not pushed into the margin.
-	if leftPad := m.displayLeftPad(); leftPad > 0 {
+	if leftPad := m.doc.DisplayLeftPad(); leftPad > 0 {
 		pad := strings.Repeat(" ", leftPad)
 		for i, line := range out {
 			out[i] = pad + line
@@ -879,74 +849,8 @@ func (m *planEditorModel) displayLines() []string {
 	return out
 }
 
-// contentWidth returns the effective column width for wrap and styling.
-// Capped at planEditorMaxMeasure so wide terminals produce comfortable margins.
-func (m *planEditorModel) contentWidth() int {
-	measure, _ := mdrender.ContentMeasure(textareaWidth(m.width), planEditorMaxMeasure)
-	return measure
-}
-
-// displayLeftPad returns the left-margin padding to center content on wide terminals.
-func (m *planEditorModel) displayLeftPad() int {
-	_, pad := mdrender.ContentMeasure(textareaWidth(m.width), planEditorMaxMeasure)
-	return pad
-}
-
-// centeredBlock prepends displayLeftPad() spaces to each line of s, matching
-// the scroll-mode centering applied in displayLines().
-func (m *planEditorModel) centeredBlock(s string) string {
-	pad := m.displayLeftPad()
-	if pad == 0 {
-		return s
-	}
-	prefix := strings.Repeat(" ", pad)
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		lines[i] = prefix + l
-	}
-	return strings.Join(lines, "\n")
-}
-
-// styledScrollLines wraps and styles a source line for scroll-mode display,
-// applying fence-block bar prefixes that are omitted in edit mode to keep
-// mdtextarea cursor-splice math unaffected.
-func (m *planEditorModel) styledScrollLines(src string, ctx mdrender.LineCtx, width int) []string {
-	isFenceLine := ctx.Kind == mdrender.LineFenceContent || ctx.Kind == mdrender.LineFenceOpen || ctx.Kind == mdrender.LineFenceClose
-	lineWidth := width
-	if isFenceLine && width > 2 {
-		lineWidth = width - 2
-	}
-	lines := m.renderer.StyleLine(src, ctx, lineWidth)
-	if isFenceLine {
-		bar := StyleSubtle.Render("│") + " "
-		for i, l := range lines {
-			lines[i] = bar + l
-		}
-	}
-	return lines
-}
-
-// bodyHeight is the number of lines available for plan content.
-// Subtract: header (2) + status line (1) + footer hints (2) = 5.
-func (m *planEditorModel) bodyHeight() int {
-	h := m.height - 5
-	if h < 1 {
-		return 1
-	}
-	return h
-}
-
 func (m *planEditorModel) clampScroll() {
-	max := len(m.displayLines()) - m.bodyHeight()
-	if max < 0 {
-		max = 0
-	}
-	if m.scrollOff > max {
-		m.scrollOff = max
-	}
-	if m.scrollOff < 0 {
-		m.scrollOff = 0
-	}
+	m.doc.ClampScroll(len(m.displayLines()))
 }
 
 // scrollToCursor adjusts scrollOff so the heading of sectionCursor's section
@@ -960,11 +864,11 @@ func (m *planEditorModel) scrollToCursor() {
 		return
 	}
 	headingLine := m.sectionDisplayStart[m.sectionCursor]
-	body := m.bodyHeight()
-	if headingLine < m.scrollOff {
-		m.scrollOff = headingLine
-	} else if headingLine >= m.scrollOff+body {
-		m.scrollOff = headingLine - body + 1
+	body := m.doc.BodyHeight(5)
+	if headingLine < m.doc.scrollOff {
+		m.doc.scrollOff = headingLine
+	} else if headingLine >= m.doc.scrollOff+body {
+		m.doc.scrollOff = headingLine - body + 1
 	}
 	m.clampScroll()
 }
@@ -987,7 +891,7 @@ func (m *planEditorModel) clampCursor() {
 func (m *planEditorModel) View() string {
 	var lines []string
 	lines = append(lines, m.renderHeader())
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, m.width-2))))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, m.doc.width-2))))
 
 	if status := m.renderStatusLine(); status != "" {
 		lines = append(lines, status)
@@ -995,7 +899,7 @@ func (m *planEditorModel) View() string {
 
 	switch m.mode {
 	case planEditorModeEdit:
-		lines = append(lines, m.centeredBlock(m.textarea.View()))
+		lines = append(lines, m.doc.CenteredBlock(m.doc.textarea.View()))
 	case planEditorModeReviseInput:
 		lines = append(lines, m.renderBody())
 		lines = append(lines, "")
@@ -1029,7 +933,7 @@ func (m *planEditorModel) renderHeader() string {
 	case m.saveNote != "" && time.Since(m.saveAt) < 3*time.Second:
 		rightLabel = StyleSuccess.Render(m.saveNote)
 	}
-	gap := m.width - ansi.StringWidth(left) - ansi.StringWidth(rightLabel) - 4
+	gap := m.doc.width - ansi.StringWidth(left) - ansi.StringWidth(rightLabel) - 4
 	if gap < 1 {
 		gap = 1
 	}
@@ -1062,11 +966,11 @@ func (m *planEditorModel) renderBody() string {
 		// is a transient state and a uniform muted body cues "this is the
 		// previous plan, not the current one".
 		all := m.planLinesPlain()
-		body := m.bodyHeight() - 1
+		body := m.doc.BodyHeight(5) - 1
 		if body < 1 {
 			body = 1
 		}
-		end := m.scrollOff + body
+		end := m.doc.scrollOff + body
 		if end > len(all) {
 			end = len(all)
 		}
@@ -1074,7 +978,7 @@ func (m *planEditorModel) renderBody() string {
 		if len(all) == 0 {
 			rendered = StyleSubtle.Render("(no plan content)")
 		} else {
-			start := m.scrollOff
+			start := m.doc.scrollOff
 			if start > len(all) {
 				start = len(all)
 			}
@@ -1089,29 +993,17 @@ func (m *planEditorModel) renderBody() string {
 	if len(all) == 0 {
 		return StyleSubtle.Render("(no plan content yet — press i to start writing or r to revise)")
 	}
-	body := m.bodyHeight()
-	// Use a local start so View() stays pure — never mutate m.scrollOff
-	// from the render path. Update()/SetSize keep m.scrollOff in range via
+	// Use a local start so View() stays pure — never mutate m.doc.scrollOff
+	// from the render path. Update()/SetSize keep m.doc.scrollOff in range via
 	// clampScroll; this local clamp guards a stale scrollOff in the render
 	// frame that races a textarea shrink (e.g. plan reload after revise).
-	start := m.scrollOff
-	if start > len(all)-body {
-		start = len(all) - body
-	}
-	if start < 0 {
-		start = 0
-	}
-	end := start + body
-	if end > len(all) {
-		end = len(all)
-	}
-	return strings.Join(all[start:end], "\n")
+	return m.doc.ScrollWindow(all, m.doc.BodyHeight(5))
 }
 
 // planLinesPlain returns the textarea's value as raw source lines. Used by
 // the revising-mode preview, which intentionally shows un-styled muted text.
 func (m *planEditorModel) planLinesPlain() []string {
-	v := m.textarea.Value()
+	v := m.doc.Value()
 	if v == "" {
 		return nil
 	}
@@ -1143,7 +1035,7 @@ func (m *planEditorModel) renderFooter() string {
 			StyleActive.Render("q") + StyleSubtle.Render(" abandon  ") +
 			StyleActive.Render("esc") + StyleSubtle.Render(" back")
 	}
-	divider := StyleSubtle.Render(strings.Repeat("─", max(1, m.width-2)))
+	divider := StyleSubtle.Render(strings.Repeat("─", max(1, m.doc.width-2)))
 	return divider + "\n" + hints
 }
 
@@ -1156,34 +1048,8 @@ func (m *planEditorModel) renderQuestionBody() string {
 	var b strings.Builder
 	b.WriteString(StyleActive.Render("planner is asking:"))
 	b.WriteString("\n\n")
-	b.WriteString(ansi.Wrap(m.questionText, max(20, m.width-4), ""))
+	b.WriteString(ansi.Wrap(m.questionText, max(20, m.doc.width-4), ""))
 	b.WriteString("\n\n")
 	b.WriteString(StyleActive.Render("answer:") + " " + m.questionInput.View())
 	return b.String()
-}
-
-// textareaWidth/textareaHeight reserve space for header, divider, status,
-// and footer when sizing the embedded textarea.
-func textareaWidth(w int) int {
-	if w < 8 {
-		return 8
-	}
-	return w - 2
-}
-
-func textareaHeight(h int) int {
-	if h < 6 {
-		return 1
-	}
-	return h - 5
-}
-
-func fmtSeconds(s int) string {
-	if s < 0 {
-		s = 0
-	}
-	if s < 60 {
-		return strconv.Itoa(s) + "s"
-	}
-	return strconv.Itoa(s/60) + "m" + strconv.Itoa(s%60) + "s"
 }

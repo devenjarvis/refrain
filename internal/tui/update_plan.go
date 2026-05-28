@@ -148,7 +148,7 @@ func (a App) handlePlanEditorRevise(msg planEditorReviseMsg) (tea.Model, tea.Cmd
 	// we abort the revise — otherwise the model would revise the wrong
 	// plan and overwrite the user's edits with the result.
 	if a.modals.PlanEditor() != nil && a.modals.PlanEditor().dirty && a.modals.PlanEditor().sess != nil {
-		val := a.modals.PlanEditor().textarea.Value()
+		val := a.modals.PlanEditor().doc.Value()
 		if err := a.modals.PlanEditor().sess.WritePlan(val); err != nil {
 			a.modals.PlanEditor().SetError("save plan: " + err.Error())
 			return a, nil

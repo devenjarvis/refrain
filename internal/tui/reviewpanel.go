@@ -17,11 +17,11 @@ import (
 )
 
 // reviewDetailMaxMeasure is the maximum content column width for the right detail
-// pane. Matches planEditorMaxMeasure so typography is consistent across panels.
-const reviewDetailMaxMeasure = 72
+// pane. Matches docEditorMaxMeasure so typography is consistent across panels.
+const reviewDetailMaxMeasure = docEditorMaxMeasure
 
 // reviewRenderer is the markdown renderer used for rationale text in the detail pane.
-var reviewRenderer = mdrender.New(planEditorChromaStyle)
+var reviewRenderer = mdrender.New(docEditorChromaStyle)
 
 // detailContentMeasure returns the effective content width and left-margin padding
 // for centering the detail pane content. Thin wrapper around mdrender.ContentMeasure.
@@ -730,7 +730,7 @@ func renderReviewSpecOverlay(sess *agent.Session, plan string, scrollOffset, wid
 	}
 
 	sections := agent.ParsePlanSections(plan)
-	r := mdrender.New(planEditorChromaStyle)
+	r := mdrender.New(docEditorChromaStyle)
 	contentW := width - 4
 
 	type namedSection struct {
