@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/git"
 )
 
@@ -1575,5 +1576,72 @@ func TestReviewTaskCmd_PassesTaskDetail(t *testing.T) {
 	}
 	if !foundTest {
 		t.Errorf("ChangedFiles must include internal/widget_test.go, got: %v", req.ChangedFiles)
+	}
+}
+
+// TestRenderChecksTab_ShowsCheckNames verifies the check list renders names and spinner.
+func TestRenderChecksTab_ShowsCheckNames(t *testing.T) {
+	cs := &checksTabState{
+		checks: []config.ValidationCheck{
+			{Name: "Tests", Command: "go test ./..."},
+			{Name: "Lint", Command: "golangci-lint run"},
+		},
+		results: []validationCheckResult{
+			{state: checkRunning},
+			{state: checkRunning},
+		},
+	}
+	lines := renderChecksTab(cs, 80, 20)
+	out := strings.Join(lines, "\n")
+	stripped := ansi.Strip(out)
+
+	if !strings.Contains(stripped, "Tests") {
+		t.Error("must contain check name 'Tests'")
+	}
+	if !strings.Contains(stripped, "Lint") {
+		t.Error("must contain check name 'Lint'")
+	}
+}
+
+// TestRenderChecksTab_PassedCheck verifies a passed check shows the ✓ icon.
+func TestRenderChecksTab_PassedCheck(t *testing.T) {
+	cs := &checksTabState{
+		checks:  []config.ValidationCheck{{Name: "Tests", Command: "go test ./..."}},
+		results: []validationCheckResult{{state: checkPassed, exitCode: 0}},
+	}
+	lines := renderChecksTab(cs, 80, 20)
+	out := ansi.Strip(strings.Join(lines, "\n"))
+
+	if !strings.Contains(out, "✓") {
+		t.Errorf("passed check must show ✓; got:\n%s", out)
+	}
+}
+
+// TestRenderChecksTab_OutputPane verifies the selected check's output appears in the pane.
+func TestRenderChecksTab_OutputPane(t *testing.T) {
+	cs := &checksTabState{
+		checks:  []config.ValidationCheck{{Name: "Tests", Command: "go test ./..."}},
+		results: []validationCheckResult{{state: checkPassed, output: "PASS: all 42 tests"}},
+		cursor:  0,
+	}
+	lines := renderChecksTab(cs, 80, 20)
+	out := ansi.Strip(strings.Join(lines, "\n"))
+
+	if !strings.Contains(out, "PASS: all 42 tests") {
+		t.Errorf("output pane must contain check output; got:\n%s", out)
+	}
+}
+
+// TestRenderChecksTab_NilState_ShowsPlaceholder verifies the no-checks placeholder.
+func TestRenderChecksTab_NilState_ShowsPlaceholder(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-1", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, nil)
+	stripped := ansi.Strip(output)
+
+	if !strings.Contains(stripped, "No validation checks configured") {
+		t.Errorf("must show no-checks placeholder; got:\n%s", stripped)
 	}
 }

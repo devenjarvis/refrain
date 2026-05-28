@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/git"
 	"github.com/devenjarvis/refrain/internal/tui/mdrender"
 )
@@ -68,6 +69,108 @@ func verdictBadge(rec *taskVerdictRecord) (icon, label string, style lipgloss.St
 		return "⊘", "no diff found", StyleSubtle
 	}
 	return "⋯", "Pending", StyleSubtle
+}
+
+// checkBadge returns the icon and lipgloss style for a validation check result.
+// Modeled on verdictBadge to keep icon/style language consistent.
+func checkBadge(result validationCheckResult) (icon string, style lipgloss.Style) {
+	switch result.state {
+	case checkPending:
+		return "⋯", StyleSubtle
+	case checkRunning:
+		return reviewSpinnerFrame(), lipgloss.NewStyle().Foreground(ColorPrimary)
+	case checkPassed:
+		return "✓", StyleSuccess
+	case checkFailed:
+		return "✗", StyleError
+	case checkError:
+		return "✗", StyleError
+	}
+	return "⋯", StyleSubtle
+}
+
+// renderChecksTab renders the Checks tab body: a compact check list on top and
+// the selected check's combined output below. cs must not be nil.
+func renderChecksTab(cs *checksTabState, width, height int) []string {
+	if height < 4 {
+		height = 4
+	}
+
+	listH := height * 2 / 5
+	if listH < 2 {
+		listH = 2
+	}
+	outputH := height - listH - 1
+	if outputH < 2 {
+		outputH = 2
+	}
+
+	// Build list pane.
+	header := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("CHECKS")
+	var listLines []string
+	listLines = append(listLines, header)
+	for i, ch := range cs.checks {
+		var result validationCheckResult
+		if i < len(cs.results) {
+			result = cs.results[i]
+		}
+		icon, iconStyle := checkBadge(result)
+		iconStr := iconStyle.Render(icon)
+
+		duration := ""
+		if result.state == checkPassed || result.state == checkFailed || result.state == checkError {
+			if result.duration > 0 {
+				duration = "  " + StyleSubtle.Render(result.duration.Round(time.Millisecond).String())
+			}
+		}
+
+		cursor := " "
+		nameStyle := StyleSubtle
+		if i == cs.cursor {
+			cursor = "›"
+			nameStyle = lipgloss.NewStyle()
+		}
+
+		line := fmt.Sprintf("  %s %s %s%s%s",
+			cursor,
+			iconStr,
+			nameStyle.Render(ch.Name),
+			duration,
+			"",
+		)
+		listLines = append(listLines, line)
+	}
+	listLines = capLines(listLines, listH)
+
+	// Build output pane.
+	var outputLines []string
+	outputLines = append(outputLines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	if cs.cursor < len(cs.results) {
+		result := cs.results[cs.cursor]
+		out := result.output
+		if result.err != nil {
+			out += "\n" + result.err.Error()
+		}
+		if out == "" {
+			if result.state == checkRunning {
+				out = "(running…)"
+			} else {
+				out = "(no output)"
+			}
+		}
+		outLines := strings.Split(out, "\n")
+		// Apply scroll offset.
+		if cs.scroll > 0 && cs.scroll < len(outLines) {
+			outLines = outLines[cs.scroll:]
+		}
+		outputLines = append(outputLines, capLines(outLines, outputH-1)...)
+	}
+	outputLines = capLines(outputLines, outputH)
+
+	var lines []string
+	lines = append(lines, listLines...)
+	lines = append(lines, outputLines...)
+	return lines
 }
 
 // renderReviewHeader returns the 4-line collapsed header:
@@ -177,17 +280,10 @@ func renderReviewTabBar(activeTab, width int) []string {
 // checks and results are sourced from App-level validationRunState; cursor
 // and scroll are panel-local since they don't need to survive panel close.
 type checksTabState struct {
-	checks  []validationCheck
+	checks  []config.ValidationCheck
 	results []validationCheckResult
 	cursor  int
 	scroll  int
-}
-
-// validationCheck mirrors config.ValidationCheck, defined here so the render
-// layer doesn't import config (config is imported by the App layer).
-type validationCheck struct {
-	Name    string
-	Command string
 }
 
 // renderReviewPanel renders the fullscreen review panel for a session.
@@ -221,7 +317,11 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	case activeTab == reviewTabDiff:
 		bodyLines = renderReviewPlaceholderTab("full diff browser coming soon", width, bodyH)
 	case activeTab == reviewTabChecks:
-		bodyLines = renderReviewPlaceholderTab("No validation checks configured — add them in .refrain/config.json", width, bodyH)
+		if checkState != nil {
+			bodyLines = renderChecksTab(checkState, width, bodyH)
+		} else {
+			bodyLines = renderReviewPlaceholderTab("No validation checks configured — add them in .refrain/config.json", width, bodyH)
+		}
 	case entry == nil:
 		bodyLines = append(bodyLines, StyleSubtle.Render("loading diff stats…"))
 	default:
