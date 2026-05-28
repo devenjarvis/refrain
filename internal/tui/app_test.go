@@ -3053,6 +3053,7 @@ func TestTick_BreakDoesNotEnterWhilePanelOpen(t *testing.T) {
 			app := NewApp()
 			app.wellness.focusSessionMinutes = 1
 			app.wellness.sessionStart = time.Now().Add(-2 * time.Minute) // long past deadline
+			app.wellness.lastInputAt = time.Now()                        // recent input → no idle decay
 			// Stub an overlay into the requested focus state. The break-defer
 			// guard reads modals.IsList(); the specific model doesn't matter.
 			switch tc.focus {
@@ -3086,6 +3087,7 @@ func TestTick_BreakEntersOnPipeline(t *testing.T) {
 	app := NewApp()
 	app.wellness.focusSessionMinutes = 1
 	app.wellness.sessionStart = time.Now().Add(-2 * time.Minute)
+	app.wellness.lastInputAt = time.Now() // recent input → EffectiveElapsed ≈ 2min > threshold
 	// Default modal state is focusList (zero value); no setup needed.
 
 	model, _ := app.Update(tickMsg(time.Now()))
