@@ -25,6 +25,12 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Repo config form cancelled.
 		return a.returnFromConfigForm()
 
+	case configFormActionMsg:
+		return a.handleConfigFormAction(msg)
+
+	case repoChecksSaveMsg, repoChecksCancelMsg:
+		return a.updateRepoChecks(msg)
+
 	case tea.PasteMsg:
 		return a.handleDashboardPaste(msg)
 
@@ -47,6 +53,13 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// When the config panel has focus, skip all app-level bindings.
 		if a.modals.Is(focusConfig) {
+			a.confirmQuit = false
+			break
+		}
+
+		// Same treatment for the validation-checks sub-editor: forward
+		// everything to the dashboard, which routes to the editor model.
+		if a.modals.Is(focusRepoChecks) {
 			a.confirmQuit = false
 			break
 		}
@@ -1184,6 +1197,19 @@ func (a App) handlePipelineOpenReview() (App, tea.Cmd, bool) {
 		return a, a.startValidationChecksCmd(sess, item.repoPath), true
 	}
 	return a, nil, true
+}
+
+// handleConfigFormAction dispatches a configFormActionMsg emitted from a
+// fieldAction row to the appropriate sub-editor. Today the only action row
+// is "Validation Checks"; other labels are ignored (forward-compatible).
+func (a App) handleConfigFormAction(msg configFormActionMsg) (tea.Model, tea.Cmd) {
+	if msg.Label == "Validation Checks" && a.modals.Is(focusConfig) {
+		repoPath := a.modals.ConfigRepoPath()
+		if repoPath != "" {
+			a.initRepoChecksEditor(repoPath)
+		}
+	}
+	return a, nil
 }
 
 // handleConfigFormSave persists the in-flight repo config form. On success

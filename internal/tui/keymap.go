@@ -87,6 +87,7 @@ type panelFocus int
 const (
 	focusList       panelFocus = iota // pipeline: j/k navigate sessions
 	focusConfig                       // overlay: per-repo config form
+	focusRepoChecks                   // overlay: validation checks editor (sub-form of focusConfig)
 	focusReview                       // overlay: review panel
 	focusLaunch                       // overlay: fullscreen agent terminal
 	focusPlanEditor                   // overlay: full-page plan editor (.claude/plan.md)

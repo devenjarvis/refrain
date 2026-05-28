@@ -60,6 +60,15 @@ var (
 		{"esc", "back"},
 	}
 
+	repoChecksHints = []keyHint{
+		{"j/k", "navigate"},
+		{"a", "add"},
+		{"e", "edit"},
+		{"d", "delete"},
+		{"ctrl+s", "save"},
+		{"esc", "back"},
+	}
+
 	branchPickerHints = []keyHint{
 		{"j/k", "navigate"},
 		{"enter", "select"},

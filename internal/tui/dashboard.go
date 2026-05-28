@@ -129,6 +129,11 @@ type dashboardModel struct {
 	repoConfigForm *configForm
 	configRepoPath string // path of the repo being configured
 
+	// Validation-checks sub-editor, mirrored from Modals when focusRepoChecks
+	// is active. nil at all other times.
+	repoChecksEditor   *repoChecksModel
+	repoChecksRepoPath string
+
 	// Mouse text selection state in VT-cell coordinates, bound to a specific
 	// agent so a sidebar selection change clears it cleanly.
 	selection selection
@@ -227,6 +232,10 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 			cmd := d.repoConfigForm.Update(msg)
 			return d, cmd
 		}
+		if d.panelFocus == focusRepoChecks && d.repoChecksEditor != nil {
+			cmd := d.repoChecksEditor.Update(msg)
+			return d, cmd
+		}
 	}
 	return d, nil
 }
@@ -251,6 +260,8 @@ func (d dashboardModel) View() string {
 		out = d.renderFocusLaunchView(d.width, d.height)
 	case d.panelFocus == focusConfig && d.repoConfigForm != nil:
 		out = d.renderRepoConfigOverlay(d.width, d.height)
+	case d.panelFocus == focusRepoChecks && d.repoChecksEditor != nil:
+		out = d.renderRepoChecksOverlay(d.width, d.height)
 	default:
 		out = d.renderFullscreenFocus(d.width, d.height)
 	}
@@ -317,6 +328,37 @@ func (d dashboardModel) renderRepoConfigOverlay(width, height int) string {
 		pathLine, "",
 		d.repoConfigForm.View(), "",
 		hint,
+	)
+
+	box := boxStyle.Render(content)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// renderRepoChecksOverlay renders the validation-checks list editor as a
+// centered modal box, styled to match renderRepoConfigOverlay so the user
+// perceives it as a sub-form of the repo settings overlay.
+func (d dashboardModel) renderRepoChecksOverlay(width, height int) string {
+	if d.repoChecksEditor == nil {
+		return d.emptyView()
+	}
+
+	repoName := d.repoChecksEditor.repoName
+	if repoName == "" {
+		repoName = d.repoChecksRepoPath
+	}
+
+	boxWidth := 72
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorPrimary).
+		Padding(1, 2).
+		Width(boxWidth)
+
+	title := StyleTitle.Render(repoName + " · Validation Checks")
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		title, "",
+		d.repoChecksEditor.View(),
 	)
 
 	box := boxStyle.Render(content)
