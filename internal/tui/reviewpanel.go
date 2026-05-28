@@ -107,7 +107,7 @@ func renderChecksTab(cs *checksTabState, width, height int) []string {
 
 	// Build list pane.
 	header := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("CHECKS")
-	var listLines []string
+	listLines := make([]string, 0, len(cs.checks)+1)
 	listLines = append(listLines, header)
 	for i, ch := range cs.checks {
 		var result validationCheckResult

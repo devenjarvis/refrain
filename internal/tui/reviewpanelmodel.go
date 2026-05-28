@@ -240,14 +240,15 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		reviewOpenIDECmd(m.session, m.repoPath, svc)
 		return m, nil
 	case "j", "down":
-		if m.activeTab == reviewTabTasks {
+		switch m.activeTab {
+		case reviewTabTasks:
 			if entry := svc.ReviewCache(m.repoPath, m.session.ID); entry != nil {
 				maxIdx := reviewTaskCount(entry) - 1
 				if m.taskCursor < maxIdx {
 					m.taskCursor++
 				}
 			}
-		} else if m.activeTab == reviewTabChecks {
+		case reviewTabChecks:
 			if svc.ValidationRuns != nil {
 				if run := svc.ValidationRuns(m.session.ID); run != nil {
 					maxIdx := len(run.results) - 1
@@ -259,10 +260,15 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		}
 		return m, nil
 	case "k", "up":
-		if m.activeTab == reviewTabTasks && m.taskCursor > 0 {
-			m.taskCursor--
-		} else if m.activeTab == reviewTabChecks && m.checksCursor > 0 {
-			m.checksCursor--
+		switch m.activeTab {
+		case reviewTabTasks:
+			if m.taskCursor > 0 {
+				m.taskCursor--
+			}
+		case reviewTabChecks:
+			if m.checksCursor > 0 {
+				m.checksCursor--
+			}
 		}
 		return m, nil
 	case "r":

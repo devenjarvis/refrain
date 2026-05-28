@@ -198,9 +198,9 @@ type App struct {
 	// openConfig / openLaunch / closeModal helpers (which keep the dashboard
 	// mirror fields in sync).
 	modals          Modals
-	reviewDiffCache  map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
-	validationRuns   map[string]*validationRunState            // keyed by sessionID; lifetime exceeds panel
-	feedbackTriage   map[string]map[string]*feedbackTriageEntry // keyed by cacheKey(repoPath, sessionID) → itemKey
+	reviewDiffCache map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
+	validationRuns  map[string]*validationRunState             // keyed by sessionID; lifetime exceeds panel
+	feedbackTriage  map[string]map[string]*feedbackTriageEntry // keyed by cacheKey(repoPath, sessionID) → itemKey
 	promptModal     promptModalModel                           // overlay for plan-first new-session prompt
 
 	// closingAgents and closingSessions track in-flight kill requests so the

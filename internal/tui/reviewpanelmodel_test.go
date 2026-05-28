@@ -246,7 +246,7 @@ func TestHandleValidationResult_MatchingRunID(t *testing.T) {
 func TestHandleValidationResult_StaleRunID(t *testing.T) {
 	app := NewApp()
 	app.validationRuns["s1"] = &validationRunState{
-		runID: 2,
+		runID:  2,
 		checks: []config.ValidationCheck{{Name: "A", Command: "echo a"}},
 		results: []validationCheckResult{
 			{state: checkRunning},
