@@ -1,11 +1,9 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -209,48 +207,22 @@ func DefaultTaskSummarizer() TaskSummarizer {
 // makes every Haiku subprocess exit 1 in ~225ms and silently breaks the
 // branch rename and task summary flows. Do not simplify this back to "{}".
 func buildClaudeHaikuArgs() []string {
-	args := []string{"-p", "--model", claudeHaikuModel}
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		args = append(args, "--bare")
-	}
-	args = append(
-		args,
-		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
-		"--disable-slash-commands",
-		"--no-session-persistence",
-		"--tools", "",
-		"--setting-sources", "user",
-		"--exclude-dynamic-system-prompt-sections",
-	)
-	return args
+	return buildClaudeArgs(claudeArgsOpts{
+		model:          claudeHaikuModel,
+		tools:          "",
+		settingSources: "user",
+	})
 }
 
 // runClaudeHaikuText runs `claude -p --model claude-haiku-4-5` with instruction
 // on stdin and returns the trimmed raw stdout. No slugification is applied.
 // This is the shared subprocess path; runClaudeHaiku adds slugification on top.
 func runClaudeHaikuText(ctx context.Context, claudePath, instruction string) (string, error) {
-	cmd := exec.CommandContext(ctx, claudePath, buildClaudeHaikuArgs()...)
-	cmd.Stdin = strings.NewReader(instruction)
-	// Strip refrain's hook-wiring env vars so the Haiku subprocess does not
-	// register hook callbacks against the running TUI's socket as the parent
-	// agent. Inheriting these caused phantom SessionStart/SessionEnd events
-	// to land on the parent agent and added per-call socket roundtrips that
-	// inflated cold-start latency past the rename timeout.
-	cmd.Env = sanitizedHaikuEnv(os.Environ())
-	// Bound how long Wait() blocks on pipe drain after the context kills the
-	// process — otherwise a descendant sleep can hold the stdout pipe open
-	// and keep Wait blocked long past cancellation.
-	cmd.WaitDelay = 500 * time.Millisecond
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("claude haiku: %w (stderr=%q)", err, strings.TrimSpace(stderr.String()))
-	}
-
-	return strings.TrimSpace(stdout.String()), nil
+	return runClaudeSubprocess(ctx, claudePath, claudeRunOpts{
+		args:      buildClaudeHaikuArgs(),
+		stdin:     instruction,
+		errPrefix: "claude haiku",
+	})
 }
 
 func runClaudeHaiku(ctx context.Context, claudePath, instruction string) (string, error) {

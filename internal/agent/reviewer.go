@@ -1,14 +1,11 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/devenjarvis/refrain/internal/config"
 )
@@ -111,22 +108,12 @@ func buildReviewPrompt(req ReviewRequest) string {
 // read-only tools only, no MCP servers, no session persistence. --bare is
 // added when ANTHROPIC_API_KEY is set (disables hooks, keychain reads, etc.).
 func buildReviewerArgs(model string) []string {
-	args := []string{"-p", "--model", model}
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		args = append(args, "--bare")
-	}
-	tools := "Read,Grep,Glob,LS"
-	args = append(
-		args,
-		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
-		"--disable-slash-commands",
-		"--no-session-persistence",
-		"--tools", tools,
-		"--allowed-tools", tools,
-		"--setting-sources", "user,project",
-		"--exclude-dynamic-system-prompt-sections",
-	)
-	return args
+	return buildClaudeArgs(claudeArgsOpts{
+		model:          model,
+		tools:          "Read,Grep,Glob,LS",
+		allowTools:     true,
+		settingSources: "user,project",
+	})
 }
 
 func (r *defaultReviewerAgent) Review(ctx context.Context, req ReviewRequest) (ReviewVerdict, error) {
@@ -135,20 +122,16 @@ func (r *defaultReviewerAgent) Review(ctx context.Context, req ReviewRequest) (R
 		return ReviewVerdict{}, fmt.Errorf("%w: %v", ErrClaudeNotFound, err)
 	}
 
-	cmd := exec.CommandContext(ctx, claudePath, buildReviewerArgs(r.model)...)
-	cmd.Stdin = strings.NewReader(buildReviewPrompt(req))
-	cmd.Env = sanitizedHaikuEnv(os.Environ())
-	cmd.WaitDelay = 500 * time.Millisecond
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return ReviewVerdict{}, fmt.Errorf("claude reviewer: %w (stderr=%q)", err, strings.TrimSpace(stderr.String()))
+	out, err := runClaudeSubprocess(ctx, claudePath, claudeRunOpts{
+		args:      buildReviewerArgs(r.model),
+		stdin:     buildReviewPrompt(req),
+		errPrefix: "claude reviewer",
+	})
+	if err != nil {
+		return ReviewVerdict{}, err
 	}
 
-	return parseReviewerOutput(strings.TrimSpace(stdout.String()))
+	return parseReviewerOutput(out)
 }
 
 // parseReviewerOutput extracts the VERDICT and RATIONALE lines from the
