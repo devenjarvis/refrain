@@ -10,8 +10,8 @@ import (
 )
 
 // feedbackNoteModal is a centered textarea overlay for attaching a guidance
-// note to a feedback item (approve/disagree verdict). It mirrors the
-// promptModalModel pattern: border + chip footer, enter to save, esc to cancel.
+// note to a feedback item (approve/disagree verdict). Border + chip footer,
+// enter to save, esc to cancel.
 type feedbackNoteModal struct {
 	active  bool
 	itemKey string
@@ -117,4 +117,25 @@ func (m *feedbackNoteModal) View() string {
 		Padding(0, 1).
 		Width(w).
 		Render(body)
+}
+
+// modalWidth computes a clamped overlay width from the surrounding viewport.
+// The modal occupies 2/3 of the viewport, clamped between 40 and 80 columns,
+// with an extra clamp so the border always fits (viewport - 2).
+func modalWidth(viewportW int) int {
+	const (
+		modalMaxWidth = 80
+		modalMinWidth = 40
+	)
+	w := viewportW * 2 / 3
+	if w > modalMaxWidth {
+		w = modalMaxWidth
+	}
+	if w < modalMinWidth {
+		w = modalMinWidth
+	}
+	if viewportW > 0 && w > viewportW-2 {
+		w = viewportW - 2
+	}
+	return w
 }

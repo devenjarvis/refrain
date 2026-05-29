@@ -34,6 +34,9 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 	// pointing at stale cells. Drop it.
 	a.dashboard.clearSelection()
 
+	// newSession always tracks terminal dimensions (it may be open in any view).
+	a.newSession.SetSize(msg.Width, msg.Height-1)
+
 	// Resize agent terminals to match their current display container.
 	if a.view == ViewDashboard {
 		a.resizeAllForDashboard()
@@ -43,7 +46,6 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 		if pe := a.modals.PlanEditor(); pe != nil {
 			pe.SetSize(msg.Width, msg.Height-1)
 		}
-		a.promptModal.SetSize(msg.Width, msg.Height-1)
 		a.prComposeModal.SetSize(msg.Width, msg.Height-1)
 		if sp := a.modals.Shipping(); sp != nil {
 			sp.Resize(msg.Width, msg.Height-1)
