@@ -31,6 +31,23 @@ func truncateVisible(s string, n int) string {
 	return ansi.Truncate(s, n, "…")
 }
 
+// clampedMove shifts a list cursor at cur by delta and clamps the result to
+// [0, n-1], where n is the item count. A non-positive n yields 0. Shared by
+// the list pickers for up/down (k/j) navigation.
+func clampedMove(cur, delta, n int) int {
+	cur += delta
+	if cur < 0 {
+		return 0
+	}
+	if n <= 0 {
+		return 0
+	}
+	if cur > n-1 {
+		return n - 1
+	}
+	return cur
+}
+
 // Timing constants for the sidebar session-name marquee ticker.
 const (
 	tickerPauseStart = 2 * time.Second
@@ -311,13 +328,6 @@ func (d dashboardModel) renderRepoConfigOverlay(width, height int) string {
 		repoName = d.configRepoPath
 	}
 
-	boxWidth := 64
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorPrimary).
-		Padding(1, 2).
-		Width(boxWidth)
-
 	title := StyleTitle.Render(repoName + " Settings")
 	pathLine := StyleSubtle.Render(repoPath)
 	hint := StyleSubtle.Render("j/k navigate  ←/→ select  enter edit/toggle  ctrl+s save  esc cancel")
@@ -330,8 +340,8 @@ func (d dashboardModel) renderRepoConfigOverlay(width, height int) string {
 		hint,
 	)
 
-	box := boxStyle.Render(content)
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+	box := modalBoxStyle(64).Render(content)
+	return placeCentered(width, height, box)
 }
 
 // renderRepoChecksOverlay renders the validation-checks list editor as a
@@ -347,13 +357,6 @@ func (d dashboardModel) renderRepoChecksOverlay(width, height int) string {
 		repoName = d.repoChecksRepoPath
 	}
 
-	boxWidth := 72
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorPrimary).
-		Padding(1, 2).
-		Width(boxWidth)
-
 	title := StyleTitle.Render(repoName + " · Validation Checks")
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -361,8 +364,8 @@ func (d dashboardModel) renderRepoChecksOverlay(width, height int) string {
 		d.repoChecksEditor.View(),
 	)
 
-	box := boxStyle.Render(content)
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
+	box := modalBoxStyle(72).Render(content)
+	return placeCentered(width, height, box)
 }
 
 func (d dashboardModel) emptyView() string {
@@ -371,7 +374,7 @@ func (d dashboardModel) emptyView() string {
 	hint := StyleSubtle.Render("Press n to create a new session")
 
 	content := lipgloss.JoinVertical(lipgloss.Center, title, "", subtitle, "", hint)
-	return lipgloss.Place(d.width, d.contentHeight(), lipgloss.Center, lipgloss.Center, content)
+	return placeCentered(d.width, d.contentHeight(), content)
 }
 
 // sessionsInPhase returns listItems for sessions whose lifecycle phase matches
@@ -1484,7 +1487,7 @@ func (d dashboardModel) renderBreakOverlay(width, height int) string {
 	parts = append(parts, actionLine)
 
 	inner := strings.Join(parts, "\n")
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, inner)
+	return placeCentered(width, height, inner)
 }
 
 // renderBreakCompleteOverlay is shown once the break timer has elapsed.
@@ -1541,7 +1544,7 @@ func (d dashboardModel) renderBreakCompleteOverlay(width, height int) string {
 	parts = append(parts, "", prompt, hint)
 
 	inner := lipgloss.JoinVertical(lipgloss.Center, parts...)
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, inner)
+	return placeCentered(width, height, inner)
 }
 
 // renderFullscreenFocus renders the pipeline dashboard: header, pipeline

@@ -1069,7 +1069,7 @@ func (a App) View() tea.View {
 		if sp := a.modals.Shipping(); sp != nil {
 			panel := sp.View(a.panelServices())
 			if sp.NoteActive() {
-				panel = lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, sp.NoteView())
+				panel = placeCentered(a.width, a.height, sp.NoteView())
 			}
 			v := tea.NewView(panel)
 			v.AltScreen = true
@@ -1147,7 +1147,7 @@ func (a App) View() tea.View {
 				Padding(0, 1).
 				Width(modalW).
 				Render(overlayContent)
-			body = lipgloss.Place(a.width, a.height-1, lipgloss.Center, lipgloss.Center, overlay)
+			body = placeCentered(a.width, a.height-1, overlay)
 		}
 		statusbar := renderStatusBar(hints, a.width)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, statusbar)

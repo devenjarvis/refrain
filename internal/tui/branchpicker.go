@@ -178,13 +178,9 @@ func (m branchPickerModel) Update(msg tea.Msg) (branchPickerModel, tea.Cmd) {
 		case "esc":
 			return m, func() tea.Msg { return branchPickerCancelMsg{} }
 		case "up", "k":
-			if m.selected > 0 {
-				m.selected--
-			}
+			m.selected = clampedMove(m.selected, -1, len(m.filtered))
 		case "down", "j":
-			if m.selected < len(m.filtered)-1 {
-				m.selected++
-			}
+			m.selected = clampedMove(m.selected, 1, len(m.filtered))
 		case "enter":
 			if len(m.filtered) > 0 && m.selected < len(m.filtered) {
 				item := m.items[m.filtered[m.selected]]

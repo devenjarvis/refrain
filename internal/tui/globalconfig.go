@@ -129,13 +129,6 @@ func (m globalConfigModel) Update(msg tea.Msg) (globalConfigModel, tea.Cmd) {
 }
 
 func (m globalConfigModel) View() string {
-	boxWidth := 64
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorPrimary).
-		Padding(1, 2).
-		Width(boxWidth)
-
 	title := StyleTitle.Render("Global Settings")
 	hint := StyleSubtle.Render("j/k navigate  ←/→ select  enter edit/toggle  ctrl+s save  esc cancel")
 
@@ -146,8 +139,8 @@ func (m globalConfigModel) View() string {
 		hint,
 	)
 
-	box := boxStyle.Render(content)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	box := modalBoxStyle(64).Render(content)
+	return placeCentered(m.width, m.height, box)
 }
 
 // extractSettings converts form field values back to a GlobalSettings struct.
