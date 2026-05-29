@@ -133,7 +133,7 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// this branch, multi-repo users would silently bypass PlanFirstEnabled
 		// and spawn the real agent immediately.
 		if resolved.PlanFirstEnabled {
-			return a, a.promptModal.Open()
+			return a, a.openNewSession(ViewRepoPicker)
 		}
 		pickerCfg := agent.Config{
 			Rows:              fixedH,

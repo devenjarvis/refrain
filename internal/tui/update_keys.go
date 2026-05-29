@@ -39,12 +39,6 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Record input before any modal early-returns so every human keypress
 		// counts toward inactivity tracking — including those absorbed by modals.
 		a.wellness.RecordInput()
-		// Prompt modal consumes all keys while open (it's a modal overlay).
-		// Submit/cancel emit dedicated messages handled below.
-		if a.promptModal.Active() {
-			cmd := a.promptModal.Update(msg)
-			return a, cmd
-		}
 		// PR compose modal consumes all keys while open.
 		if a.prComposeModal.Active() {
 			cmd := a.prComposeModal.Update(msg)
@@ -506,7 +500,7 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		// the planning path (StartDraft + editor) and the skip path
 		// (today's flow).
 		if resolved.PlanFirstEnabled {
-			return a, a.promptModal.Open(), true
+			return a, a.openNewSession(ViewDashboard), true
 		}
 
 		cfg := agent.Config{
@@ -1257,17 +1251,10 @@ func (a App) handleConfigFormSave() (tea.Model, tea.Cmd) {
 }
 
 // handleDashboardPaste routes a paste event to whichever modal owns focus:
-// the prompt modal, the PR compose modal, or the focusLaunch agent terminal.
+// the PR compose modal or the focusLaunch agent terminal.
 // When no consumer is active the paste is dropped (no panel consumes
 // arbitrary text on the pipeline).
 func (a App) handleDashboardPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
-	// Prompt modal consumes paste while open (same precedence as the
-	// KeyPressMsg branch) so cmd+v / bracketed paste inserts into the
-	// textarea instead of being swallowed by the focusLaunch path.
-	if a.promptModal.Active() {
-		cmd := a.promptModal.Update(msg)
-		return a, cmd
-	}
 	if a.prComposeModal.Active() {
 		cmd := a.prComposeModal.Update(msg)
 		return a, cmd

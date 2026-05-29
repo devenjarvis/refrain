@@ -79,6 +79,7 @@ const (
 	ViewGlobalConfig // overlay: edit global settings
 	ViewBranchPicker // overlay: pick branch/PR to open session on
 	ViewRepoPicker   // overlay: pick a registered repo to start a session in
+	ViewNewSession   // full-viewport new-session composition screen
 )
 
 // panelFocus tracks which dashboard surface has keyboard focus.

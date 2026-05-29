@@ -103,6 +103,13 @@ var (
 		{"a", "add"},
 		{"esc", "cancel"},
 	}
+
+	newSessionHints = []keyHint{
+		{"⏎", "draft plan"},
+		{"ctrl+⏎", "run now"},
+		{"ctrl+j", "newline"},
+		{"esc", "cancel"},
+	}
 )
 
 func renderStatusBar(hints []keyHint, width int) string {
