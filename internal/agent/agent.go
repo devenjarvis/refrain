@@ -454,130 +454,169 @@ func (a *Agent) OnHookEvent(e hook.Event) (changed bool) {
 
 	switch e.Kind {
 	case hook.KindSessionStart:
-		// A late SessionStart after process exit must not resurrect a Done or
-		// Error agent — mirror the guard pattern on the other hook kinds.
-		if a.status == StatusDone || a.status == StatusError {
-			return false
-		}
-		if e.SessionID != "" {
-			a.claudeSessionID = e.SessionID
-		}
-		if a.status != StatusActive {
-			a.status = StatusActive
-			return true
-		}
-		return false
-
+		return a.applySessionStart(e)
 	case hook.KindStop:
-		// A late Stop after process exit must not resurrect a Done or Error
-		// agent. This race is common: the PTY closes (readLoop sets Done/Error)
-		// and Claude's in-flight Stop hook event lands a moment later on the
-		// unix socket. Without this guard the agent's status would flip back to
-		// Idle, showing a wrong indicator and potentially triggering a chime.
-		if a.status == StatusDone || a.status == StatusError {
-			return false
-		}
-		a.waitingReason = ""
-		// Scan the visible viewport to find the last non-empty line and detect
-		// a trailing "?". RenderRegion holds only the terminal's own emulator
-		// lock; there is no a.mu path that would invert the order, so holding
-		// a.mu here is safe.
-		h := a.terminal.Height()
-		a.askingQuestion = false
-		if h > 0 {
-			raw := ansi.Strip(a.terminal.RenderRegion(0, h-1))
-			lines := strings.Split(raw, "\n")
-			for i := len(lines) - 1; i >= 0; i-- {
-				line := strings.TrimSpace(lines[i])
-				if line != "" {
-					a.askingQuestion = strings.HasSuffix(line, "?")
-					break
-				}
-			}
-		}
-		if a.status != StatusIdle {
-			a.status = StatusIdle
-			return true
-		}
-		return false
-
+		return a.applyStop(e)
 	case hook.KindSessionEnd:
-		// Actual teardown still goes through the PTY close path
-		// (readLoop -> close(done)); we just clear any in-flight waitingReason
-		// so the row doesn't keep that hint after exit.
-		a.waitingReason = ""
-		return false
-
+		return a.applySessionEnd(e)
 	case hook.KindNotification:
-		// Claude is waiting for the user (typically a permission prompt).
-		// Only override Active/Waiting so a late Notification can't revive a
-		// Done or Error agent, and don't clobber Idle either — if Claude sent
-		// Stop already, a trailing Notification shouldn't re-attention the row.
-		if a.status == StatusActive || a.status == StatusWaiting {
-			a.waitingReason = e.Message
-			if a.status != StatusWaiting {
-				a.status = StatusWaiting
-				return true
-			}
-		}
-		return false
-
+		return a.applyNotification(e)
 	case hook.KindUserPromptSubmit:
-		// User just submitted a new turn. Re-arm the chime and drive the
-		// agent back to Active — this is the authoritative re-arm signal
-		// alongside the existing SendKey(Enter) path. Mirror the Notification
-		// guard: a late event after the agent exited must not resurrect a
-		// Done or Error row, and must not reset chimedForTurn either.
-		if a.status == StatusDone || a.status == StatusError {
-			return false
-		}
-		a.waitingReason = ""
-		a.askingQuestion = false
-		a.chimedForTurn = false
-		if a.status != StatusActive {
-			a.status = StatusActive
-			return true
-		}
-		return false
-
+		return a.applyUserPromptSubmit(e)
 	case hook.KindPreToolUse:
-		// Claude resumed tool execution — authoritative signal that the
-		// agent is no longer waiting on the user (e.g. a permission prompt
-		// was just approved). Clear Waiting back to Active so the yellow
-		// indicator doesn't linger until Stop fires at end of turn.
-		// Mirror the late-event guard on Notification/UserPromptSubmit so a
-		// trailing event can't revive a Done or Error row. Do NOT reset
-		// chimedForTurn: that's gated to new user turns, not every tool call.
-		if a.status == StatusDone || a.status == StatusError {
-			return false
-		}
-		a.waitingReason = ""
-		todosChanged := false
-		if e.ToolName == "TodoWrite" && len(e.ToolInput) > 0 {
-			var inp struct {
-				Todos []TodoItem `json:"todos"`
-			}
-			if err := json.Unmarshal(e.ToolInput, &inp); err != nil {
-				if os.Getenv("REFRAIN_HOOK_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "refrain: TodoWrite unmarshal err=%v input=%s\n", err, e.ToolInput)
-				}
-			} else {
-				a.todos = make([]TodoItem, len(inp.Todos))
-				copy(a.todos, inp.Todos)
-				a.todosUpdatedAt = time.Now()
-				todosChanged = true
-				if os.Getenv("REFRAIN_HOOK_DEBUG") != "" {
-					fmt.Fprintf(os.Stderr, "refrain: TodoWrite populated todos=%d\n", len(a.todos))
-				}
-			}
-		}
-		if a.status != StatusActive {
-			a.status = StatusActive
-			return true
-		}
-		return todosChanged
+		return a.applyPreToolUse(e)
 	}
 	return false
+}
+
+// isTerminal reports whether the agent has exited (Done or Error). Late hook
+// events that arrive after the PTY close path set this state must not resurrect
+// the row. Callers hold a.mu.
+func (a *Agent) isTerminal() bool {
+	return a.status == StatusDone || a.status == StatusError
+}
+
+// applySessionStart handles hook.KindSessionStart. Callers hold a.mu.
+func (a *Agent) applySessionStart(e hook.Event) bool {
+	// A late SessionStart after process exit must not resurrect a Done or
+	// Error agent — mirror the guard pattern on the other hook kinds.
+	if a.isTerminal() {
+		return false
+	}
+	if e.SessionID != "" {
+		a.claudeSessionID = e.SessionID
+	}
+	if a.status != StatusActive {
+		a.status = StatusActive
+		return true
+	}
+	return false
+}
+
+// applyStop handles hook.KindStop. Callers hold a.mu.
+func (a *Agent) applyStop(_ hook.Event) bool {
+	// A late Stop after process exit must not resurrect a Done or Error
+	// agent. This race is common: the PTY closes (readLoop sets Done/Error)
+	// and Claude's in-flight Stop hook event lands a moment later on the
+	// unix socket. Without this guard the agent's status would flip back to
+	// Idle, showing a wrong indicator and potentially triggering a chime.
+	if a.isTerminal() {
+		return false
+	}
+	a.waitingReason = ""
+	// Scan the visible viewport to find the last non-empty line and detect
+	// a trailing "?". RenderRegion holds only the terminal's own emulator
+	// lock; there is no a.mu path that would invert the order, so holding
+	// a.mu here is safe.
+	h := a.terminal.Height()
+	a.askingQuestion = false
+	if h > 0 {
+		raw := ansi.Strip(a.terminal.RenderRegion(0, h-1))
+		lines := strings.Split(raw, "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			line := strings.TrimSpace(lines[i])
+			if line != "" {
+				a.askingQuestion = strings.HasSuffix(line, "?")
+				break
+			}
+		}
+	}
+	if a.status != StatusIdle {
+		a.status = StatusIdle
+		return true
+	}
+	return false
+}
+
+// applySessionEnd handles hook.KindSessionEnd. Callers hold a.mu.
+func (a *Agent) applySessionEnd(_ hook.Event) bool {
+	// Actual teardown still goes through the PTY close path
+	// (readLoop -> close(done)); we just clear any in-flight waitingReason
+	// so the row doesn't keep that hint after exit.
+	a.waitingReason = ""
+	return false
+}
+
+// applyNotification handles hook.KindNotification. Callers hold a.mu.
+func (a *Agent) applyNotification(e hook.Event) bool {
+	// Claude is waiting for the user (typically a permission prompt).
+	// Only override Active/Waiting so a late Notification can't revive a
+	// Done or Error agent, and don't clobber Idle either — if Claude sent
+	// Stop already, a trailing Notification shouldn't re-attention the row.
+	if a.status == StatusActive || a.status == StatusWaiting {
+		a.waitingReason = e.Message
+		if a.status != StatusWaiting {
+			a.status = StatusWaiting
+			return true
+		}
+	}
+	return false
+}
+
+// applyUserPromptSubmit handles hook.KindUserPromptSubmit. Callers hold a.mu.
+func (a *Agent) applyUserPromptSubmit(_ hook.Event) bool {
+	// User just submitted a new turn. Re-arm the chime and drive the
+	// agent back to Active — this is the authoritative re-arm signal
+	// alongside the existing SendKey(Enter) path. Mirror the Notification
+	// guard: a late event after the agent exited must not resurrect a
+	// Done or Error row, and must not reset chimedForTurn either.
+	if a.isTerminal() {
+		return false
+	}
+	a.waitingReason = ""
+	a.askingQuestion = false
+	a.chimedForTurn = false
+	if a.status != StatusActive {
+		a.status = StatusActive
+		return true
+	}
+	return false
+}
+
+// applyPreToolUse handles hook.KindPreToolUse. Callers hold a.mu.
+func (a *Agent) applyPreToolUse(e hook.Event) bool {
+	// Claude resumed tool execution — authoritative signal that the
+	// agent is no longer waiting on the user (e.g. a permission prompt
+	// was just approved). Clear Waiting back to Active so the yellow
+	// indicator doesn't linger until Stop fires at end of turn.
+	// Mirror the late-event guard on Notification/UserPromptSubmit so a
+	// trailing event can't revive a Done or Error row. Do NOT reset
+	// chimedForTurn: that's gated to new user turns, not every tool call.
+	if a.isTerminal() {
+		return false
+	}
+	a.waitingReason = ""
+	todosChanged := a.applyTodoWrite(e)
+	if a.status != StatusActive {
+		a.status = StatusActive
+		return true
+	}
+	return todosChanged
+}
+
+// applyTodoWrite parses a TodoWrite tool call's payload into a.todos and
+// reports whether the todo list changed. Non-TodoWrite events and malformed
+// payloads are no-ops. Callers hold a.mu.
+func (a *Agent) applyTodoWrite(e hook.Event) bool {
+	if e.ToolName != "TodoWrite" || len(e.ToolInput) == 0 {
+		return false
+	}
+	var inp struct {
+		Todos []TodoItem `json:"todos"`
+	}
+	if err := json.Unmarshal(e.ToolInput, &inp); err != nil {
+		if os.Getenv("REFRAIN_HOOK_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "refrain: TodoWrite unmarshal err=%v input=%s\n", err, e.ToolInput)
+		}
+		return false
+	}
+	a.todos = make([]TodoItem, len(inp.Todos))
+	copy(a.todos, inp.Todos)
+	a.todosUpdatedAt = time.Now()
+	if os.Getenv("REFRAIN_HOOK_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "refrain: TodoWrite populated todos=%d\n", len(a.todos))
+	}
+	return true
 }
 
 // Render returns the full terminal screen as an ANSI string.
