@@ -32,9 +32,13 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.updateRepoChecks(msg)
 
 	case tea.PasteMsg:
+		a.wellness.RecordInput()
 		return a.handleDashboardPaste(msg)
 
 	case tea.KeyPressMsg:
+		// Record input before any modal early-returns so every human keypress
+		// counts toward inactivity tracking — including those absorbed by modals.
+		a.wellness.RecordInput()
 		// PR compose modal consumes all keys while open.
 		if a.prComposeModal.Active() {
 			cmd := a.prComposeModal.Update(msg)
@@ -122,18 +126,22 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg, ok := msg.(tea.MouseClickMsg); ok {
+		a.wellness.RecordInput()
 		return a.handleMouseClick(msg)
 	}
 
 	if msg, ok := msg.(tea.MouseMotionMsg); ok {
+		a.wellness.RecordInput()
 		return a.handleMouseMotion(msg)
 	}
 
 	if _, ok := msg.(tea.MouseReleaseMsg); ok {
+		a.wellness.RecordInput()
 		return a.handleMouseRelease()
 	}
 
 	if msg, ok := msg.(tea.MouseWheelMsg); ok {
+		a.wellness.RecordInput()
 		return a.handleMouseWheel(msg)
 	}
 
@@ -407,6 +415,8 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			// Break is fully elapsed; user is opting back in. Exit
 			// without any "are you sure" friction.
 			a.wellness.sessionStart = time.Now()
+			a.wellness.idleDebt = 0
+			a.wellness.lastInputAt = time.Now()
 			a.wellness.focusBlockCount++
 			a.wellness.focusBreakMode = false
 			a.wellness.focusBreakShortWarning = false
@@ -418,6 +428,8 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			// Third b press while still inside the break window:
 			// override the short-break guard and end early.
 			a.wellness.sessionStart = time.Now()
+			a.wellness.idleDebt = 0
+			a.wellness.lastInputAt = time.Now()
 			a.wellness.focusBlockCount++
 			a.wellness.focusBreakMode = false
 			a.wellness.focusBreakShortWarning = false

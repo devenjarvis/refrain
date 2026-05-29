@@ -3053,6 +3053,7 @@ func TestTick_BreakDoesNotEnterWhilePanelOpen(t *testing.T) {
 			app := NewApp()
 			app.wellness.focusSessionMinutes = 1
 			app.wellness.sessionStart = time.Now().Add(-2 * time.Minute) // long past deadline
+			app.wellness.lastInputAt = time.Now()                        // recent input → no idle decay
 			// Stub an overlay into the requested focus state. The break-defer
 			// guard reads modals.IsList(); the specific model doesn't matter.
 			switch tc.focus {
@@ -3086,6 +3087,7 @@ func TestTick_BreakEntersOnPipeline(t *testing.T) {
 	app := NewApp()
 	app.wellness.focusSessionMinutes = 1
 	app.wellness.sessionStart = time.Now().Add(-2 * time.Minute)
+	app.wellness.lastInputAt = time.Now() // recent input → EffectiveElapsed ≈ 2min > threshold
 	// Default modal state is focusList (zero value); no setup needed.
 
 	model, _ := app.Update(tickMsg(time.Now()))
@@ -3093,6 +3095,44 @@ func TestTick_BreakEntersOnPipeline(t *testing.T) {
 
 	if !app.wellness.focusBreakMode {
 		t.Error("expected break to enter when on pipeline past session deadline")
+	}
+}
+
+// TestTick_BreakDoesNotFireWhenIdleDecayBringsElapsedUnderThreshold verifies
+// that a user who walked away for a long time does not get a surprise auto-break
+// on return: if idleDebt / currentExtendedIdle brings EffectiveElapsed below
+// the session threshold, the break should NOT fire even though wall-clock
+// time.Since(sessionStart) would exceed it.
+func TestTick_BreakDoesNotFireWhenIdleDecayBringsElapsedUnderThreshold(t *testing.T) {
+	app := NewApp()
+	app.wellness.focusSessionMinutes = 90
+	app.wellness.sessionStart = time.Now().Add(-100 * time.Minute)
+	// 60 min idle: currentExtendedIdle = 60min - 3min grace = 57min
+	// EffectiveElapsed = 100min - 0 - 57min = 43min < 90min → no break
+	app.wellness.lastInputAt = time.Now().Add(-60 * time.Minute)
+
+	model, _ := app.Update(tickMsg(time.Now()))
+	app = model.(App)
+
+	if app.wellness.focusBreakMode {
+		t.Error("break fired despite EffectiveElapsed being under threshold; idle decay must suppress it")
+	}
+}
+
+// TestTick_BreakFiresWhenEffectiveElapsedExceedsThreshold is the complementary
+// positive case: when lastInputAt is recent (within grace), EffectiveElapsed
+// matches wall-clock elapsed and the break fires normally.
+func TestTick_BreakFiresWhenEffectiveElapsedExceedsThreshold(t *testing.T) {
+	app := NewApp()
+	app.wellness.focusSessionMinutes = 1
+	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
+	app.wellness.lastInputAt = time.Now() // recent — no idle decay
+
+	model, _ := app.Update(tickMsg(time.Now()))
+	app = model.(App)
+
+	if !app.wellness.focusBreakMode {
+		t.Error("break did not fire despite EffectiveElapsed exceeding threshold with recent lastInputAt")
 	}
 }
 
@@ -5686,5 +5726,143 @@ func TestManualMarkReady_TriggersValidation(t *testing.T) {
 	}
 	if len(run.results) != 1 {
 		t.Errorf("len(results) = %d, want 1", len(run.results))
+	}
+}
+
+// TestRecordInput_NonDashboardView verifies that a key press routed through the
+// non-dashboard view handler (e.g. the validation-checks sub-editor) also
+// records input so idle decay doesn't accumulate while the user is in settings.
+func TestRecordInput_NonDashboardView(t *testing.T) {
+	const tol = 500 * time.Millisecond
+	app := NewApp()
+	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
+	app.wellness.lastInputAt = time.Now().Add(-4 * time.Minute) // 1 min past grace
+
+	// Open the checks editor to put the app into the focusRepoChecks path.
+	// We use openRepoChecksEditor directly to bypass the normal init path.
+	editor := newRepoChecksModel("repo", nil)
+	app.openRepoChecksEditor(editor, "/repo")
+	app.syncModalsToDashboard()
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	app = model.(App)
+
+	if app.wellness.idleDebt < 1*time.Minute-tol || app.wellness.idleDebt > 1*time.Minute+tol {
+		t.Errorf("idleDebt = %v after non-dashboard KeyPress, want ~1m", app.wellness.idleDebt)
+	}
+}
+
+// TestRecordInput_KeyPress verifies that a tea.KeyPressMsg on the dashboard
+// locks the idle gap into idleDebt and resets lastInputAt so EffectiveElapsed
+// reflects the reduced active time.
+func TestRecordInput_KeyPress(t *testing.T) {
+	const tol = 500 * time.Millisecond
+	app := NewApp()
+	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
+	app.wellness.lastInputAt = time.Now().Add(-4 * time.Minute) // 1 min past grace
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	app = model.(App)
+
+	// idleDebt should be ≈ 1 min (4min gap − 3min grace)
+	if app.wellness.idleDebt < 1*time.Minute-tol || app.wellness.idleDebt > 1*time.Minute+tol {
+		t.Errorf("idleDebt = %v after KeyPress, want ~1m", app.wellness.idleDebt)
+	}
+	// EffectiveElapsed ≈ 5min − 1min idleDebt − 0 currentExtendedIdle = 4min
+	got := app.wellness.EffectiveElapsed()
+	want := 4 * time.Minute
+	if got < want-tol || got > want+tol {
+		t.Errorf("EffectiveElapsed() = %v, want ~%v after KeyPress records input", got, want)
+	}
+}
+
+// TestRecordInput_MouseClick verifies that a tea.MouseClickMsg on the dashboard
+// records input the same way as a key press.
+func TestRecordInput_MouseClick(t *testing.T) {
+	const tol = 500 * time.Millisecond
+	app := NewApp()
+	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
+	app.wellness.lastInputAt = time.Now().Add(-4 * time.Minute)
+
+	model, _ := app.Update(tea.MouseClickMsg{})
+	app = model.(App)
+
+	if app.wellness.idleDebt < 1*time.Minute-tol || app.wellness.idleDebt > 1*time.Minute+tol {
+		t.Errorf("idleDebt = %v after MouseClick, want ~1m", app.wellness.idleDebt)
+	}
+	got := app.wellness.EffectiveElapsed()
+	want := 4 * time.Minute
+	if got < want-tol || got > want+tol {
+		t.Errorf("EffectiveElapsed() = %v, want ~%v after MouseClick records input", got, want)
+	}
+}
+
+// TestInit_SeedsLastInputAt verifies that handleInit populates lastInputAt so
+// the idle-decay path starts from a known reference rather than the zero value.
+func TestInit_SeedsLastInputAt(t *testing.T) {
+	app := NewApp()
+	before := time.Now()
+	model, _ := app.Update(initAppMsg{cfg: &config.Config{}})
+	after := time.Now()
+	app = model.(App)
+
+	if app.wellness.lastInputAt.IsZero() {
+		t.Fatal("handleInit must set lastInputAt to a non-zero time")
+	}
+	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
+		t.Errorf("lastInputAt %v is not within [%v, %v]", app.wellness.lastInputAt, before, after)
+	}
+}
+
+// TestBreakExit_TimerUp_ResetsIdleDebt verifies that the timer-up break-exit
+// path (single 'b' press) resets idleDebt and refreshes lastInputAt.
+func TestBreakExit_TimerUp_ResetsIdleDebt(t *testing.T) {
+	app, _, _, _, _ := makeFourPhaseApp(t)
+	app.wellness.focusBreakMode = true
+	app.wellness.focusBreakTimerUp = true
+	app.wellness.idleDebt = 5 * time.Minute
+	app.wellness.lastInputAt = time.Now().Add(-10 * time.Minute)
+
+	before := time.Now()
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	after := time.Now()
+	app = model.(App)
+
+	if app.wellness.focusBreakMode {
+		t.Fatal("expected break mode to exit on timer-up 'b' press")
+	}
+	if app.wellness.idleDebt != 0 {
+		t.Errorf("idleDebt = %v after break exit, want 0", app.wellness.idleDebt)
+	}
+	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
+		t.Errorf("lastInputAt %v not refreshed on break exit; want within [%v, %v]",
+			app.wellness.lastInputAt, before, after)
+	}
+}
+
+// TestBreakExit_ShortBreakOverride_ResetsIdleDebt verifies that the double-press
+// early-exit path also resets idleDebt and refreshes lastInputAt.
+func TestBreakExit_ShortBreakOverride_ResetsIdleDebt(t *testing.T) {
+	app, _, _, _, _ := makeFourPhaseApp(t)
+	app.wellness.focusBreakMode = true
+	app.wellness.focusBreakTimerUp = false
+	app.wellness.focusBreakShortWarning = true // second 'b' press: override
+	app.wellness.idleDebt = 3 * time.Minute
+	app.wellness.lastInputAt = time.Now().Add(-8 * time.Minute)
+
+	before := time.Now()
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	after := time.Now()
+	app = model.(App)
+
+	if app.wellness.focusBreakMode {
+		t.Fatal("expected break mode to exit on short-break override 'b' press")
+	}
+	if app.wellness.idleDebt != 0 {
+		t.Errorf("idleDebt = %v after short-break override, want 0", app.wellness.idleDebt)
+	}
+	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
+		t.Errorf("lastInputAt %v not refreshed on short-break override; want within [%v, %v]",
+			app.wellness.lastInputAt, before, after)
 	}
 }

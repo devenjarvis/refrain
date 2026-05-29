@@ -195,6 +195,7 @@ func (a App) updateRepoChecks(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.closeRepoChecksEditor()
 		return a, nil
 	case tea.KeyPressMsg:
+		a.wellness.RecordInput()
 		var cmd tea.Cmd
 		a.dashboard, cmd = a.dashboard.Update(msg)
 		return a, cmd

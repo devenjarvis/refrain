@@ -760,7 +760,7 @@ func (a *App) dashboardTopY() int {
 func (a *App) refreshAgentList() {
 	a.dashboard.closingAgents = a.closingAgents
 	a.dashboard.closingSessions = a.closingSessions
-	a.dashboard.sessionElapsed = time.Since(a.wellness.sessionStart)
+	a.dashboard.sessionElapsed = a.wellness.EffectiveElapsed()
 	a.dashboard.lastReviewAt = a.wellness.lastReviewAt
 	a.dashboard.focusSessionMinutes = a.wellness.focusSessionMinutes
 	a.dashboard.focusBreakMode = a.wellness.focusBreakMode

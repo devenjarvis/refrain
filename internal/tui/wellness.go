@@ -2,6 +2,10 @@ package tui
 
 import "time"
 
+// idleGrace is the keyboard/mouse inactivity window before the focus-block
+// timer starts counting down. Kept unexported and non-configurable by design.
+const idleGrace = 3 * time.Minute
+
 // wellnessState owns the focus-block timer, the break overlay, and the
 // session/agent counters that flush to the wellness log on quit. It was
 // extracted from App so the 14 related fields stop sprawling at the top
@@ -21,6 +25,14 @@ type wellnessState struct {
 	// lastReviewAt is the wall-clock time of the most recent review-panel
 	// open. Surfaced as a comfort metric in the wellness log.
 	lastReviewAt time.Time
+
+	// lastInputAt is the wall-clock time (monotonic stripped) of the most
+	// recent keyboard or mouse event from the human. Used by EffectiveElapsed
+	// to decay the timer during extended inactivity.
+	lastInputAt time.Time
+	// idleDebt is the cumulative time the user was idle beyond idleGrace in
+	// prior idle intervals. Locked in by RecordInput and carried forward.
+	idleDebt time.Duration
 
 	// focusSessionMinutes and focusBreakMinutes mirror the resolved global
 	// settings; cached so the per-tick comparison doesn't need to re-resolve.
@@ -62,5 +74,39 @@ func newWellnessState() wellnessState {
 	return wellnessState{
 		appStart:     now,
 		sessionStart: now,
+		lastInputAt:  now,
 	}
+}
+
+// RecordInput locks in the idle debt accumulated since the last input event
+// and resets the inactivity clock. Call this at the top of every human
+// keyboard and mouse handler so EffectiveElapsed reflects real active time.
+func (w *wellnessState) RecordInput() {
+	now := time.Now().Round(0)
+	if !w.lastInputAt.IsZero() {
+		gap := now.Sub(w.lastInputAt)
+		if gap > idleGrace {
+			w.idleDebt += gap - idleGrace
+		}
+	}
+	w.lastInputAt = now
+}
+
+// EffectiveElapsed returns how much focus-block time has elapsed, excluding
+// keyboard/mouse inactivity past idleGrace. The value is clamped to zero so
+// the display never goes negative. If lastInputAt has not been seeded yet
+// (tests or pre-init paths), falls back to raw time.Since(sessionStart).
+func (w wellnessState) EffectiveElapsed() time.Duration {
+	if w.lastInputAt.IsZero() {
+		return time.Since(w.sessionStart)
+	}
+	currentExtendedIdle := time.Since(w.lastInputAt) - idleGrace
+	if currentExtendedIdle < 0 {
+		currentExtendedIdle = 0
+	}
+	elapsed := time.Since(w.sessionStart) - w.idleDebt - currentExtendedIdle
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
 }
