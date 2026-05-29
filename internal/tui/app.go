@@ -207,7 +207,7 @@ type App struct {
 	reviewDiffCache map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
 	validationRuns  map[string]*validationRunState             // keyed by sessionID; lifetime exceeds panel
 	feedbackTriage  map[string]map[string]*feedbackTriageEntry // keyed by cacheKey(repoPath, sessionID) → itemKey
-	newSession      newSessionModel  // full-viewport new-session composition screen
+	newSession      newSessionModel                            // full-viewport new-session composition screen
 
 	// closingAgents and closingSessions track in-flight kill requests so the
 	// dashboard can render a "closing…" indicator while the async teardown runs.
