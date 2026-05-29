@@ -333,6 +333,24 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 	return a, tea.Batch(allCmds...)
 }
 
+// shouldAutoPromote reports whether a BUILDING session is complete enough to
+// auto-advance to ReadyForReview when its agent goes idle/done. A session with
+// no cached plan is promotable; one with a plan is promotable only once every
+// task is accounted for (by the plan's own checkbox count or the per-commit
+// [task N] count, whichever is larger). Outstanding tasks keep the session in
+// BUILDING so its progress bar stays visible. Pure: no App or manager state.
+func shouldAutoPromote(sess *agent.Session) bool {
+	plan, present := sess.CachedPlan()
+	if !present {
+		return true
+	}
+	pTotal, pDone := planTaskCounts(plan)
+	cDone, cMax := sess.CommitTaskCount()
+	effectiveTotal := max(pTotal, cMax)
+	effectiveDone := max(pDone, cDone)
+	return effectiveTotal == 0 || effectiveDone >= effectiveTotal
+}
+
 func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 	var autoPromoteCmd tea.Cmd
 	// Clean up stale lastKnownStatus entries when a session auto-closes.
@@ -391,17 +409,7 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 					// Suppressed when the plan has uncompleted tasks so the
 					// session stays in BUILDING with a visible progress bar.
 					if sess.LifecyclePhase() == agent.LifecycleInProgress && sess.IsReviewable() {
-						promote := true
-						if plan, present := sess.CachedPlan(); present {
-							pTotal, pDone := planTaskCounts(plan)
-							cDone, cMax := sess.CommitTaskCount()
-							effectiveTotal := max(pTotal, cMax)
-							effectiveDone := max(pDone, cDone)
-							if effectiveTotal > 0 && effectiveDone < effectiveTotal {
-								promote = false
-							}
-						}
-						if promote {
+						if shouldAutoPromote(sess) {
 							sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
 							autoPromoteCmd = tea.Batch(
 								a.fetchReviewDiffCmd(sess, msg.repoPath),

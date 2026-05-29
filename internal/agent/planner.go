@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -254,12 +253,7 @@ func buildClaudePlannerArgs(model, questionSocket string) []string {
 	if model == "" {
 		model = config.DefaultPlanModel
 	}
-	args := []string{"-p", "--model", model}
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		args = append(args, "--bare")
-	}
 
-	mcpConfig := plannerMCPConfigJSON(questionSocket)
 	tools := "Read,Grep,Glob,LS,LSP,WebFetch,WebSearch"
 	if questionSocket != "" {
 		tools += "," + plannerQuestionToolName
@@ -269,17 +263,13 @@ func buildClaudePlannerArgs(model, questionSocket string) []string {
 	// if Claude's default set expands). --allowedTools auto-approves those same
 	// tools so the non-interactive -p subprocess never hits a permission gate.
 	// Both flags are required: --tools alone only controls availability, not approval.
-	args = append(
-		args,
-		"--strict-mcp-config", "--mcp-config", mcpConfig,
-		"--disable-slash-commands",
-		"--no-session-persistence",
-		"--tools", tools,
-		"--allowedTools", tools,
-		"--setting-sources", "user,project",
-		"--exclude-dynamic-system-prompt-sections",
-	)
-	return args
+	return buildClaudeArgs(claudeArgsOpts{
+		model:          model,
+		mcpConfig:      plannerMCPConfigJSON(questionSocket),
+		tools:          tools,
+		allowTools:     true,
+		settingSources: "user,project",
+	})
 }
 
 // plannerMCPConfigJSON renders the --mcp-config payload. With an empty
@@ -335,27 +325,23 @@ func plannerMCPConfigJSON(questionSocket string) string {
 // When cwd is non-empty, cmd.Dir is set so the subprocess reads the correct
 // repo when multiple repos are registered in refrain.
 func runClaudePlanner(ctx context.Context, claudePath, model, instruction, questionSocket, cwd string) (string, error) {
-	cmd := exec.CommandContext(ctx, claudePath, buildClaudePlannerArgs(model, questionSocket)...)
-	cmd.Stdin = strings.NewReader(instruction)
-	env := sanitizedHaikuEnv(os.Environ())
+	var extraEnv []string
 	if questionSocket != "" {
-		env = append(env, PlannerQuestionSocketEnv+"="+questionSocket)
-	}
-	cmd.Env = env
-	if cwd != "" {
-		cmd.Dir = cwd
-	}
-	cmd.WaitDelay = 500 * time.Millisecond
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("claude planner: %w (stdout=%q stderr=%q)", err, strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()))
+		extraEnv = append(extraEnv, PlannerQuestionSocketEnv+"="+questionSocket)
 	}
 
-	output := strings.TrimSpace(stdout.String())
+	output, err := runClaudeSubprocess(ctx, claudePath, claudeRunOpts{
+		args:             buildClaudePlannerArgs(model, questionSocket),
+		stdin:            instruction,
+		extraEnv:         extraEnv,
+		dir:              cwd,
+		errPrefix:        "claude planner",
+		errIncludeStdout: true,
+	})
+	if err != nil {
+		return "", err
+	}
+
 	if idx := strings.Index(output, "# Goal"); idx > 0 {
 		output = output[idx:]
 	}

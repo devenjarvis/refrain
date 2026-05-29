@@ -105,14 +105,10 @@ func (m repoPickerModel) Update(msg tea.Msg) (repoPickerModel, tea.Cmd) {
 			return m, func() tea.Msg { return repoPickerCancelMsg{} }
 		case "up", "k":
 			m.pendingRemoveIdx = -1
-			if m.selected > 0 {
-				m.selected--
-			}
+			m.selected = clampedMove(m.selected, -1, len(m.filtered))
 		case "down", "j":
 			m.pendingRemoveIdx = -1
-			if m.selected < len(m.filtered)-1 {
-				m.selected++
-			}
+			m.selected = clampedMove(m.selected, 1, len(m.filtered))
 		case "enter":
 			if len(m.filtered) == 0 || m.selected >= len(m.filtered) {
 				break

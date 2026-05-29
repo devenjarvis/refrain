@@ -79,6 +79,35 @@ func (a App) handlePRCreated(msg prCreatedMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// handlePRNotFound applies the 2-consecutive-nil grace period to the PR cache
+// for key. A lookup that returns no PR is common during the rename gap (branch
+// pushed under the old name, remote SHA not yet updated) or a rapid force-push
+// window, so the cache entry is evicted only after two back-to-back nil polls;
+// a single nil is treated as transient and left in place so the UI doesn't
+// blank. No-op when key was never cached. Mutates a.prCache, ps, and the
+// dashboard cache in place via the pointer receiver.
+func (a *App) handlePRNotFound(key string, ps *prSessionState) {
+	if _, had := a.prCache[key]; !had {
+		return
+	}
+	// ps is always non-nil here in production: pollAllSessions initialises it
+	// before dispatching a poll, and prPollMsg can only arrive after dispatch.
+	// The nil guard is defensive; if ps were nil we skip the grace period and
+	// evict immediately rather than dereference.
+	if ps != nil {
+		ps.consecutiveNilPolls++
+		if ps.consecutiveNilPolls < 2 {
+			return
+		}
+	}
+	delete(a.prCache, key)
+	if ps != nil {
+		ps.lastCheckState = ""
+		ps.consecutiveNilPolls = 0
+	}
+	a.updateDashboardPRCache()
+}
+
 func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 	a.prPollsInFlight--
 	if a.prPollsInFlight < 0 {
@@ -102,29 +131,9 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		return a, nil
 	}
-	// Lookup succeeded with no PR. Apply a 2-consecutive-nil grace period
-	// before evicting the cache: a single nil is common during the rename
-	// gap (branch pushed under old name, remote SHA not yet updated) or a
-	// rapid force-push window. Two in a row means the PR is genuinely gone.
+	// Lookup succeeded with no PR. Apply the grace period before evicting.
 	if msg.pr == nil {
-		if _, had := a.prCache[key]; had {
-			// ps is always non-nil here: pollAllSessions initialises it before
-			// dispatching a poll, and prPollMsg can only arrive after dispatch.
-			// The nil guard is defensive; if ps were nil we skip the grace period
-			// and evict immediately rather than dereference.
-			if ps != nil {
-				ps.consecutiveNilPolls++
-				if ps.consecutiveNilPolls < 2 {
-					return a, nil
-				}
-			}
-			delete(a.prCache, key)
-			if ps != nil {
-				ps.lastCheckState = ""
-				ps.consecutiveNilPolls = 0
-			}
-			a.updateDashboardPRCache()
-		}
+		a.handlePRNotFound(key, ps)
 		return a, nil
 	}
 	// Successful poll: reset the nil counter.
