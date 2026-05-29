@@ -30,7 +30,7 @@ func setRapidChecks(t *testing.T, n int) {
 func TestSessionRepoProp_WorktreeAlwaysUnderRepo(t *testing.T) {
 	setRapidChecks(t, 20)
 	repo := setupTestRepoForProp()
-	t.Cleanup(func() { os.RemoveAll(repo) })
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
 	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
@@ -76,7 +76,7 @@ func TestSessionRepoProp_AgentWorktreePathMatchesSession(t *testing.T) {
 func TestSessionRepoProp_PlanPathsUnderWorktree(t *testing.T) {
 	setRapidChecks(t, 20)
 	repo := setupTestRepoForProp()
-	t.Cleanup(func() { os.RemoveAll(repo) })
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
 	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
@@ -118,7 +118,7 @@ func TestSessionRepoProp_PlanPathsUnderWorktree(t *testing.T) {
 func TestSessionRepoProp_LifecycleTransitionsPreserveWorktreePath(t *testing.T) {
 	setRapidChecks(t, 20)
 	repo := setupTestRepoForProp()
-	t.Cleanup(func() { os.RemoveAll(repo) })
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
 	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
@@ -207,7 +207,7 @@ func TestSessionRepoProp_ReviseCwdMatchesWorktreePath(t *testing.T) {
 func TestSessionRepoProp_MultipleSessionsDistinctWorktreesSameRepo(t *testing.T) {
 	setRapidChecks(t, 20)
 	repo := setupTestRepoForProp()
-	t.Cleanup(func() { os.RemoveAll(repo) })
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
 	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
@@ -415,7 +415,7 @@ func TestSessionRepoProp_PlanningSessionWorktreeUnderRepo(t *testing.T) {
 func TestSessionRepoProp_WorktreePathsNeverNested(t *testing.T) {
 	setRapidChecks(t, 20)
 	repo := setupTestRepoForProp()
-	t.Cleanup(func() { os.RemoveAll(repo) })
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
 	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())

@@ -19,7 +19,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("creating temp dir: " + err.Error())
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	bin := filepath.Join(dir, "refrain")
 	build := exec.Command("go", "build", "-o", bin, ".")
