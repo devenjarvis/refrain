@@ -191,7 +191,7 @@ func waitForAny(s *Session, timeoutMs int, needles ...string) bool {
 func submitPlanPrompt(t *testing.T, s *Session, prompt string) {
 	t.Helper()
 	s.Press("n")
-	s.WaitForText("draft a plan", 5000)
+	s.WaitForText("draft plan", 5000)
 	s.Type(prompt)
 	s.Press("enter")
 }
@@ -480,7 +480,7 @@ func TestPlanPromptModalCancel(t *testing.T) {
 
 	// Open prompt modal.
 	s.Press("n")
-	s.WaitForText("draft a plan", 5000)
+	s.WaitForText("draft plan", 5000)
 
 	// Cancel.
 	s.Press("Escape")
