@@ -36,6 +36,27 @@ turns:
 `,
 }
 
+// taskProgressBranchNameScenario absorbs the background haiku branch-namer
+// subprocess that fires on the first UserPromptSubmit. The DefaultBranchNamePrompt
+// contains "Respond with ONLY the slug" which is unique to the haiku instruction
+// and not present in any build or draft prompt. Returning empty text causes the
+// namer to see an empty slug (ErrEmptySlug) and skip the rename, which eliminates
+// the race between "git branch -m" and "git commit" in the exec scenario.
+var taskProgressBranchNameScenario = scenarioFile{
+	name: "tp_branchname.yaml",
+	content: `name: tp_branchname
+match:
+  prompt: "Respond with ONLY the slug"
+session:
+  id: "e2e-tp-branchname"
+  model: "claude-haiku-4-5-20251001"
+turns:
+  - assistant:
+      - type: text
+        text: ""
+`,
+}
+
 var taskProgressBuildTask1 = scenarioFile{
 	name: "tp_build1.yaml",
 	content: `name: tp_build1
@@ -87,6 +108,7 @@ turns:
 func allTaskProgressScenarios() []scenarioFile {
 	return []scenarioFile{
 		taskProgressDraftScenario,
+		taskProgressBranchNameScenario,
 		taskProgressBuildTask1,
 		taskProgressBuildTask2,
 		taskProgressBuildTask3,
@@ -118,20 +140,37 @@ func TestTaskProgressBarUpdates(t *testing.T) {
 		t.Fatalf("session did not transition to BUILDING after approve\nScreen:\n%s", s.Screenshot())
 	}
 
+	// Open the agent terminal and send the build prompt to trigger task 1.
+	// scrim starts in interactive mode and waits for prompts via stdin.
+	s.Press("enter")
+	s.WaitForText("back", 10000)
+	s.Type("execute the plan\n")
+	s.WaitForText("Completed task 1", 15000)
+	s.Press("Escape")
+	s.WaitForText("navigate", 10000)
+
 	if !waitForProgress(s, 1, 3, 30000) {
 		t.Fatalf("progress bar never showed 1/3 tasks\nScreen:\n%s", s.Screenshot())
 	}
 
+	// Send task 2, escape back to dashboard to observe 2/3 progress.
 	s.Press("enter")
 	s.WaitForText("back", 10000)
 	s.Type("continue task 2\n")
-	s.Type("continue task 3\n")
+	s.WaitForText("Completed task 2", 15000)
 	s.Press("Escape")
 	s.WaitForText("navigate", 10000)
 
 	if !waitForProgress(s, 2, 3, 30000) {
 		t.Errorf("progress bar never showed 2/3 tasks\nScreen:\n%s", s.Screenshot())
 	}
+
+	// Send task 3, then wait for either 3/3 tasks or auto-promotion to REVIEWING.
+	s.Press("enter")
+	s.WaitForText("back", 10000)
+	s.Type("continue task 3\n")
+	s.Press("Escape")
+	s.WaitForText("navigate", 10000)
 
 	if !waitForBadgeText(s, "REVIEWING", 30000) {
 		if !waitForProgress(s, 3, 3, 5000) {
@@ -141,7 +180,7 @@ func TestTaskProgressBarUpdates(t *testing.T) {
 }
 
 func TestTaskProgressBarStaysInBuilding(t *testing.T) {
-	s := newPlanningSession(t, taskProgressDraftScenario, taskProgressBuildTask1)
+	s := newPlanningSession(t, taskProgressDraftScenario, taskProgressBranchNameScenario, taskProgressBuildTask1)
 	s.Start()
 	s.WaitForText("FOCUS", 10000)
 
@@ -152,6 +191,14 @@ func TestTaskProgressBarStaysInBuilding(t *testing.T) {
 	if !waitForBadgeText(s, "BUILDING", 15000) {
 		t.Fatalf("session did not transition to BUILDING\nScreen:\n%s", s.Screenshot())
 	}
+
+	// Open the agent terminal and trigger task 1.
+	s.Press("enter")
+	s.WaitForText("back", 10000)
+	s.Type("execute the plan\n")
+	s.WaitForText("Completed task 1", 15000)
+	s.Press("Escape")
+	s.WaitForText("navigate", 10000)
 
 	if !waitForProgress(s, 1, 3, 30000) {
 		t.Errorf("progress bar never showed 1/3 tasks\nScreen:\n%s", s.Screenshot())
