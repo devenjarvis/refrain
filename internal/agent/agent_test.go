@@ -227,10 +227,11 @@ func TestIdleSuppressedWhileTyping(t *testing.T) {
 		t.Fatalf("expected Active after output, got %s", s)
 	}
 
-	// Simulate user typing every 500ms for 5 seconds (well past the 3s idle timeout).
-	for i := 0; i < 10; i++ {
+	// Simulate user typing to confirm idle is suppressed while input is received.
+	// Hook-driven idle detection means no background timer; a few iterations suffice.
+	for i := 0; i < 3; i++ {
 		a.SendText("x")
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Agent should still be Active because user input keeps it non-idle.
@@ -260,7 +261,8 @@ func TestIdleDrivenByStopHook(t *testing.T) {
 	}
 
 	// With no hook, Active MUST NOT flip to Idle on its own.
-	time.Sleep(4 * time.Second)
+	// Hook-driven idle detection means there is no background timer; 50ms is sufficient.
+	time.Sleep(50 * time.Millisecond)
 	if s := a.Status(); s != StatusActive {
 		t.Errorf("expected Active without hook event, got %s", s)
 	}
@@ -357,10 +359,10 @@ func TestNewShellAgent(t *testing.T) {
 		t.Errorf("expected render to contain 'hello', got: %q", render)
 	}
 
-	// Shell agents should NOT transition to Idle (no statusLoop).
-	time.Sleep(4 * time.Second)
+	// Shell agents should NOT transition to Idle (hook-driven idle detection, no background timer).
+	time.Sleep(50 * time.Millisecond)
 	if s := a.Status(); s == StatusIdle {
-		t.Error("shell agent should not transition to Idle (no statusLoop)")
+		t.Error("shell agent should not transition to Idle (hook-driven idle detection)")
 	}
 }
 
