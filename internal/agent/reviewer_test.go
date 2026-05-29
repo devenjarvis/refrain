@@ -352,7 +352,7 @@ func TestBuildReviewerArgs_RequiredFlags(t *testing.T) {
 	want := map[string]bool{
 		"--no-session-persistence": false,
 		"--tools":                  false,
-		"--allowed-tools":          false,
+		"--allowedTools":           false,
 	}
 	for _, a := range args {
 		if _, ok := want[a]; ok {

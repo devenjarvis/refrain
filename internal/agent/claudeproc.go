@@ -25,9 +25,11 @@ type claudeArgsOpts struct {
 	// tools is the --tools value (visibility filter). May be empty to expose
 	// no tools.
 	tools string
-	// allowTools, when true, additionally passes --allowed-tools <tools> so the
+	// allowTools, when true, additionally passes --allowedTools <tools> so the
 	// non-interactive -p subprocess auto-approves those same tools instead of
 	// hitting a permission gate. --tools alone only controls availability.
+	// The camelCase spelling is used (claude also accepts --allowed-tools) so
+	// the scrim test double, which only registers --allowedTools, parses it.
 	allowTools bool
 	// settingSources is the --setting-sources value, e.g. "user" or
 	// "user,project".
@@ -58,7 +60,7 @@ func buildClaudeArgs(o claudeArgsOpts) []string {
 		"--tools", o.tools,
 	)
 	if o.allowTools {
-		args = append(args, "--allowed-tools", o.tools)
+		args = append(args, "--allowedTools", o.tools)
 	}
 	args = append(
 		args,
