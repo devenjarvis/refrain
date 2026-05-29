@@ -4,11 +4,11 @@ import (
 	"testing"
 )
 
-// TestCheckHookPipeline exercises the doctor self-check: it builds the refrain
-// binary, invokes checkHookPipeline against it, and asserts the socket round
-// trip succeeds. Uses buildRefrain from hook_test.go.
+// TestCheckHookPipeline exercises the doctor self-check: it invokes
+// checkHookPipeline against the binary built in TestMain and asserts the socket
+// round trip succeeds.
 func TestCheckHookPipeline(t *testing.T) {
-	bin := buildRefrain(t)
+	bin := testBin
 	if err := checkHookPipeline(bin); err != nil {
 		t.Fatalf("checkHookPipeline: %v", err)
 	}

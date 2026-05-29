@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -27,25 +26,11 @@ outer:
 	return filtered
 }
 
-// buildRefrain builds the refrain binary into a temp dir and returns the path.
-func buildRefrain(t *testing.T) string {
-	t.Helper()
-	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Dir(filepath.Dir(thisFile))
-	bin := filepath.Join(t.TempDir(), "refrain")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Dir = repoRoot
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building refrain: %v\n%s", err, out)
-	}
-	return bin
-}
-
 // TestHookSubcommandForwards runs the built refrain binary with each supported
 // subcommand and asserts the server receives the event with the right kind,
 // AgentID, and parsed payload fields.
 func TestHookSubcommandForwards(t *testing.T) {
-	bin := buildRefrain(t)
+	bin := testBin
 
 	cases := []struct {
 		name        string
@@ -182,7 +167,7 @@ func TestHookSubcommandForwards(t *testing.T) {
 // REFRAIN_HOOK_SOCKET and REFRAIN_AGENT_ID aren't set — this is the case for a
 // user running `claude` outside of refrain.
 func TestHookSubcommandNoEnv(t *testing.T) {
-	bin := buildRefrain(t)
+	bin := testBin
 
 	cmd := exec.Command(bin, "hook", "stop")
 	// Deliberately no REFRAIN_* env vars — if refrain itself was launched inside
@@ -200,7 +185,7 @@ func TestHookSubcommandNoEnv(t *testing.T) {
 
 // TestHookSubcommandUnknownEvent ensures unknown event names exit 0 silently.
 func TestHookSubcommandUnknownEvent(t *testing.T) {
-	bin := buildRefrain(t)
+	bin := testBin
 
 	cmd := exec.Command(bin, "hook", "made-up-event")
 	cmd.Stdin = strings.NewReader(`{}`)

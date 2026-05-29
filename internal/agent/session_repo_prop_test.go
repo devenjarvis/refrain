@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,18 +14,31 @@ import (
 	"pgregory.net/rapid"
 )
 
+// setRapidChecks sets -rapid.checks to n for the duration of the current test
+// and restores the previous value via t.Cleanup. rapid v1.3.0 has no per-call
+// option API; the flag binding is the only runtime-safe override.
+func setRapidChecks(t *testing.T, n int) {
+	t.Helper()
+	prev := flag.Lookup("rapid.checks").Value.String()
+	if err := flag.Set("rapid.checks", fmt.Sprintf("%d", n)); err != nil {
+		t.Fatalf("setRapidChecks: %v", err)
+	}
+	t.Cleanup(func() { _ = flag.Set("rapid.checks", prev) })
+}
+
 // Every session's worktree path is a subdirectory of its manager's repoPath.
 func TestSessionRepoProp_WorktreeAlwaysUnderRepo(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		repo := setupTestRepoForProp()
-		defer func() { _ = os.RemoveAll(repo) }()
+	setRapidChecks(t, 20)
+	repo := setupTestRepoForProp()
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
+	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
 		defer mgr.Shutdown()
 
 		n := rapid.IntRange(1, 3).Draw(t, "session_count")
 		for i := 0; i < n; i++ {
-			sess, _ := createTestSession(t, mgr)
+			sess := createTestSessionPlanOnly(t, mgr)
 			assertWorktreeUnderRepo(t, repo, sess)
 		}
 	})
@@ -59,10 +74,11 @@ func TestSessionRepoProp_AgentWorktreePathMatchesSession(t *testing.T) {
 
 // PlanPath and PrevPlanPath are always under the session's worktree.
 func TestSessionRepoProp_PlanPathsUnderWorktree(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		repo := setupTestRepoForProp()
-		defer func() { _ = os.RemoveAll(repo) }()
+	setRapidChecks(t, 20)
+	repo := setupTestRepoForProp()
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
+	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
 		defer mgr.Shutdown()
 
@@ -100,14 +116,15 @@ func TestSessionRepoProp_PlanPathsUnderWorktree(t *testing.T) {
 // Walking through any sequence of lifecycle phase transitions never changes
 // the session's worktree path.
 func TestSessionRepoProp_LifecycleTransitionsPreserveWorktreePath(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		repo := setupTestRepoForProp()
-		defer func() { _ = os.RemoveAll(repo) }()
+	setRapidChecks(t, 20)
+	repo := setupTestRepoForProp()
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
+	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
 		defer mgr.Shutdown()
 
-		sess, _ := createTestSession(t, mgr)
+		sess := createTestSessionPlanOnly(t, mgr)
 		originalPath := sess.Worktree.Path
 		originalBranch := sess.Worktree.BaseBranch
 
@@ -188,17 +205,18 @@ func TestSessionRepoProp_ReviseCwdMatchesWorktreePath(t *testing.T) {
 // Multiple sessions on the same manager all have worktrees under the same repo
 // and all worktree paths are mutually distinct.
 func TestSessionRepoProp_MultipleSessionsDistinctWorktreesSameRepo(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		repo := setupTestRepoForProp()
-		defer func() { _ = os.RemoveAll(repo) }()
+	setRapidChecks(t, 20)
+	repo := setupTestRepoForProp()
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
+	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
 		defer mgr.Shutdown()
 
 		n := rapid.IntRange(2, 4).Draw(t, "session_count")
 		sessions := make([]*Session, n)
 		for i := 0; i < n; i++ {
-			sessions[i], _ = createTestSession(t, mgr)
+			sessions[i] = createTestSessionPlanOnly(t, mgr)
 		}
 
 		paths := make(map[string]bool)
@@ -395,17 +413,18 @@ func TestSessionRepoProp_PlanningSessionWorktreeUnderRepo(t *testing.T) {
 // The worktree path never shares a prefix with any other session's worktree
 // path (they are peers under .refrain/worktrees/, not nested).
 func TestSessionRepoProp_WorktreePathsNeverNested(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		repo := setupTestRepoForProp()
-		defer func() { _ = os.RemoveAll(repo) }()
+	setRapidChecks(t, 20)
+	repo := setupTestRepoForProp()
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
+	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
 		defer mgr.Shutdown()
 
 		n := rapid.IntRange(2, 4).Draw(t, "count")
 		sessions := make([]*Session, n)
 		for i := 0; i < n; i++ {
-			sessions[i], _ = createTestSession(t, mgr)
+			sessions[i] = createTestSessionPlanOnly(t, mgr)
 		}
 
 		for i := 0; i < n; i++ {
