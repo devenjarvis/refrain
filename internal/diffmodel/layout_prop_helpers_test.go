@@ -79,5 +79,5 @@ func countInputLines(hunks []diffmodel.Hunk) (delPlusCtx, addPlusCtx int) {
 			}
 		}
 	}
-	return
+	return delPlusCtx, addPlusCtx
 }
