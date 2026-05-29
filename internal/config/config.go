@@ -69,10 +69,17 @@ func legacyBatonConfigFile() (string, error) {
 }
 
 // legacyConfigFile returns the old XDG-based path for migration.
+// Uses $XDG_CONFIG_HOME directly (falling back to ~/.config) rather than
+// os.UserConfigDir(), which returns ~/Library/Application Support on macOS
+// and would miss the XDG path the legacy app actually wrote.
 func legacyConfigFile() (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("config: finding user config dir: %w", err)
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("config: finding home dir: %w", err)
+		}
+		base = filepath.Join(home, ".config")
 	}
 	return filepath.Join(base, "baton", "repos.json"), nil
 }
