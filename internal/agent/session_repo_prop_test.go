@@ -74,10 +74,11 @@ func TestSessionRepoProp_AgentWorktreePathMatchesSession(t *testing.T) {
 
 // PlanPath and PrevPlanPath are always under the session's worktree.
 func TestSessionRepoProp_PlanPathsUnderWorktree(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		repo := setupTestRepoForProp()
-		defer func() { _ = os.RemoveAll(repo) }()
+	setRapidChecks(t, 20)
+	repo := setupTestRepoForProp()
+	t.Cleanup(func() { os.RemoveAll(repo) })
 
+	rapid.Check(t, func(t *rapid.T) {
 		mgr := NewManager(repo, defaultTestSettings())
 		defer mgr.Shutdown()
 
