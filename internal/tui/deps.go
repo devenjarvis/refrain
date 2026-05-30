@@ -34,6 +34,10 @@ type AppDeps struct {
 	Managers       map[string]SessionManager          // keyed by repo path
 	GHClient       *github.Client
 	Factory        ManagerFactory // used by the runtime addRepo path
+
+	// InitWarning is a non-fatal wiring warning (e.g. unreadable global
+	// settings) that the TUI surfaces transiently on init. Empty when clean.
+	InitWarning string
 }
 
 // NewAppFromDeps builds an App with concretes injected by cmd/. It delegates
@@ -56,5 +60,6 @@ func NewAppFromDeps(deps AppDeps) App {
 		a.managers = deps.Managers
 	}
 	a.ghClient = deps.GHClient
+	a.initWarning = deps.InitWarning
 	return a
 }

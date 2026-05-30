@@ -65,9 +65,11 @@ func buildAppDeps() (tui.AppDeps, error) {
 	// launch. On failure we proceed with nil (config.Resolve tolerates it),
 	// matching the prior in-TUI behavior. The one-time bypass migration runs
 	// only when settings loaded cleanly.
+	var initWarning string
 	globalSettings, gerr := config.LoadGlobalSettings()
 	if gerr != nil {
 		globalSettings = nil
+		initWarning = gerr.Error()
 	} else {
 		_ = config.MigrateBypassPermissions(cfg)
 	}
@@ -95,6 +97,7 @@ func buildAppDeps() (tui.AppDeps, error) {
 		Managers:       managers,
 		GHClient:       ghClient,
 		Factory:        factory,
+		InitWarning:    initWarning,
 	}, nil
 }
 

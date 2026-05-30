@@ -58,6 +58,11 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 	if a.cfg == nil {
 		a.cfg = &config.Config{}
 	}
+	// Surface any non-fatal wiring warning from cmd/ (e.g. unreadable global
+	// settings) transiently, preserving the pre-injection behavior.
+	if a.initWarning != "" {
+		a.setError(a.initWarning)
+	}
 	now := time.Now()
 	a.wellness.appStart = now
 	a.wellness.sessionStart = now

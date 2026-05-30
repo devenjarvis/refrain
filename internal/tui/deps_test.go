@@ -91,3 +91,22 @@ func TestNewAppFromDeps_OverlaysInjectedConcretes(t *testing.T) {
 		t.Error("NewAppFromDeps lost NewApp's base initialization")
 	}
 }
+
+// TestNewAppFromDeps_SurfacesInitWarning verifies a non-fatal wiring warning
+// from cmd/ (e.g. unreadable global settings) is surfaced transiently on init,
+// preserving the pre-injection behavior.
+func TestNewAppFromDeps_SurfacesInitWarning(t *testing.T) {
+	app := NewAppFromDeps(AppDeps{
+		Cfg:         &config.Config{},
+		InitWarning: "settings: bad json",
+	})
+	if app.initWarning != "settings: bad json" {
+		t.Fatalf("initWarning = %q, want %q", app.initWarning, "settings: bad json")
+	}
+
+	model, _ := app.Update(initAppMsg{})
+	got := model.(App)
+	if got.err != "settings: bad json" {
+		t.Errorf("handleInit did not surface the warning: err = %q", got.err)
+	}
+}

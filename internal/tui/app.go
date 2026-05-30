@@ -157,6 +157,10 @@ type App struct {
 	// it to assert wiring without building a real Manager. See deps.go.
 	managerFactory ManagerFactory
 
+	// initWarning is a non-fatal wiring warning injected by cmd/ (e.g.
+	// unreadable global settings) that handleInit surfaces transiently.
+	initWarning string
+
 	// debugDumpPath, when non-empty, names a file that the latest composed
 	// dashboard frame is written to on every tick. Set once at startup from
 	// REFRAIN_E2E_DEBUG_DUMP so the env read stays out of the render loop;

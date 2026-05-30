@@ -8,7 +8,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/tui/mdrender"
@@ -930,7 +929,7 @@ func (m *planEditorModel) View() string {
 }
 
 func (m *planEditorModel) renderHeader() string {
-	title := lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render("PLAN")
+	title := StyleTitle.Render("PLAN")
 	if m.sess == nil {
 		return title
 	}
