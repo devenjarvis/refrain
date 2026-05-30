@@ -126,10 +126,17 @@ func (f *configForm) focusField(idx int) {
 	f.focused = idx
 }
 
-// Update handles key events for the form.
-func (f *configForm) Update(msg tea.Msg) tea.Cmd {
+// SetSize informs the form of the space it has to render in. Width drives
+// text input sizing; the form lays out vertically so height is advisory.
+func (f *configForm) SetSize(w, _ int) {
+	f.width = w
+}
+
+// Update handles key events for the form. It returns the next form state and
+// any command to run (CONVENTIONS.md §3).
+func (f configForm) Update(msg tea.Msg) (configForm, tea.Cmd) {
 	if len(f.fields) == 0 {
-		return nil
+		return f, nil
 	}
 
 	switch msg := msg.(type) {
@@ -142,15 +149,15 @@ func (f *configForm) Update(msg tea.Msg) tea.Cmd {
 			case "esc":
 				field.textInput.Blur()
 				field.editing = false
-				return nil
+				return f, nil
 			case "enter":
 				field.textInput.Blur()
 				field.editing = false
-				return nil
+				return f, nil
 			}
 			var cmd tea.Cmd
 			field.textInput, cmd = field.textInput.Update(msg)
-			return cmd
+			return f, cmd
 		}
 
 		// Navigation and actions when not editing.
@@ -159,22 +166,22 @@ func (f *configForm) Update(msg tea.Msg) tea.Cmd {
 			if f.focused < len(f.fields)-1 {
 				f.focusField(f.focused + 1)
 			}
-			return nil
+			return f, nil
 		case "k", "up":
 			if f.focused > 0 {
 				f.focusField(f.focused - 1)
 			}
-			return nil
+			return f, nil
 		case "right", "l":
 			if field.kind == fieldSelect && len(field.options) > 0 {
 				field.selected = (field.selected + 1) % len(field.options)
 			}
-			return nil
+			return f, nil
 		case "left", "h":
 			if field.kind == fieldSelect && len(field.options) > 0 {
 				field.selected = (field.selected - 1 + len(field.options)) % len(field.options)
 			}
-			return nil
+			return f, nil
 		case "enter", " ", "space":
 			switch field.kind {
 			case fieldToggle:
@@ -188,17 +195,17 @@ func (f *configForm) Update(msg tea.Msg) tea.Cmd {
 				}
 			case fieldAction:
 				label := field.label
-				return func() tea.Msg { return configFormActionMsg{Label: label} }
+				return f, func() tea.Msg { return configFormActionMsg{Label: label} }
 			}
-			return nil
+			return f, nil
 		case "ctrl+s":
-			return func() tea.Msg { return configFormSaveMsg{} }
+			return f, func() tea.Msg { return configFormSaveMsg{} }
 		case "esc":
-			return func() tea.Msg { return configFormCancelMsg{} }
+			return f, func() tea.Msg { return configFormCancelMsg{} }
 		}
 	}
 
-	return nil
+	return f, nil
 }
 
 // View renders the form as a vertical list of labeled fields.

@@ -89,7 +89,7 @@ func TestPlanEditor_EditModeSavesOnCtrlS(t *testing.T) {
 	editor := newPlanEditor(sess, "", 80, 30)
 
 	// `i` enters edit mode.
-	cmd := editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
 	_ = cmd
 	if editor.mode != planEditorModeEdit {
 		t.Fatalf("mode after i = %v, want edit", editor.mode)
@@ -99,7 +99,7 @@ func TestPlanEditor_EditModeSavesOnCtrlS(t *testing.T) {
 	editor.doc.textarea.SetValue("rewritten\n")
 	editor.dirty = true
 
-	cmd = editor.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl, Text: "ctrl+s"})
+	editor, cmd = editor.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl, Text: "ctrl+s"})
 	if cmd == nil {
 		t.Fatal("expected planEditorSavedMsg cmd from ctrl+s")
 	}
@@ -127,11 +127,11 @@ func TestPlanEditor_EscFromEditPreservesEdits(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	_ = sess.WritePlan("orig\n")
 	editor := newPlanEditor(sess, "", 80, 30)
-	editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
 	editor.doc.textarea.SetValue("typed but not saved\n")
 	editor.dirty = true
 
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if editor.mode != planEditorModeScroll {
 		t.Errorf("mode = %v, want scroll after esc", editor.mode)
 	}
@@ -148,7 +148,7 @@ func TestPlanEditor_ApproveEmptyPlanShowsError(t *testing.T) {
 	_ = sess.WritePlan("   \n\t\n")
 	editor := newPlanEditor(sess, "", 80, 30)
 
-	cmd := editor.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	if cmd != nil {
 		t.Fatal("expected no cmd from approve on empty plan")
 	}
@@ -163,12 +163,12 @@ func TestPlanEditor_ApprovePersistsAndEmits(t *testing.T) {
 	editor := newPlanEditor(sess, "", 80, 30)
 
 	// User edits, doesn't ctrl+s, esc back, then approves.
-	editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
 	editor.doc.textarea.SetValue("# revised\n- [ ] thing\n")
 	editor.dirty = true
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 
-	cmd := editor.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	if cmd == nil {
 		t.Fatal("approve produced no cmd")
 	}
@@ -194,7 +194,7 @@ func TestPlanEditor_AbandonEmitsMessage(t *testing.T) {
 	_ = sess.WritePlan("anything\n")
 	editor := newPlanEditor(sess, "", 80, 30)
 
-	cmd := editor.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd := editor.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if cmd == nil {
 		t.Fatal("abandon produced no cmd")
 	}
@@ -209,14 +209,16 @@ func TestPlanEditor_DraftingLocksEditAndApprove(t *testing.T) {
 	editor := newPlanEditor(sess, "", 80, 30)
 	editor.SetDrafting(true)
 
-	if cmd := editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}); cmd != nil {
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	if cmd != nil {
 		t.Error("i should be a no-op while drafting")
 	}
-	if cmd := editor.Update(tea.KeyPressMsg{Code: 'a', Text: "a"}); cmd != nil {
+	editor, cmd = editor.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if cmd != nil {
 		t.Error("a should be a no-op while drafting")
 	}
 	// esc still works to back out.
-	cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	editor, cmd = editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd == nil {
 		t.Fatal("esc should emit close even while drafting")
 	}
@@ -231,13 +233,13 @@ func TestPlanEditor_ReviseInputEmitsCritique(t *testing.T) {
 	_ = sess.WritePlan("# plan\n")
 	editor := newPlanEditor(sess, "", 80, 30)
 
-	editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if editor.mode != planEditorModeReviseInput {
 		t.Fatalf("mode = %v, want reviseInput", editor.mode)
 	}
 	editor.reviseInput.SetValue("split task 2 into ui and persistence")
 
-	cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
 	if cmd == nil {
 		t.Fatal("expected revise cmd")
 	}
@@ -304,7 +306,7 @@ func TestPlanEditor_EditModeCenteredOnWideTerminal(t *testing.T) {
 		t.Fatal("displayLeftPad() == 0 at width 120; test precondition failed")
 	}
 
-	editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
 	if editor.mode != planEditorModeEdit {
 		t.Fatalf("mode = %v after 'i', want planEditorModeEdit", editor.mode)
 	}
@@ -479,14 +481,14 @@ func TestPlanEditor_TabTogglesFoldAtViewportTop(t *testing.T) {
 	}
 
 	// Cursor at 0 (Goal); pressing tab collapses it.
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if !editor.folds["Goal"] {
 		t.Errorf("after tab at Goal (cursor=0), folds[Goal] = false, want true (collapsed)")
 	}
 
 	// Move cursor to Spec (index 1), then tab toggles Spec.
 	editor.sectionCursor = 1
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if !editor.folds["Spec"] {
 		t.Errorf("after tab at Spec (cursor=1), folds[Spec] = false, want true (collapsed)")
 	}
@@ -507,29 +509,29 @@ func TestPlanEditor_BracketsJumpBetweenSections(t *testing.T) {
 	}
 
 	// ] from 0 → cursor 1 (Spec).
-	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if editor.sectionCursor != 1 {
 		t.Errorf("] from 0: sectionCursor = %d, want 1 (Spec)", editor.sectionCursor)
 	}
 
 	// ] again → cursor 2 (Tasks).
-	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if editor.sectionCursor != 2 {
 		t.Errorf("] from Spec: sectionCursor = %d, want 2 (Tasks)", editor.sectionCursor)
 	}
 
 	// ] at last section → still 2 (clamped).
-	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if editor.sectionCursor != 2 {
 		t.Errorf("] at last section: sectionCursor = %d, want 2 (clamp)", editor.sectionCursor)
 	}
 
 	// [ twice → back to 0 (Goal).
-	editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if editor.sectionCursor != 1 {
 		t.Errorf("[ from Tasks: sectionCursor = %d, want 1 (Spec)", editor.sectionCursor)
 	}
-	editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if editor.sectionCursor != 0 {
 		t.Errorf("[ from Spec: sectionCursor = %d, want 0 (Goal)", editor.sectionCursor)
 	}
@@ -547,7 +549,7 @@ func TestPlanEditor_ShiftZTogglesAllFolds(t *testing.T) {
 	editor := newPlanEditor(sess, "", 80, 30)
 
 	// Default: Goal/Spec/Tasks expanded, others collapsed. Press Z → all collapsed.
-	editor.Update(tea.KeyPressMsg{Code: 'Z', Text: "Z"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'Z', Text: "Z"})
 	for _, s := range editor.sections {
 		if !editor.folds[s.heading] {
 			t.Errorf("after first Z, folds[%q] = false, want true (all collapsed)", s.heading)
@@ -555,7 +557,7 @@ func TestPlanEditor_ShiftZTogglesAllFolds(t *testing.T) {
 	}
 
 	// All collapsed. Press Z again → all expanded.
-	editor.Update(tea.KeyPressMsg{Code: 'Z', Text: "Z"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'Z', Text: "Z"})
 	for _, s := range editor.sections {
 		if editor.folds[s.heading] {
 			t.Errorf("after second Z, folds[%q] = true, want false (all expanded)", s.heading)
@@ -651,7 +653,7 @@ func TestPlanEditor_R_RetryEmitsMsgWhenDraftError(t *testing.T) {
 	sess.SetOriginalPrompt("do the thing")
 	editor := newPlanEditor(sess, "testrepo", 80, 30)
 
-	cmd := editor.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
+	_, cmd := editor.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	if cmd == nil {
 		t.Fatal("R with draft error + original prompt should emit a cmd")
 	}
@@ -674,7 +676,7 @@ func TestPlanEditor_R_NoopWhenNoDraftError(t *testing.T) {
 	// No draft error set.
 	editor := newPlanEditor(sess, "testrepo", 80, 30)
 
-	cmd := editor.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
+	_, cmd := editor.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	if cmd != nil {
 		t.Errorf("R with no draft error should be a no-op, got cmd that returns %T", cmd())
 	}
@@ -686,7 +688,7 @@ func TestPlanEditor_R_NoopWhenNoOriginalPrompt(t *testing.T) {
 	// No original prompt set.
 	editor := newPlanEditor(sess, "testrepo", 80, 30)
 
-	cmd := editor.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
+	_, cmd := editor.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	if cmd != nil {
 		t.Errorf("R with no original prompt should be a no-op, got cmd that returns %T", cmd())
 	}
@@ -702,25 +704,25 @@ func TestPlanEditor_JK_ScrollLines(t *testing.T) {
 	if editor.sectionCursor != 0 {
 		t.Fatalf("sectionCursor = %d, want 0 initially", editor.sectionCursor)
 	}
-	editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if editor.sectionCursor != 1 {
 		t.Errorf("after j, sectionCursor = %d, want 1", editor.sectionCursor)
 	}
-	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	if editor.sectionCursor != 0 {
 		t.Errorf("after k, sectionCursor = %d, want 0", editor.sectionCursor)
 	}
 	// k at first section → stays 0 (clamped).
-	editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	if editor.sectionCursor != 0 {
 		t.Errorf("k at first section: sectionCursor = %d, want 0", editor.sectionCursor)
 	}
 	// down/up are aliases for j/k.
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if editor.sectionCursor != 1 {
 		t.Errorf("after down, sectionCursor = %d, want 1", editor.sectionCursor)
 	}
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if editor.sectionCursor != 0 {
 		t.Errorf("after up, sectionCursor = %d, want 0", editor.sectionCursor)
 	}
@@ -737,12 +739,12 @@ func TestPlanEditor_CtrlD_CtrlU_HalfPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	editor := newPlanEditor(sess, "", 80, 20)
-	editor.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if editor.doc.scrollOff == 0 {
 		t.Errorf("ctrl+d did not scroll")
 	}
 	pre := editor.doc.scrollOff
-	editor.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 	if editor.doc.scrollOff >= pre {
 		t.Errorf("ctrl+u did not reverse scroll: pre=%d post=%d", pre, editor.doc.scrollOff)
 	}
@@ -760,21 +762,21 @@ func TestPlanEditor_GHomeAndShiftGEnd_Jump(t *testing.T) {
 	}
 	editor := newPlanEditor(sess, "", 80, 20)
 	// G jumps to bottom.
-	editor.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
 	if editor.doc.scrollOff == 0 {
 		t.Errorf("G did not move scroll")
 	}
 	// g jumps back to top.
-	editor.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if editor.doc.scrollOff != 0 {
 		t.Errorf("g did not jump to top, got %d", editor.doc.scrollOff)
 	}
 	// home/end aliases.
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
 	if editor.doc.scrollOff == 0 {
 		t.Errorf("end did not move scroll")
 	}
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyHome})
 	if editor.doc.scrollOff != 0 {
 		t.Errorf("home did not jump to top, got %d", editor.doc.scrollOff)
 	}
@@ -786,7 +788,7 @@ func TestPlanEditor_U_NothingToUndo_ShowsInlineError(t *testing.T) {
 		t.Fatal(err)
 	}
 	editor := newPlanEditor(sess, "", 80, 20)
-	editor.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	if editor.errMsg == "" {
 		t.Error("u with no prev plan should set an inline error message")
 	}
@@ -816,7 +818,7 @@ func TestPlanEditor_DraftingState_BlocksAllExceptEscAndQ(t *testing.T) {
 		{Code: 'u', Text: "u"},
 		{Code: tea.KeyTab},
 	} {
-		editor.Update(k)
+		editor, _ = editor.Update(k)
 	}
 	if editor.doc.scrollOff != 0 {
 		t.Errorf("scroll changed during drafting, got %d", editor.doc.scrollOff)
@@ -838,12 +840,12 @@ func TestPlanEditor_ReviseInput_EnterOnEmpty_ShowsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	editor := newPlanEditor(sess, "", 80, 20)
-	editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if editor.mode != planEditorModeReviseInput {
 		t.Fatalf("test prereq: mode = %v, want reviseInput", editor.mode)
 	}
 	editor.reviseInput.SetValue("   ")
-	cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil {
 		if _, bad := cmd().(planEditorReviseMsg); bad {
 			t.Error("empty critique should NOT emit reviseMsg")
@@ -860,9 +862,9 @@ func TestPlanEditor_ReviseInput_EscCancels(t *testing.T) {
 		t.Fatal(err)
 	}
 	editor := newPlanEditor(sess, "", 80, 20)
-	editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	editor.reviseInput.SetValue("partial input")
-	cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd != nil {
 		if _, bad := cmd().(planEditorReviseMsg); bad {
 			t.Error("esc in revise mode must not emit reviseMsg")
@@ -885,7 +887,7 @@ func TestPlanEditor_ScrollMode_UnknownKey_NoOp(t *testing.T) {
 		err    string
 		dirty  bool
 	}{editor.doc.scrollOff, editor.mode, editor.errMsg, editor.dirty}
-	cmd := editor.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
 	if cmd != nil {
 		t.Errorf("unknown key produced cmd %T, want nil", cmd())
 	}
@@ -907,7 +909,7 @@ func TestPlanEditor_R_NoopWhenDrafting(t *testing.T) {
 	editor := newPlanEditor(sess, "testrepo", 80, 30)
 	editor.SetDrafting(true)
 
-	cmd := editor.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	if cmd != nil {
 		t.Errorf("R while drafting should be a no-op, got cmd that returns %T", cmd())
 	}
@@ -927,23 +929,23 @@ func TestPlanEditor_Brackets_MoveCursor(t *testing.T) {
 	}
 
 	// ] twice: 0→1→2.
-	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if editor.sectionCursor != 1 {
 		t.Errorf("] once: sectionCursor=%d, want 1", editor.sectionCursor)
 	}
-	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if editor.sectionCursor != 2 {
 		t.Errorf("] twice: sectionCursor=%d, want 2", editor.sectionCursor)
 	}
 
 	// ] at last section → still 2 (clamped).
-	editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: ']', Text: "]"})
 	if editor.sectionCursor != 2 {
 		t.Errorf("] at last: sectionCursor=%d, want 2", editor.sectionCursor)
 	}
 
 	// [ once: 2→1.
-	editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: '[', Text: "["})
 	if editor.sectionCursor != 1 {
 		t.Errorf("[ once: sectionCursor=%d, want 1", editor.sectionCursor)
 	}
@@ -971,14 +973,14 @@ func TestPlanEditor_TabFoldsCursorSection(t *testing.T) {
 
 	// Move cursor to Context (index 2), press tab → Context expands.
 	editor.sectionCursor = 2
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if editor.folds["Context"] {
 		t.Error("after tab at Context (cursor=2), Context should be expanded")
 	}
 
 	// Move cursor back to Goal (index 0), press tab → Goal collapses.
 	editor.sectionCursor = 0
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if !editor.folds["Goal"] {
 		t.Error("after tab at Goal (cursor=0), Goal should be collapsed")
 	}
@@ -1005,32 +1007,32 @@ func TestPlanEditor_JK_MoveSectionCursor(t *testing.T) {
 
 	// j three times: 0→1→2→3.
 	for want := 1; want <= 3; want++ {
-		editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		editor, _ = editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 		if editor.sectionCursor != want {
 			t.Errorf("after j: sectionCursor=%d, want %d", editor.sectionCursor, want)
 		}
 	}
 
 	// j at last section → still 3 (clamped).
-	editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if editor.sectionCursor != 3 {
 		t.Errorf("j at last section: sectionCursor=%d, want 3", editor.sectionCursor)
 	}
 
 	// k twice: 3→2→1.
 	for want := 2; want >= 1; want-- {
-		editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+		editor, _ = editor.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 		if editor.sectionCursor != want {
 			t.Errorf("after k: sectionCursor=%d, want %d", editor.sectionCursor, want)
 		}
 	}
 
 	// down/up are aliases.
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if editor.sectionCursor != 2 {
 		t.Errorf("after down: sectionCursor=%d, want 2", editor.sectionCursor)
 	}
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if editor.sectionCursor != 1 {
 		t.Errorf("after up: sectionCursor=%d, want 1", editor.sectionCursor)
 	}

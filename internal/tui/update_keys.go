@@ -40,7 +40,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.wellness.RecordInput()
 		// PR compose modal consumes all keys while open.
 		if a.prComposeModal.Active() {
-			cmd := a.prComposeModal.Update(msg)
+			var cmd tea.Cmd
+			a.prComposeModal, cmd = a.prComposeModal.Update(msg)
 			return a, cmd
 		}
 		// focusLaunch: forward all keys to the launch agent; esc/ctrl+e returns to focus pipeline.
@@ -326,7 +327,8 @@ func (a App) handleKeysPlanEditor(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 	if pe == nil {
 		return a, nil, false
 	}
-	cmd := pe.Update(msg)
+	updated, cmd := pe.Update(msg)
+	*pe = updated
 	return a, cmd, true
 }
 
@@ -1211,7 +1213,8 @@ func (a App) handleConfigFormSave() (tea.Model, tea.Cmd) {
 // arbitrary text on the pipeline).
 func (a App) handleDashboardPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if a.prComposeModal.Active() {
-		cmd := a.prComposeModal.Update(msg)
+		var cmd tea.Cmd
+		a.prComposeModal, cmd = a.prComposeModal.Update(msg)
 		return a, cmd
 	}
 	if ag := a.modals.LaunchAgent(); ag != nil {

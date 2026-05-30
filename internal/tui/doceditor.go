@@ -169,11 +169,16 @@ func (d *docEditor) Focused() bool {
 	return d.textarea.Focused()
 }
 
-// UpdateTextarea forwards a message to the textarea and returns the resulting cmd.
-func (d *docEditor) UpdateTextarea(msg tea.Msg) tea.Cmd {
+// Update forwards a message to the textarea and returns the next docEditor
+// state plus the resulting cmd. docEditor is a shared embedded sub-widget, not
+// a top-level screen: it conforms to the Update/SetSize shape of the Component
+// contract (§3) but intentionally has no standalone View — parents render it
+// via RenderLines/ScrollWindow/etc. — so it does not implement the full
+// Component interface.
+func (d docEditor) Update(msg tea.Msg) (docEditor, tea.Cmd) {
 	var cmd tea.Cmd
 	d.textarea, cmd = d.textarea.Update(msg)
-	return cmd
+	return d, cmd
 }
 
 // textareaWidth/textareaHeight reserve space for the header, divider, status,

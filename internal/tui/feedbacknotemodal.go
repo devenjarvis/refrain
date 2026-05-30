@@ -59,30 +59,35 @@ func (m *feedbackNoteModal) Close() {
 // Active reports whether the modal is currently visible.
 func (m *feedbackNoteModal) Active() bool { return m.active }
 
-// Update routes a tea.Msg to the modal.
-// Returns (cmd, submitted, note). submitted is true when the user pressed enter.
-func (m *feedbackNoteModal) Update(msg tea.Msg) (tea.Cmd, bool, string) {
+// Update routes a tea.Msg to the modal and returns the next modal state plus a
+// command. On enter it closes synchronously and returns a command yielding a
+// feedbackNoteSubmitMsg so the owning panel persists the note one Update cycle
+// later (CONVENTIONS.md §3/§4); esc closes with no save.
+func (m feedbackNoteModal) Update(msg tea.Msg) (feedbackNoteModal, tea.Cmd) {
 	if !m.active {
-		return nil, false, ""
+		return m, nil
 	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "esc":
 			m.Close()
-			return nil, false, ""
+			return m, nil
 		case "enter":
 			val := strings.TrimSpace(m.ta.Value())
+			itemKey := m.itemKey
 			m.Close()
-			return nil, true, val
+			return m, func() tea.Msg {
+				return feedbackNoteSubmitMsg{itemKey: itemKey, note: val}
+			}
 		}
 	}
 	var cmd tea.Cmd
 	m.ta, cmd = m.ta.Update(msg)
-	return cmd, false, ""
+	return m, cmd
 }
 
 // View renders the modal box. Caller should overlay this when Active().
-func (m *feedbackNoteModal) View() string {
+func (m feedbackNoteModal) View() string {
 	w := modalWidth(m.width)
 	innerW := modalContentWidth(w)
 

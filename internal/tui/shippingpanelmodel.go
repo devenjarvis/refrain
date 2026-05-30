@@ -69,8 +69,8 @@ func (m *shippingPanelModel) DetailScroll() int {
 	return m.detailScroll
 }
 
-// Resize updates layout dimensions and forwards to the nested modal.
-func (m *shippingPanelModel) Resize(w, h int) {
+// SetSize updates layout dimensions and forwards to the nested modal.
+func (m *shippingPanelModel) SetSize(w, h int) {
 	if m == nil {
 		return
 	}
@@ -95,6 +95,15 @@ func closeShippingPanel(svc PanelServices) tea.Cmd {
 	return nil
 }
 
+// feedbackNoteSubmitMsg is emitted by the embedded feedbackNoteModal when the
+// user saves a note (enter). It is owned and handled here (§4): the shipping
+// panel persists the note via svc.SetFeedbackNote one Update cycle after the
+// modal closes.
+type feedbackNoteSubmitMsg struct {
+	itemKey string
+	note    string
+}
+
 // Update dispatches the shipping panel's key handling.
 func (m *shippingPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel, tea.Cmd) {
 	if m == nil || m.session == nil {
@@ -102,7 +111,12 @@ func (m *shippingPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel,
 	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.Resize(msg.Width, msg.Height-1)
+		m.SetSize(msg.Width, msg.Height-1)
+		return m, nil
+	case feedbackNoteSubmitMsg:
+		if svc.SetFeedbackNote != nil {
+			svc.SetFeedbackNote(m.repoPath, m.session.ID, msg.itemKey, msg.note)
+		}
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg, svc)
@@ -114,10 +128,8 @@ func (m *shippingPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel,
 // intercepts all keys when active.
 func (m *shippingPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (PanelModel, tea.Cmd) {
 	if m.feedbackNote.Active() {
-		cmd, submitted, note := m.feedbackNote.Update(msg)
-		if submitted && svc.SetFeedbackNote != nil {
-			svc.SetFeedbackNote(m.repoPath, m.session.ID, m.feedbackNote.itemKey, note)
-		}
+		var cmd tea.Cmd
+		m.feedbackNote, cmd = m.feedbackNote.Update(msg)
 		return m, cmd
 	}
 

@@ -114,6 +114,14 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 	}
 }
 
+// SetSize informs the overlay of its render space and passes width through to
+// the embedded form so its text inputs size correctly.
+func (m *globalConfigModel) SetSize(w, h int) {
+	m.width = w
+	m.height = h
+	m.form.SetSize(w, h)
+}
+
 func (m globalConfigModel) Update(msg tea.Msg) (globalConfigModel, tea.Cmd) {
 	switch msg.(type) {
 	case configFormSaveMsg:
@@ -124,7 +132,8 @@ func (m globalConfigModel) Update(msg tea.Msg) (globalConfigModel, tea.Cmd) {
 		return m, func() tea.Msg { return globalConfigCancelMsg{} }
 	}
 
-	cmd := m.form.Update(msg)
+	var cmd tea.Cmd
+	m.form, cmd = m.form.Update(msg)
 	return m, cmd
 }
 

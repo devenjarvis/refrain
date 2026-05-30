@@ -212,11 +212,13 @@ func (d dashboardModel) Update(msg tea.Msg, props dashboardProps) (dashboardMode
 		// is handled at the app level via moveFocusCursorUp/Down and
 		// activateFocusCursor; nothing else needs to reach the dashboard here.
 		if props.panelFocus == focusConfig && props.repoConfigForm != nil {
-			cmd := props.repoConfigForm.Update(msg)
+			var cmd tea.Cmd
+			*props.repoConfigForm, cmd = props.repoConfigForm.Update(msg)
 			return d, cmd
 		}
 		if props.panelFocus == focusRepoChecks && props.repoChecksEditor != nil {
-			cmd := props.repoChecksEditor.Update(msg)
+			var cmd tea.Cmd
+			*props.repoChecksEditor, cmd = props.repoChecksEditor.Update(msg)
 			return d, cmd
 		}
 	}

@@ -124,39 +124,39 @@ func (m *newSessionModel) Close() {
 
 // Update routes a tea.Msg. Intercepts esc / enter / ctrl+enter for control;
 // all other messages (including ctrl+j via InsertNewline) go to the textarea.
-func (m *newSessionModel) Update(msg tea.Msg) tea.Cmd {
+func (m newSessionModel) Update(msg tea.Msg) (newSessionModel, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "esc":
 			m.Close()
-			return func() tea.Msg { return promptModalCancelMsg{} }
+			return m, func() tea.Msg { return promptModalCancelMsg{} }
 		case "ctrl+enter":
 			val := strings.TrimSpace(m.textarea.Value())
 			if val == "" {
-				return nil
+				return m, nil
 			}
 			m.Close()
-			return func() tea.Msg {
+			return m, func() tea.Msg {
 				return promptModalSubmitMsg{prompt: val, skipPlanning: true}
 			}
 		case "enter":
 			val := strings.TrimSpace(m.textarea.Value())
 			if val == "" {
-				return nil
+				return m, nil
 			}
 			m.Close()
-			return func() tea.Msg {
+			return m, func() tea.Msg {
 				return promptModalSubmitMsg{prompt: val, skipPlanning: false}
 			}
 		}
 	}
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
-	return cmd
+	return m, cmd
 }
 
 // View renders the full-viewport composition screen.
-func (m *newSessionModel) View() string {
+func (m newSessionModel) View() string {
 	// Header: "NEW SESSION" left, "repoName · branch" right.
 	left := StyleSubtle.Render("NEW SESSION")
 	var rightStr string

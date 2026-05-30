@@ -5565,7 +5565,7 @@ func TestRecordInput_NonDashboardView(t *testing.T) {
 	// Open the checks editor to put the app into the focusRepoChecks path.
 	// We use openRepoChecksEditor directly to bypass the normal init path.
 	editor := newRepoChecksModel("repo", nil)
-	app.openRepoChecksEditor(editor, "/repo")
+	app.openRepoChecksEditor(&editor, "/repo")
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)

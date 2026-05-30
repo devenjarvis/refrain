@@ -89,7 +89,7 @@ func TestNewSession_EnterSubmitsPlanning(t *testing.T) {
 	m.Open(ViewDashboard)
 	m.textarea.SetValue("add dark mode toggle")
 
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
 	if cmd == nil {
 		t.Fatal("expected cmd from enter")
 	}
@@ -115,7 +115,7 @@ func TestNewSession_CtrlEnterSubmitsSkip(t *testing.T) {
 	m.Open(ViewDashboard)
 	m.textarea.SetValue("trivial fix")
 
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl, Text: "ctrl+enter"})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl, Text: "ctrl+enter"})
 	if cmd == nil {
 		t.Fatal("expected cmd from ctrl+enter")
 	}
@@ -138,7 +138,7 @@ func TestNewSession_EscEmitsCancel(t *testing.T) {
 	m.Open(ViewDashboard)
 	m.textarea.SetValue("never mind")
 
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd == nil {
 		t.Fatal("expected cancel cmd")
 	}
@@ -157,7 +157,7 @@ func TestNewSession_EmptyEnterIsNoop(t *testing.T) {
 	m.Open(ViewDashboard)
 	m.textarea.SetValue("   \n\t")
 
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
 	if cmd != nil {
 		t.Fatal("empty/whitespace enter should be a no-op")
 	}
@@ -172,7 +172,7 @@ func TestNewSession_CtrlJInsertsNewline(t *testing.T) {
 	m.Open(ViewDashboard)
 	m.textarea.SetValue("first line")
 
-	cmd := m.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl, Text: "ctrl+j"})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl, Text: "ctrl+j"})
 	// ctrl+j must not produce a submit/cancel cmd
 	if cmd != nil {
 		msg := cmd()
@@ -198,7 +198,7 @@ func TestNewSession_ShiftEnterInsertsNewline(t *testing.T) {
 	m.Open(ViewDashboard)
 	m.textarea.SetValue("first line")
 
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift, Text: "shift+enter"})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift, Text: "shift+enter"})
 	if cmd != nil {
 		if msg := cmd(); msg != nil {
 			if _, ok := msg.(promptModalSubmitMsg); ok {

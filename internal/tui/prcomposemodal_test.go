@@ -9,12 +9,12 @@ import (
 
 // makePRComposeForTest returns an opened modal with sane defaults so each
 // test can focus on a single key.
-func makePRComposeForTest(t *testing.T) *prComposeModal {
+func makePRComposeForTest(t *testing.T) prComposeModal {
 	t.Helper()
 	m := newPRComposeModal()
 	m.SetSize(120, 40)
 	m.Open("Initial title", "Initial body line 1\nbody line 2", true, "")
-	return &m
+	return m
 }
 
 func TestPRCompose_OpenSetsScrollModeAndHasRenderer(t *testing.T) {
@@ -78,7 +78,7 @@ func TestPRCompose_ScrollKeyJ_IncrementsScrollOff(t *testing.T) {
 	m.doc.SetValue(strings.Repeat("line\n", 50))
 	m.SetSize(120, 40)
 	before := m.doc.scrollOff
-	m.Update(keyRune('j'))
+	m, _ = m.Update(keyRune('j'))
 	if m.doc.scrollOff <= before {
 		t.Errorf("j did not increment scrollOff: before=%d after=%d", before, m.doc.scrollOff)
 	}
@@ -88,10 +88,10 @@ func TestPRCompose_ScrollKeyK_DecrementsScrollOff(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.doc.SetValue(strings.Repeat("line\n", 50))
 	m.SetSize(120, 40)
-	m.Update(keyRune('j'))
-	m.Update(keyRune('j'))
+	m, _ = m.Update(keyRune('j'))
+	m, _ = m.Update(keyRune('j'))
 	after := m.doc.scrollOff
-	m.Update(keyRune('k'))
+	m, _ = m.Update(keyRune('k'))
 	if m.doc.scrollOff >= after {
 		t.Errorf("k did not decrement scrollOff: before=%d after=%d", after, m.doc.scrollOff)
 	}
@@ -101,9 +101,9 @@ func TestPRCompose_ScrollKeyG_GoesToTop(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.doc.SetValue(strings.Repeat("line\n", 50))
 	m.SetSize(120, 40)
-	m.Update(keyRune('j'))
-	m.Update(keyRune('j'))
-	m.Update(keyRune('g'))
+	m, _ = m.Update(keyRune('j'))
+	m, _ = m.Update(keyRune('j'))
+	m, _ = m.Update(keyRune('g'))
 	if m.doc.scrollOff != 0 {
 		t.Errorf("g did not reset scrollOff to 0, got %d", m.doc.scrollOff)
 	}
@@ -113,7 +113,7 @@ func TestPRCompose_ScrollKeyG_GoesToTop(t *testing.T) {
 
 func TestPRCompose_EscCancels(t *testing.T) {
 	m := makePRComposeForTest(t)
-	cmd := m.Update(keyNamed(tea.KeyEscape))
+	m, cmd := m.Update(keyNamed(tea.KeyEscape))
 	if cmd == nil {
 		t.Fatal("expected cancel cmd")
 	}
@@ -130,7 +130,7 @@ func TestPRCompose_CtrlEnterSubmitsTrimmedValues(t *testing.T) {
 	m.titleInput.SetValue("  trimmed title  ")
 	m.doc.SetValue("\nbody with leading newline\n")
 
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("expected submit cmd from ctrl+enter")
 	}
@@ -155,7 +155,7 @@ func TestPRCompose_CtrlEnterSubmitsTrimmedValues(t *testing.T) {
 func TestPRCompose_CtrlEnter_EmptyTitle_NoOp(t *testing.T) {
 	m := makePRComposeForTest(t)
 	m.titleInput.SetValue("   ")
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatalf("empty title submit should be a no-op (no cmd); got %T", cmd())
 	}
@@ -169,11 +169,11 @@ func TestPRCompose_CtrlD_ScrollMode_TogglesAndDraftReflectedOnSubmit(t *testing.
 	if !m.draft {
 		t.Fatal("prereq: draft should start true")
 	}
-	m.Update(keyCtrlRune('d')) // toggle to ready
+	m, _ = m.Update(keyCtrlRune('d')) // toggle to ready
 	if m.draft {
 		t.Fatal("ctrl+d did not toggle draft off in scroll mode")
 	}
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("expected submit cmd")
 	}
@@ -193,7 +193,7 @@ func TestPRCompose_I_EntersEditModeAndFocusesTitle(t *testing.T) {
 	if m.mode != prComposeModeScroll {
 		t.Fatalf("prereq: mode=%v, want scroll", m.mode)
 	}
-	m.Update(keyRune('i'))
+	m, _ = m.Update(keyRune('i'))
 	if m.mode != prComposeModeEdit {
 		t.Errorf("after i: mode=%v, want prComposeModeEdit", m.mode)
 	}
@@ -204,11 +204,11 @@ func TestPRCompose_I_EntersEditModeAndFocusesTitle(t *testing.T) {
 
 func TestPRCompose_EscInEditMode_ReturnsToScroll(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i'))
+	m, _ = m.Update(keyRune('i'))
 	if m.mode != prComposeModeEdit {
 		t.Fatalf("prereq: expected edit mode")
 	}
-	m.Update(keyNamed(tea.KeyEscape))
+	m, _ = m.Update(keyNamed(tea.KeyEscape))
 	if m.mode != prComposeModeScroll {
 		t.Errorf("esc in edit mode did not return to scroll: mode=%v", m.mode)
 	}
@@ -219,15 +219,15 @@ func TestPRCompose_EscInEditMode_ReturnsToScroll(t *testing.T) {
 
 func TestPRCompose_Tab_SwitchesFocusToBodyInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode; title focused first
+	m, _ = m.Update(keyRune('i')) // enter edit mode; title focused first
 	if !m.titleInput.Focused() {
 		t.Fatal("prereq: title input should be focused after i")
 	}
-	m.Update(keyNamed(tea.KeyTab))
+	m, _ = m.Update(keyNamed(tea.KeyTab))
 	if !m.doc.Focused() {
 		t.Error("after tab: body should be focused")
 	}
-	m.Update(keyNamed(tea.KeyTab))
+	m, _ = m.Update(keyNamed(tea.KeyTab))
 	if !m.titleInput.Focused() {
 		t.Error("after second tab: title should be focused again")
 	}
@@ -235,8 +235,8 @@ func TestPRCompose_Tab_SwitchesFocusToBodyInEditMode(t *testing.T) {
 
 func TestPRCompose_ShiftTab_SwitchesFocusInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode
-	m.Update(keyShiftNamed(tea.KeyTab))
+	m, _ = m.Update(keyRune('i')) // enter edit mode
+	m, _ = m.Update(keyShiftNamed(tea.KeyTab))
 	if !m.doc.Focused() {
 		t.Error("after shift+tab: body should be focused")
 	}
@@ -247,14 +247,14 @@ func TestPRCompose_CtrlD_TogglesDraft(t *testing.T) {
 	if !m.draft {
 		t.Fatal("test prereq: draft should start true")
 	}
-	cmd := m.Update(keyCtrlRune('d'))
+	m, cmd := m.Update(keyCtrlRune('d'))
 	if cmd != nil {
 		t.Errorf("ctrl+d should not emit a cmd, got %T", cmd())
 	}
 	if m.draft {
 		t.Error("ctrl+d did not toggle draft off")
 	}
-	m.Update(keyCtrlRune('d'))
+	m, _ = m.Update(keyCtrlRune('d'))
 	if !m.draft {
 		t.Error("second ctrl+d did not toggle draft back on")
 	}
@@ -262,8 +262,8 @@ func TestPRCompose_CtrlD_TogglesDraft(t *testing.T) {
 
 func TestPRCompose_CtrlEnterInEditMode_Submits(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
+	m, _ = m.Update(keyRune('i')) // enter edit mode
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("expected submit cmd from ctrl+enter in edit mode")
 	}
@@ -277,11 +277,11 @@ func TestPRCompose_CtrlEnterInEditMode_Submits(t *testing.T) {
 
 func TestPRCompose_CtrlD_TogglesDraftInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode
+	m, _ = m.Update(keyRune('i')) // enter edit mode
 	if !m.draft {
 		t.Fatal("prereq: draft should be true")
 	}
-	m.Update(keyCtrlRune('d'))
+	m, _ = m.Update(keyCtrlRune('d'))
 	if m.draft {
 		t.Error("ctrl+d in edit mode did not toggle draft off")
 	}
@@ -289,9 +289,9 @@ func TestPRCompose_CtrlD_TogglesDraftInEditMode(t *testing.T) {
 
 func TestPRCompose_CtrlEnter_EmptyTitle_NoOp_EditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode
+	m, _ = m.Update(keyRune('i')) // enter edit mode
 	m.titleInput.SetValue("   ")
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatalf("empty title in edit mode should be a no-op; got cmd %T", cmd())
 	}
@@ -304,7 +304,7 @@ func TestPRCompose_CtrlEnter_EmptyTitle_NoOp_EditMode(t *testing.T) {
 
 func TestPRCompose_ViewEditMode_ContainsHeaderAndTitle(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode
+	m, _ = m.Update(keyRune('i')) // enter edit mode
 	v := m.View()
 	if !strings.Contains(v, "PR DRAFT") {
 		t.Errorf("edit view missing 'PR DRAFT', got: %q", v)
@@ -323,11 +323,11 @@ func TestPRCompose_ViewEditMode_ContainsHeaderAndTitle(t *testing.T) {
 
 func TestPRCompose_PasteInEditMode_TitleFocused_UpdatesTitle(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode, title focused
+	m, _ = m.Update(keyRune('i')) // enter edit mode, title focused
 	if !m.titleInput.Focused() {
 		t.Fatal("prereq: title input should be focused after i")
 	}
-	cmd := m.Update(tea.PasteMsg{Content: "pasted-title"})
+	m, cmd := m.Update(tea.PasteMsg{Content: "pasted-title"})
 	if cmd != nil {
 		cmd()
 	}
@@ -338,13 +338,13 @@ func TestPRCompose_PasteInEditMode_TitleFocused_UpdatesTitle(t *testing.T) {
 
 func TestPRCompose_PasteInEditMode_BodyFocused_UpdatesBody(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i'))         // enter edit mode
-	m.Update(keyNamed(tea.KeyTab)) // switch to body
+	m, _ = m.Update(keyRune('i'))         // enter edit mode
+	m, _ = m.Update(keyNamed(tea.KeyTab)) // switch to body
 	if !m.doc.Focused() {
 		t.Fatal("prereq: body should be focused after tab")
 	}
 	bodyBefore := m.doc.Value()
-	m.Update(tea.PasteMsg{Content: "pasted-body"})
+	m, _ = m.Update(tea.PasteMsg{Content: "pasted-body"})
 	if got := m.doc.Value(); got == bodyBefore {
 		t.Error("paste in body-focused edit mode did not update body")
 	}
@@ -353,7 +353,7 @@ func TestPRCompose_PasteInEditMode_BodyFocused_UpdatesBody(t *testing.T) {
 func TestPRCompose_PasteInScrollMode_IsNoOp(t *testing.T) {
 	m := makePRComposeForTest(t)
 	titleBefore := m.titleInput.Value()
-	m.Update(tea.PasteMsg{Content: "should-be-ignored"})
+	m, _ = m.Update(tea.PasteMsg{Content: "should-be-ignored"})
 	if m.titleInput.Value() != titleBefore {
 		t.Error("paste in scroll mode should not modify title")
 	}
@@ -361,9 +361,9 @@ func TestPRCompose_PasteInScrollMode_IsNoOp(t *testing.T) {
 
 func TestPRCompose_PrintableKey_AppendsToTitleInEditMode(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i')) // enter edit mode (title focused)
+	m, _ = m.Update(keyRune('i')) // enter edit mode (title focused)
 	m.titleInput.SetValue("hi")
-	m.Update(keyRune('!'))
+	m, _ = m.Update(keyRune('!'))
 	if got := m.titleInput.Value(); !strings.Contains(got, "!") {
 		t.Errorf("title = %q, want it to include '!' after typing in edit mode", got)
 	}
@@ -371,13 +371,13 @@ func TestPRCompose_PrintableKey_AppendsToTitleInEditMode(t *testing.T) {
 
 func TestPRCompose_PrintableKey_RoutedToBodyInEditModeWhenBodyFocused(t *testing.T) {
 	m := makePRComposeForTest(t)
-	m.Update(keyRune('i'))         // enter edit mode (title focused)
-	m.Update(keyNamed(tea.KeyTab)) // switch to body
+	m, _ = m.Update(keyRune('i'))         // enter edit mode (title focused)
+	m, _ = m.Update(keyNamed(tea.KeyTab)) // switch to body
 	if !m.doc.Focused() {
 		t.Fatal("body should be focused after tab")
 	}
 	bodyBefore := m.doc.Value()
-	m.Update(keyRune('?'))
+	m, _ = m.Update(keyRune('?'))
 	if m.doc.Value() == bodyBefore {
 		t.Error("typing in body did not change body value")
 	}
@@ -397,7 +397,7 @@ func TestPRCompose_NotActive_AllInputsNoOp(t *testing.T) {
 		keyNamed(tea.KeyTab),
 		keyRune('x'),
 	} {
-		cmd := m.Update(k)
+		_, cmd := m.Update(k)
 		if cmd != nil {
 			t.Errorf("inactive modal returned cmd for %v: %T", k, cmd())
 		}
@@ -409,7 +409,7 @@ func TestPRCompose_NotActive_AllInputsNoOp(t *testing.T) {
 
 func TestPRCompose_UnknownKey_DoesNotCloseOrSubmit(t *testing.T) {
 	m := makePRComposeForTest(t)
-	cmd := m.Update(keyRune('z'))
+	m, cmd := m.Update(keyRune('z'))
 	// 'z' is forwarded to the textarea; it may produce a cmd (cursor blink
 	// etc.) but it must NOT produce submit/cancel.
 	if cmd != nil {

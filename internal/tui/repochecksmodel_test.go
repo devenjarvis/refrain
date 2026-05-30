@@ -30,7 +30,7 @@ func TestRepoChecks_NewSeedsCopy(t *testing.T) {
 func TestRepoChecks_DownClampsAtLast(t *testing.T) {
 	m := newRepoChecksModel("r", sampleChecks())
 	for range 5 {
-		m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
 	if m.cursor != 1 {
 		t.Errorf("cursor = %d, want 1", m.cursor)
@@ -39,7 +39,7 @@ func TestRepoChecks_DownClampsAtLast(t *testing.T) {
 
 func TestRepoChecks_UpClampsAtZero(t *testing.T) {
 	m := newRepoChecksModel("r", sampleChecks())
-	m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	if m.cursor != 0 {
 		t.Errorf("cursor = %d, want 0", m.cursor)
 	}
@@ -47,7 +47,7 @@ func TestRepoChecks_UpClampsAtZero(t *testing.T) {
 
 func TestRepoChecks_AddBeginsEditOnNewRow(t *testing.T) {
 	m := newRepoChecksModel("r", nil)
-	m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	if !m.editing {
 		t.Fatal("expected editing=true after 'a'")
 	}
@@ -61,10 +61,10 @@ func TestRepoChecks_AddBeginsEditOnNewRow(t *testing.T) {
 
 func TestRepoChecks_EditCommitsValuesAndExitsEditMode(t *testing.T) {
 	m := newRepoChecksModel("r", nil)
-	m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m.nameInput.SetValue("Smoke")
 	m.cmdInput.SetValue("./smoke.sh")
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if m.editing {
 		t.Error("editing should be false after committing")
@@ -76,11 +76,11 @@ func TestRepoChecks_EditCommitsValuesAndExitsEditMode(t *testing.T) {
 
 func TestRepoChecks_EditEscDiscardsBlankRow(t *testing.T) {
 	m := newRepoChecksModel("r", sampleChecks())
-	m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	if len(m.checks) != 3 {
 		t.Fatalf("setup: len = %d, want 3", len(m.checks))
 	}
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if m.editing {
 		t.Error("editing should be false after esc")
@@ -94,7 +94,7 @@ func TestRepoChecks_EditEscPreservesNonBlankRow(t *testing.T) {
 	m := newRepoChecksModel("r", sampleChecks())
 	m.beginEdit(0)
 	m.nameInput.SetValue("Edited but cancelled")
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if m.checks[0].Name != "Tests" {
 		t.Errorf("esc should not commit, got %q", m.checks[0].Name)
@@ -107,7 +107,7 @@ func TestRepoChecks_EditEscPreservesNonBlankRow(t *testing.T) {
 func TestRepoChecks_DeleteRemovesAndClampsCursor(t *testing.T) {
 	m := newRepoChecksModel("r", sampleChecks())
 	m.cursor = 1
-	m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	if len(m.checks) != 1 {
 		t.Errorf("after delete, len = %d, want 1", len(m.checks))
 	}
@@ -115,7 +115,7 @@ func TestRepoChecks_DeleteRemovesAndClampsCursor(t *testing.T) {
 		t.Errorf("cursor should clamp to last row, got %d", m.cursor)
 	}
 	// Delete the last remaining row -> cursor clamps to 0 with empty slice.
-	m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	if len(m.checks) != 0 {
 		t.Errorf("after second delete, len = %d, want 0", len(m.checks))
 	}
@@ -126,7 +126,7 @@ func TestRepoChecks_DeleteRemovesAndClampsCursor(t *testing.T) {
 
 func TestRepoChecks_DeleteOnEmptyIsNoOp(t *testing.T) {
 	m := newRepoChecksModel("r", nil)
-	m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	if len(m.checks) != 0 {
 		t.Errorf("delete on empty should keep len 0, got %d", len(m.checks))
 	}
@@ -134,7 +134,7 @@ func TestRepoChecks_DeleteOnEmptyIsNoOp(t *testing.T) {
 
 func TestRepoChecks_CtrlSEmitsSaveMsgWithCurrentList(t *testing.T) {
 	m := newRepoChecksModel("r", sampleChecks())
-	cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("ctrl+s should return a non-nil cmd")
 	}
@@ -150,7 +150,7 @@ func TestRepoChecks_CtrlSEmitsSaveMsgWithCurrentList(t *testing.T) {
 
 func TestRepoChecks_EscEmitsCancelMsg(t *testing.T) {
 	m := newRepoChecksModel("r", sampleChecks())
-	cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmd == nil {
 		t.Fatal("esc should return a non-nil cmd")
 	}
@@ -165,11 +165,11 @@ func TestRepoChecks_TabSwitchesInputFocus(t *testing.T) {
 	if m.activeInput != repoChecksInputName {
 		t.Fatalf("initial activeInput = %v, want name", m.activeInput)
 	}
-	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.activeInput != repoChecksInputCommand {
 		t.Errorf("after tab, activeInput = %v, want command", m.activeInput)
 	}
-	m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	if m.activeInput != repoChecksInputName {
 		t.Errorf("after shift+tab, activeInput = %v, want name", m.activeInput)
 	}

@@ -1,0 +1,3 @@
+### Changed
+
+- Internal TUI components now follow one standard contract (CONVENTIONS.md §3): `Update` uses value receivers and returns the concrete component type plus a command, `View` is a value receiver, and sizing flows through `SetSize`. Converted `configForm`, `repoChecksModel`, `newSessionModel`, `prComposeModal`, `planEditorModel`, `feedbackNoteModal`, and the shared `docEditor` sub-widget (renaming its `UpdateTextarea` to `Update`); added `SetSize` to `configForm` and `repoChecksModel`; and renamed `PanelModel.Resize` to `SetSize`. The feedback-note modal now reports a saved note via a `feedbackNoteSubmitMsg` (handled by the shipping panel) instead of a non-standard return tuple. No user-facing behavior changes.

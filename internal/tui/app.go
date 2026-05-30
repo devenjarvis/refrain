@@ -388,6 +388,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleReviewReworkRequest(msg)
 	case shippingFeedbackRequestMsg:
 		return a.handleShippingFeedbackRequest(msg)
+	case feedbackNoteSubmitMsg:
+		return a.handleFeedbackNoteSubmit(msg)
 	case initAppMsg:
 		return a.handleInit(msg)
 	case tickMsg:
@@ -576,7 +578,8 @@ func (a *App) openNewSession(returnTo ViewMode) tea.Cmd {
 
 // updateNewSession routes messages to the new-session model while in ViewNewSession.
 func (a App) updateNewSession(msg tea.Msg) (tea.Model, tea.Cmd) {
-	cmd := a.newSession.Update(msg)
+	var cmd tea.Cmd
+	a.newSession, cmd = a.newSession.Update(msg)
 	return a, cmd
 }
 

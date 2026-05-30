@@ -325,10 +325,20 @@ func TestShippingPanelModel_NoteModalEnter_SavesNote(t *testing.T) {
 	panel, svc, state := shippingPanelWithFeedback()
 	_, _ = panel.Update(tea.KeyPressMsg{Code: 'n', Text: "n"}, svc)
 	panel.feedbackNote.ta.SetValue("important note")
-	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, svc)
+	// Enter closes the modal synchronously and emits a feedbackNoteSubmitMsg;
+	// the note persists one Update cycle later when that msg is handled.
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, svc)
 	if panel.NoteActive() {
 		t.Error("enter should close the modal")
 	}
+	if cmd == nil {
+		t.Fatal("enter should emit a submit cmd")
+	}
+	submit, ok := cmd().(feedbackNoteSubmitMsg)
+	if !ok {
+		t.Fatalf("enter cmd yielded %T, want feedbackNoteSubmitMsg", cmd())
+	}
+	_, _ = panel.Update(submit, svc)
 	got := state.triage["thread:alice"]
 	if got == nil || got.Note != "important note" {
 		t.Errorf("triage note = %+v, want %q", got, "important note")
