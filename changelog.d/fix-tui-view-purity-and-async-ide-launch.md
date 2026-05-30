@@ -1,0 +1,3 @@
+### Fixed
+
+- TUI rendering is now side-effect free and IDE launches surface failures. Every `View()`/render helper in `internal/tui` is now pure: the dashboard no longer reads env vars or writes files during render (the E2E debug-dump path is read once at startup and written from the tick path), and all render-time clock reads (the plan editor's revising counter and save-note window, the dashboard's idle/elapsed/done-ago timers, and the review panel's age strings and verdict/check spinner) now read a tick-refreshed timestamp stored on the model instead of calling `time.Now`/`time.Since` while rendering. The two fire-and-forget IDE-launch goroutines are replaced by a shared `tea.Cmd` so a failed launch shows a transient error instead of failing silently.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -23,7 +24,7 @@ func TestRenderReviewHeader_TwoLineIntentCap(t *testing.T) {
 	sess.SetOriginalPrompt(longPrompt)
 	sess.MarkDone()
 
-	lines := renderReviewHeader(sess, width)
+	lines := renderReviewHeader(sess, width, time.Now())
 
 	// Expect: title row + exactly 2 intent rows (2nd ending with …) + divider = 4 total.
 	if len(lines) != 4 {
@@ -80,7 +81,7 @@ func TestRenderTaskListPane_RowFormat(t *testing.T) {
 	}
 
 	const width, height, cursor = 40, 10, 0
-	lines := renderTaskListPane(entry, width, height, cursor)
+	lines := renderTaskListPane(entry, width, height, cursor, time.Now())
 	out := strings.Join(lines, "\n")
 
 	if !strings.Contains(out, "PLAN TASKS") {
@@ -141,7 +142,7 @@ func TestRenderTaskDetailPane_FullRationaleNoTruncation(t *testing.T) {
 	}
 
 	const width, height, cursor = 60, 20, 0
-	lines := renderTaskDetailPane(entry, cursor, width, height)
+	lines := renderTaskDetailPane(entry, cursor, width, height, time.Now())
 	out := strings.Join(lines, "\n")
 
 	// Full rationale must appear — check a phrase that fits within one wrapped line.
@@ -189,7 +190,7 @@ func TestRenderTaskDetailPane_VerdictStatesRender(t *testing.T) {
 				groups:   []taskReviewGroup{{taskIndex: 1, commits: []git.Commit{{Hash: "abc1234"}}}},
 				verdicts: map[int]*taskVerdictRecord{1: tt.rec},
 			}
-			lines := renderTaskDetailPane(entry, 0, 80, 20)
+			lines := renderTaskDetailPane(entry, 0, 80, 20, time.Now())
 			out := strings.Join(lines, "\n")
 			if !strings.Contains(out, tt.wantLabel) {
 				t.Errorf("verdict state %s: want label %q in output; got:\n%s", tt.name, tt.wantLabel, out)
@@ -220,7 +221,7 @@ func TestRenderTaskDetailPane_ShowsFilesAndCommits(t *testing.T) {
 		},
 	}
 
-	lines := renderTaskDetailPane(entry, 0, 80, 30)
+	lines := renderTaskDetailPane(entry, 0, 80, 30, time.Now())
 	out := strings.Join(lines, "\n")
 
 	for _, want := range []string{
@@ -254,7 +255,7 @@ func TestRenderReviewPanel_TwoPaneLayout(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 140, 30, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 140, 30, 0, false, 0, nil, time.Now())
 
 	if !strings.Contains(output, "PLAN TASKS") {
 		t.Error("must contain PLAN TASKS from left pane")
@@ -294,7 +295,7 @@ func TestRenderReviewPanel_FullWidthStack(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
 
 	if !strings.Contains(output, "PLAN TASKS") {
 		t.Error("must contain PLAN TASKS from list pane")
@@ -335,7 +336,7 @@ func TestRenderReviewPanel_NarrowWidthStacks(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 70, 30, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 70, 30, 0, false, 0, nil, time.Now())
 
 	if !strings.Contains(output, "PLAN TASKS") {
 		t.Error("must contain PLAN TASKS from list pane")
@@ -365,7 +366,7 @@ func TestRenderReviewPanel_ShowsOriginalPrompt(t *testing.T) {
 		aggregate: &git.DiffStats{Files: 2, Insertions: 213, Deletions: 34},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
 
 	if !strings.Contains(output, "Fix the auth bug") {
 		t.Error("review panel must show the original prompt")
@@ -380,7 +381,7 @@ func TestRenderReviewPanel_NilDiffEntry(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 
 	// nil entry — should not panic
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0, nil, time.Now())
 	if !strings.Contains(output, "Fix the auth bug") {
 		t.Error("must still show prompt even with nil diff entry")
 	}
@@ -404,7 +405,7 @@ func TestRenderReviewPanel_UsesThemeColors(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 30, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 120, 30, 0, false, 0, nil, time.Now())
 
 	// The pass verdict icon should carry the ColorSuccess ANSI escape.
 	expectedPrefix := StyleSuccess.Render("✓")
@@ -466,7 +467,7 @@ func TestRenderReviewPanel_NoPlanShowsOverview(t *testing.T) {
 		aggregate: &git.DiffStats{Files: 2, Insertions: 30, Deletions: 2},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 30, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 120, 30, 0, false, 0, nil, time.Now())
 
 	if !strings.Contains(output, "Overview") {
 		t.Error("must show 'Overview' row in list pane for no-plan session")
@@ -506,7 +507,7 @@ func TestRenderReviewPanel_FooterAdvertisesAllActions(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0, nil, time.Now())
 
 	for _, want := range []string{
 		"open PR",
@@ -529,7 +530,7 @@ func TestRenderReviewPanel_ChecksTabFooter(t *testing.T) {
 	sess.SetOriginalPrompt("Fix auth")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, nil)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, nil, time.Now())
 	stripped := ansi.Strip(output)
 
 	if !strings.Contains(stripped, "run checks") {
@@ -567,7 +568,7 @@ func TestRenderReviewPanel_TaskListShown(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
 
 	if !strings.Contains(output, "PLAN TASKS") {
 		t.Error("task list view must show PLAN TASKS header")
@@ -775,7 +776,7 @@ func TestRenderReviewPanel_NoDiffFoundBadge(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
 
 	if !strings.Contains(output, "Write tests") {
 		t.Error("must render a row for task 2 even though it has no commits")
@@ -907,7 +908,7 @@ func TestVerdictBadge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			icon, label, _ := verdictBadge(tt.rec)
+			icon, label, _ := verdictBadge(tt.rec, time.Now())
 			if !tt.wantIcon(icon) {
 				t.Errorf("verdictBadge icon = %q, unexpected for %s", icon, tt.name)
 			}
@@ -931,7 +932,7 @@ func TestRenderReviewHeader_GoalLineFromPlan(t *testing.T) {
 		t.Fatalf("WritePlan: %v", err)
 	}
 
-	lines := renderReviewHeader(sess, 120)
+	lines := renderReviewHeader(sess, 120, time.Now())
 	out := strings.Join(lines, "\n")
 
 	foundGoalLine := false
@@ -957,7 +958,7 @@ func TestRenderReviewHeader_NoGoalWhenNoPlan(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth redirect bug")
 	sess.MarkDone()
 
-	lines := renderReviewHeader(sess, 120)
+	lines := renderReviewHeader(sess, 120, time.Now())
 	out := strings.Join(lines, "\n")
 
 	for _, l := range lines {
@@ -985,7 +986,7 @@ func TestRenderReviewPanel_HintsIncludeSpecAndEnter(t *testing.T) {
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 
-	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil, time.Now())
 	stripped := ansi.Strip(output)
 
 	if !strings.Contains(stripped, "?") {
@@ -1059,7 +1060,7 @@ func TestRenderReviewPanel_PRDraftInFlight(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, true, 0, nil)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, true, 0, nil, time.Now())
 
 	if !strings.Contains(output, "Pushing branch and drafting PR") {
 		t.Error("in-flight state must show draft spinner line")
@@ -1104,7 +1105,7 @@ func TestRenderReviewPanel_TaskHasDiff(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil, time.Now())
 
 	if !strings.Contains(output, "pass") {
 		t.Error("must contain verdict label 'pass'")
@@ -1139,7 +1140,7 @@ func TestReviewPanel_CursorMoveSwapsDetail(t *testing.T) {
 	}
 
 	// cursor=0 → task 1 heading in detail pane
-	out0 := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil)
+	out0 := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil, time.Now())
 	if !strings.Contains(out0, "Task 1:") {
 		t.Errorf("cursor=0: expected 'Task 1:' in detail pane; got:\n%s", out0)
 	}
@@ -1148,7 +1149,7 @@ func TestReviewPanel_CursorMoveSwapsDetail(t *testing.T) {
 	}
 
 	// cursor=1 → task 2 heading in detail pane
-	out1 := renderReviewPanel(sess, entry, 140, 40, 1, false, 0, nil)
+	out1 := renderReviewPanel(sess, entry, 140, 40, 1, false, 0, nil, time.Now())
 	if !strings.Contains(out1, "Task 2:") {
 		t.Errorf("cursor=1: expected 'Task 2:' in detail pane; got:\n%s", out1)
 	}
@@ -1175,7 +1176,7 @@ func TestRenderTaskDetailPane_ContentWidthCapped(t *testing.T) {
 	}
 
 	const width = 120
-	lines := renderTaskDetailPane(entry, 0, width, 30)
+	lines := renderTaskDetailPane(entry, 0, width, 30, time.Now())
 
 	for i, l := range lines {
 		if l == "" {
@@ -1217,7 +1218,7 @@ func TestRenderTaskDetailPane_RationaleHasANSIStyling(t *testing.T) {
 
 	// width=80 → measure=72 (capped), maxW=70. If wrapText(70) were used, "refresh!!"
 	// would land on its own line; RenderLines(72) keeps "token refresh!!" together.
-	lines := renderTaskDetailPane(entry, 0, 80, 30)
+	lines := renderTaskDetailPane(entry, 0, 80, 30, time.Now())
 	out := strings.Join(lines, "\n")
 
 	if !strings.Contains(ansi.Strip(out), "token refresh!!") {
@@ -1241,7 +1242,7 @@ func TestRenderTaskDetailPane_HeadingHasUnderline(t *testing.T) {
 		},
 	}
 
-	lines := renderTaskDetailPane(entry, 0, 80, 20)
+	lines := renderTaskDetailPane(entry, 0, 80, 20, time.Now())
 
 	headingIdx := -1
 	for i, l := range lines {
@@ -1269,7 +1270,7 @@ func TestRenderReviewPanel_FooterUsesThemeStyles(t *testing.T) {
 	sess.SetOriginalPrompt("Fix auth")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0, nil, time.Now())
 
 	// StyleActive.Render("p") — carries ANSI codes in color mode, is "p" otherwise.
 	// In both cases the rendered footer must contain it.
@@ -1294,7 +1295,7 @@ func TestRenderTaskListPane_HeaderUsesHeadingColor(t *testing.T) {
 		groups: []taskReviewGroup{},
 	}
 
-	lines := renderTaskListPane(entry, 40, 10, 0)
+	lines := renderTaskListPane(entry, 40, 10, 0, time.Now())
 	out := strings.Join(lines, "\n")
 
 	if !strings.Contains(out, "PLAN TASKS") {
@@ -1336,7 +1337,7 @@ func TestRenderReviewPanel_ShowsTabBar(t *testing.T) {
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
 
 	for _, tab := range []string{"Tasks", "Diff", "Checks"} {
 		if !strings.Contains(ansi.Strip(output), tab) {
@@ -1356,7 +1357,7 @@ func TestRenderReviewPanel_DiffTabPlaceholder(t *testing.T) {
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabDiff, nil)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabDiff, nil, time.Now())
 	stripped := ansi.Strip(output)
 
 	if !strings.Contains(stripped, "full diff browser coming soon") {
@@ -1378,7 +1379,7 @@ func TestRenderReviewPanel_TasksTabStillWorks(t *testing.T) {
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabTasks, nil)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabTasks, nil, time.Now())
 	stripped := ansi.Strip(output)
 
 	if !strings.Contains(stripped, "PLAN TASKS") {
@@ -1397,7 +1398,7 @@ func TestRenderReviewPanel_FooterShowsEnterHint(t *testing.T) {
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabTasks, nil)
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabTasks, nil, time.Now())
 	stripped := ansi.Strip(output)
 
 	if !strings.Contains(stripped, "enter") {
@@ -1501,7 +1502,7 @@ func TestRenderReviewPanel_NoDiffTask(t *testing.T) {
 	}
 
 	// Must not panic and must show the "no diff found" verdict badge.
-	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil)
+	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil, time.Now())
 	if !strings.Contains(output, "no diff found") {
 		t.Errorf("must show 'no diff found' verdict badge; got:\n%s", output)
 	}
@@ -1591,7 +1592,7 @@ func TestRenderChecksTab_ShowsCheckNames(t *testing.T) {
 			{state: checkRunning},
 		},
 	}
-	lines := renderChecksTab(cs, 80, 20)
+	lines := renderChecksTab(cs, 80, 20, time.Now())
 	out := strings.Join(lines, "\n")
 	stripped := ansi.Strip(out)
 
@@ -1609,7 +1610,7 @@ func TestRenderChecksTab_PassedCheck(t *testing.T) {
 		checks:  []config.ValidationCheck{{Name: "Tests", Command: "go test ./..."}},
 		results: []validationCheckResult{{state: checkPassed, exitCode: 0}},
 	}
-	lines := renderChecksTab(cs, 80, 20)
+	lines := renderChecksTab(cs, 80, 20, time.Now())
 	out := ansi.Strip(strings.Join(lines, "\n"))
 
 	if !strings.Contains(out, "✓") {
@@ -1624,7 +1625,7 @@ func TestRenderChecksTab_OutputPane(t *testing.T) {
 		results: []validationCheckResult{{state: checkPassed, output: "PASS: all 42 tests"}},
 		cursor:  0,
 	}
-	lines := renderChecksTab(cs, 80, 20)
+	lines := renderChecksTab(cs, 80, 20, time.Now())
 	out := ansi.Strip(strings.Join(lines, "\n"))
 
 	if !strings.Contains(out, "PASS: all 42 tests") {
@@ -1638,7 +1639,7 @@ func TestRenderChecksTab_NilState_ShowsPlaceholder(t *testing.T) {
 	sess.SetOriginalPrompt("Fix auth")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, nil)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, nil, time.Now())
 	stripped := ansi.Strip(output)
 
 	if !strings.Contains(stripped, "No validation checks configured") {
@@ -1659,7 +1660,7 @@ func TestRenderReviewPanel_ChecksTabWithState(t *testing.T) {
 		},
 		results: []validationCheckResult{{state: checkPassed}},
 	}
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, cs)
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, cs, time.Now())
 	stripped := ansi.Strip(output)
 
 	if !strings.Contains(stripped, "Tests") {

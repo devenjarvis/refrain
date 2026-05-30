@@ -2,11 +2,34 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"unicode"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/devenjarvis/refrain/internal/editor"
 )
+
+// ideOpenedMsg reports the outcome of launching the configured IDE. A non-nil
+// err surfaces as a transient error in the UI (§8).
+type ideOpenedMsg struct{ err error }
+
+// openIDECmd launches the IDE executable detached from refrain and reports the
+// result as an ideOpenedMsg. Running the exec inside the tea.Cmd — rather than
+// a fire-and-forget goroutine — keeps the side effect on the Bubble Tea command
+// path so a launch failure can surface to the user (§4: goroutines produce
+// messages, they don't silently mutate or drop work the UI depends on).
+func openIDECmd(exe string, args []string, dir string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command(exe, args...)
+		cmd.Dir = dir
+		if err := cmd.Start(); err != nil {
+			return ideOpenedMsg{err: err}
+		}
+		return ideOpenedMsg{}
+	}
+}
 
 const (
 	editorFieldLabel        = "Editor"

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -584,12 +583,7 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		worktreePath := sess.Worktree.Path
 		exe := parts[0]
 		args := append(parts[1:], worktreePath)
-		go func() {
-			cmd := exec.Command(exe, args...)
-			cmd.Dir = worktreePath
-			_ = cmd.Start()
-		}()
-		return a, nil, true
+		return a, openIDECmd(exe, args, worktreePath), true
 
 	case "a":
 		// Open file browser to add a new repo.

@@ -254,6 +254,16 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	a.refreshAgentList()
+	// Refresh every component's render clock from a single tick timestamp so
+	// their View()/render helpers stay pure (§5: no clock read at render time).
+	renderNow := time.Now()
+	a.dashboard.now = renderNow
+	if pe := a.modals.PlanEditor(); pe != nil {
+		pe.refreshDerived(renderNow)
+	}
+	if rp := a.modals.Review(); rp != nil {
+		rp.SetNow(renderNow)
+	}
 	// Detect Active->Idle transitions for diff-stats refresh. Chime
 	// notifications are fired in the EventStatusChanged handler below,
 	// which reacts the instant Claude's Stop hook arrives.
@@ -322,8 +332,17 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 			diffCmd = a.refreshDiffStatsCmd()
 		}
 	}
-	// Advance sidebar marquee tickers for overflowing session names.
-	a.dashboard.advanceTickers(time.Now())
+	// Advance sidebar marquee tickers for overflowing session names. Reuse
+	// renderNow so all of the dashboard's time-derived state (now field +
+	// ticker advance) is coherent from a single per-tick timestamp.
+	a.dashboard.advanceTickers(renderNow)
+	// E2E debug-dump: write the latest composed dashboard frame to the file
+	// named by REFRAIN_E2E_DEBUG_DUMP (read once at startup). Kept out of any
+	// View()/render helper so rendering stays pure (§5); dashboard.View() is
+	// itself pure, so calling it here from the Update path is side-effect free.
+	if a.debugDumpPath != "" {
+		_ = os.WriteFile(a.debugDumpPath, []byte(a.dashboard.View()), 0o644)
+	}
 	// Adaptive per-session PR polling.
 	var prCmds []tea.Cmd
 	if a.ghClient != nil {
