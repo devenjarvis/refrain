@@ -18,7 +18,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	var lines []string
 
 	// ── Header ────────────────────────────────────────────────────────────────
-	headerLeft := lipgloss.NewStyle().Foreground(lipgloss.Color("#5ab58a")).Bold(true).Render("SHIPPING") +
+	headerLeft := StyleHeading.Foreground(ColorShipping).Render("SHIPPING") +
 		"  " + StyleSubtle.Render("›") +
 		"  " + lipgloss.NewStyle().Render(sess.GetDisplayName())
 	var headerRight string
@@ -43,15 +43,15 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	pr := entry.pr
 
 	// ── PR summary ────────────────────────────────────────────────────────────
-	titleLine := "  " + lipgloss.NewStyle().Bold(true).Render(pr.Title)
+	titleLine := "  " + StyleBold.Render(pr.Title)
 	lines = append(lines, titleLine)
 
 	var mergeableLabel string
 	switch pr.MergeableState {
 	case "clean":
-		mergeableLabel = lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ mergeable")
+		mergeableLabel = StyleSuccess.Render("✓ mergeable")
 	case "dirty":
-		mergeableLabel = lipgloss.NewStyle().Foreground(ColorError).Render("✗ conflicts")
+		mergeableLabel = StyleError.Render("✗ conflicts")
 	default:
 		mergeableLabel = StyleSubtle.Render("⋯ checking")
 	}
@@ -184,7 +184,7 @@ func renderFeedbackList(items []feedbackItem, cursor int, triage map[string]*fee
 		}
 	}
 
-	cursorBar := lipgloss.NewStyle().Foreground(ColorPrimary).Render("│")
+	cursorBar := StyleAccent.Render("│")
 
 	end := offset + rowsH
 	if end > len(items) {
@@ -275,7 +275,7 @@ func renderFeedbackDetail(items []feedbackItem, cursor int, triage map[string]*f
 		}
 		heading = StyleSubtle.Render(loc) + "  " + stateStyle.Render(strings.ToLower(strings.ReplaceAll(item.State, "_", " ")))
 	} else {
-		heading = lipgloss.NewStyle().Bold(true).Render(item.Reviewer) + "  " + stateStyle.Render(strings.ToLower(strings.ReplaceAll(item.State, "_", " ")))
+		heading = StyleBold.Render(item.Reviewer) + "  " + stateStyle.Render(strings.ToLower(strings.ReplaceAll(item.State, "_", " ")))
 	}
 	lines = append(lines, heading, "")
 
@@ -335,13 +335,13 @@ func renderCheckRow(run github.CheckRun, width int) string {
 	switch {
 	case run.Status != "completed":
 		icon = "○"
-		iconStyle = lipgloss.NewStyle().Foreground(ColorWarning)
+		iconStyle = StyleWarning
 	case run.Conclusion == "success" || run.Conclusion == "skipped" || run.Conclusion == "neutral":
 		icon = "✓"
-		iconStyle = lipgloss.NewStyle().Foreground(ColorSuccess)
+		iconStyle = StyleSuccess
 	default:
 		icon = "✗"
-		iconStyle = lipgloss.NewStyle().Foreground(ColorError)
+		iconStyle = StyleError
 	}
 
 	var dur string
@@ -433,13 +433,12 @@ func feedbackItemKey(item feedbackItem) string {
 
 // shippingHints returns the action hint line for the shipping panel footer.
 func shippingHints(mergeReady bool) string {
-	mKey := lipgloss.NewStyle().Foreground(lipgloss.Color("#5ab58a")).Render("m")
+	mKey := StyleAccent.Foreground(ColorShipping).Render("m")
 	mDesc := StyleSubtle.Render(" — merge")
 	if !mergeReady {
 		mKey = StyleSubtle.Render("m")
 	}
-	blue := lipgloss.Color("#7ec8e3")
-	key := func(s string) string { return lipgloss.NewStyle().Foreground(blue).Render(s) }
+	key := func(s string) string { return StyleAccent.Foreground(ColorBuilding).Render(s) }
 	return "  " +
 		mKey + mDesc +
 		"   " + StyleSubtle.Render("M — force merge") +

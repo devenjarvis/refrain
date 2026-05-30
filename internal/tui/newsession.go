@@ -211,7 +211,7 @@ func (m *newSessionModel) renderSidebar() string {
 	w := newSessionSidebarWidth
 
 	flowLabel := StyleSubtle.Render("FLOW")
-	flow := lipgloss.NewStyle().Foreground(ColorPrimary).Render("Plan → Build → Review → Ship")
+	flow := StyleAccent.Render("Plan → Build → Review → Ship")
 	flowBlock := lipgloss.JoinVertical(lipgloss.Left, flowLabel, flow)
 
 	exLabel := StyleSubtle.Render("EXAMPLES")

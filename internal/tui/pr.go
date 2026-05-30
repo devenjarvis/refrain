@@ -114,16 +114,16 @@ func checkSymbolFor(checks *github.CheckStatus) string {
 	switch checks.State {
 	case "success":
 		sym = "\u2713"
-		style = lipgloss.NewStyle().Foreground(ColorSuccess)
+		style = StyleSuccess
 	case "failure":
 		sym = "\u2717"
-		style = lipgloss.NewStyle().Foreground(ColorError)
+		style = StyleError
 	case "pending":
 		sym = "\u25cb"
-		style = lipgloss.NewStyle().Foreground(ColorWarning)
+		style = StyleWarning
 	default:
 		sym = "?"
-		style = lipgloss.NewStyle().Foreground(ColorMuted)
+		style = StyleSubtle
 	}
 	return style.Render(sym)
 }
@@ -187,13 +187,13 @@ func prIndicator(entry *prCacheEntry) string {
 func statePhraseStyle(phrase string) lipgloss.Style {
 	switch phrase {
 	case "Ready":
-		return lipgloss.NewStyle().Foreground(ColorSuccess)
+		return StyleSuccess
 	case "Conflicts", "Changes requested":
-		return lipgloss.NewStyle().Foreground(ColorError)
+		return StyleError
 	case "Waiting on CI":
-		return lipgloss.NewStyle().Foreground(ColorWarning)
+		return StyleWarning
 	default: // "CI N/M failing"
-		return lipgloss.NewStyle().Foreground(ColorError)
+		return StyleError
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -293,16 +292,16 @@ func (m *prComposeModal) renderFooter() string {
 }
 
 func (m *prComposeModal) renderHeader() string {
-	title := lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render("PR DRAFT")
+	title := StyleHeading.Render("PR DRAFT")
 	left := title
 	if m.sessName != "" {
 		left = title + "  " + StyleSubtle.Render("›") + "  " + m.sessName
 	}
 	var draftLabel string
 	if m.draft {
-		draftLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).Render("● draft")
+		draftLabel = StyleWarning.Bold(true).Render("● draft")
 	} else {
-		draftLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).Render("● ready")
+		draftLabel = StyleSuccess.Bold(true).Render("● ready")
 	}
 	gap := m.doc.width - ansi.StringWidth(left) - ansi.StringWidth(draftLabel) - 4
 	if gap < 1 {
