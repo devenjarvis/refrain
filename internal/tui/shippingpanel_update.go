@@ -2,97 +2,13 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/devenjarvis/refrain/internal/agent"
 )
-
-// shippingPanelModel owns key/view dispatch for the shipping panel (PR
-// status, CI failures, review threads, merge gate). Per-panel state
-// (cursor, scroll, feedback-note modal) lives here; feedbackTriage stays on
-// App because it survives panel close/reopen.
-type shippingPanelModel struct {
-	session        *agent.Session
-	repoPath       string
-	feedbackCursor int
-	detailScroll   int
-	feedbackNote   feedbackNoteModal
-
-	width, height int
-}
-
-// newShippingPanel constructs a shipping panel for sess. repoPath pins which
-// repo's manager is used for merge and feedback key handlers, preventing
-// multi-repo session-ID collisions from routing operations to the wrong repo.
-// The nested feedbackNote modal is initialised but inactive until the user
-// presses 'n'.
-func newShippingPanel(sess *agent.Session, repoPath string, width, height int) *shippingPanelModel {
-	note := newFeedbackNoteModal()
-	note.SetSize(width, height+1)
-	return &shippingPanelModel{
-		session:      sess,
-		repoPath:     repoPath,
-		feedbackNote: note,
-		width:        width,
-		height:       height,
-	}
-}
-
-// SessionID returns the bound session's ID or "" when unbound.
-func (m *shippingPanelModel) SessionID() string {
-	if m == nil || m.session == nil {
-		return ""
-	}
-	return m.session.ID
-}
-
-// Session returns the bound session, or nil.
-func (m *shippingPanelModel) Session() *agent.Session {
-	if m == nil {
-		return nil
-	}
-	return m.session
-}
-
-// FeedbackCursor exposes the cursor row for tests and View rendering.
-func (m *shippingPanelModel) FeedbackCursor() int {
-	if m == nil {
-		return 0
-	}
-	return m.feedbackCursor
-}
-
-// DetailScroll exposes the detail-pane scroll for tests and View rendering.
-func (m *shippingPanelModel) DetailScroll() int {
-	if m == nil {
-		return 0
-	}
-	return m.detailScroll
-}
-
-// SetSize updates layout dimensions and forwards to the nested modal.
-func (m *shippingPanelModel) SetSize(w, h int) {
-	if m == nil {
-		return
-	}
-	m.width = w
-	m.height = h
-	m.feedbackNote.SetSize(w, h+1)
-}
 
 // shippingFeedbackRequestMsg is emitted by the panel when the user presses
 // 'r' to address feedback. App handles the cross-cutting effects.
 type shippingFeedbackRequestMsg struct {
 	sessionID string
 	repoPath  string
-}
-
-// closeShippingPanel invokes svc.ClosePanel(). Returns nil for inline
-// `return m, closeShippingPanel(svc)`.
-func closeShippingPanel(svc PanelServices) tea.Cmd {
-	if svc.ClosePanel != nil {
-		svc.ClosePanel()
-	}
-	return nil
 }
 
 // feedbackNoteSubmitMsg is emitted by the embedded feedbackNoteModal when the
@@ -102,6 +18,15 @@ func closeShippingPanel(svc PanelServices) tea.Cmd {
 type feedbackNoteSubmitMsg struct {
 	itemKey string
 	note    string
+}
+
+// closeShippingPanel invokes svc.ClosePanel(). Returns nil for inline
+// `return m, closeShippingPanel(svc)`.
+func closeShippingPanel(svc PanelServices) tea.Cmd {
+	if svc.ClosePanel != nil {
+		svc.ClosePanel()
+	}
+	return nil
 }
 
 // Update dispatches the shipping panel's key handling.
@@ -230,29 +155,4 @@ func (m *shippingPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (
 		}
 	}
 	return m, nil
-}
-
-// View renders the shipping panel. Modal precedence: if the feedback-note
-// modal is active, render it overlaid; otherwise render the panel proper.
-func (m *shippingPanelModel) View(svc PanelServices) string {
-	if m == nil || m.session == nil {
-		return ""
-	}
-	entry := svc.PRCache(m.repoPath, m.session.ID)
-	triage := svc.FeedbackTriage(m.repoPath, m.session.ID)
-	return renderShippingPanel(m.session, entry, m.width, m.height, m.feedbackCursor, m.detailScroll, triage)
-}
-
-// NoteActive reports whether the feedback-note modal is currently active.
-// App's View uses this to overlay the modal above the panel.
-func (m *shippingPanelModel) NoteActive() bool {
-	return m != nil && m.feedbackNote.Active()
-}
-
-// NoteView returns the rendered feedback-note modal for overlaying.
-func (m *shippingPanelModel) NoteView() string {
-	if m == nil {
-		return ""
-	}
-	return m.feedbackNote.View()
 }

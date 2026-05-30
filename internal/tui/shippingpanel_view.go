@@ -11,6 +11,17 @@ import (
 	"github.com/devenjarvis/refrain/internal/github"
 )
 
+// View renders the shipping panel. Modal precedence: if the feedback-note
+// modal is active, render it overlaid; otherwise render the panel proper.
+func (m *shippingPanelModel) View(svc PanelServices) string {
+	if m == nil || m.session == nil {
+		return ""
+	}
+	entry := svc.PRCache(m.repoPath, m.session.ID)
+	triage := svc.FeedbackTriage(m.repoPath, m.session.ID)
+	return renderShippingPanel(m.session, entry, m.width, m.height, m.feedbackCursor, m.detailScroll, triage)
+}
+
 // renderShippingPanel renders the fullscreen shipping panel for a session.
 // entry may be nil while the first PR poll is in flight (shows loading state).
 // cursor and scroll control the feedback two-pane UI; triage holds user verdicts.
@@ -360,71 +371,6 @@ func renderCheckRow(run github.CheckRun, width int) string {
 		row += strings.Repeat(" ", padW) + StyleSubtle.Render(dur)
 	}
 	return row
-}
-
-// feedbackVerdict is the user's disposition on a single feedback item.
-type feedbackVerdict int
-
-const (
-	feedbackNeutral   feedbackVerdict = iota
-	feedbackApproved                  // user agreed; item will be addressed
-	feedbackDisagreed                 // user disputes; item framed as advisory
-)
-
-// feedbackTriageEntry holds the verdict and optional guidance note for one item.
-type feedbackTriageEntry struct {
-	Verdict feedbackVerdict
-	Note    string
-}
-
-// feedbackItem is a flattened view of a single piece of review feedback.
-type feedbackItem struct {
-	Reviewer  string
-	State     string
-	Path      string
-	Line      int
-	Body      string
-	CommentID int64
-	IsInline  bool
-}
-
-// feedbackItems flattens review threads into an ordered slice of feedback items.
-// For each thread: one body item (when non-empty), then one item per inline comment.
-func feedbackItems(threads []github.ReviewThread) []feedbackItem {
-	var items []feedbackItem
-	for _, t := range threads {
-		if strings.TrimSpace(t.Body) != "" {
-			items = append(items, feedbackItem{
-				Reviewer: t.Reviewer,
-				State:    t.State,
-				Body:     t.Body,
-				IsInline: false,
-			})
-		}
-		for _, c := range t.Comments {
-			items = append(items, feedbackItem{
-				Reviewer:  t.Reviewer,
-				State:     t.State,
-				Path:      c.Path,
-				Line:      c.Line,
-				Body:      c.Body,
-				CommentID: c.ID,
-				IsInline:  true,
-			})
-		}
-	}
-	return items
-}
-
-// feedbackItemKey returns the stable triage map key for an item.
-// Inline comments use "comment:<id>"; thread bodies use "thread:<reviewer>".
-// The reviewer key is unique because GetReviewThreads produces at most one
-// ReviewThread per reviewer (latest-review dedup + seen guard).
-func feedbackItemKey(item feedbackItem) string {
-	if item.IsInline {
-		return fmt.Sprintf("comment:%d", item.CommentID)
-	}
-	return "thread:" + item.Reviewer
 }
 
 // shippingHints returns the action hint line for the shipping panel footer.
