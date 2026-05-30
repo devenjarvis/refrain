@@ -211,6 +211,22 @@ func (a *App) setFeedbackNote(repoPath, sessID, itemKey, note string) {
 	}
 }
 
+// handleFeedbackNoteSubmit forwards a feedbackNoteSubmitMsg to the active
+// shipping panel so it can persist the note via svc.SetFeedbackNote. Mirrors
+// the snapshot-and-restore pattern of handleKeysShippingPanel; the message is
+// otherwise local to the shipping panel.
+func (a App) handleFeedbackNoteSubmit(msg feedbackNoteSubmitMsg) (tea.Model, tea.Cmd) {
+	snapshot := a.modals.Shipping()
+	if snapshot == nil {
+		return a, nil
+	}
+	updated, cmd := snapshot.Update(msg, a.panelServices())
+	if sp, ok := updated.(*shippingPanelModel); ok {
+		a.modals.CompareAndSetShipping(snapshot, sp)
+	}
+	return a, cmd
+}
+
 // handleShippingFeedbackRequest spawns a new agent in the session's existing
 // worktree, synthesised from failing CI checks and unresolved review
 // comments, and transitions the session back to LifecycleInProgress. The

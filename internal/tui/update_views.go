@@ -177,7 +177,7 @@ func (a *App) initRepoChecksEditor(repoPath string) {
 		}
 	}
 	editor := newRepoChecksModel(repoName, a.pendingChecks)
-	a.openRepoChecksEditor(editor, repoPath)
+	a.openRepoChecksEditor(&editor, repoPath)
 }
 
 // updateRepoChecks handles save and cancel messages from the checks

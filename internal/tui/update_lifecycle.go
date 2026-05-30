@@ -35,6 +35,8 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 
 	// newSession always tracks terminal dimensions (it may be open in any view).
 	a.newSession.SetSize(msg.Width, msg.Height-1)
+	// globalConfig may be open in its own view; keep its form sized.
+	a.globalConfig.SetSize(msg.Width, msg.Height-1)
 
 	// Resize agent terminals to match their current display container.
 	if a.view == ViewDashboard {
@@ -47,7 +49,13 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 		}
 		a.prComposeModal.SetSize(msg.Width, msg.Height-1)
 		if sp := a.modals.Shipping(); sp != nil {
-			sp.Resize(msg.Width, msg.Height-1)
+			sp.SetSize(msg.Width, msg.Height-1)
+		}
+		if cf := a.modals.Config(); cf != nil {
+			cf.SetSize(msg.Width, msg.Height-1)
+		}
+		if rc := a.modals.RepoChecks(); rc != nil {
+			rc.SetSize(msg.Width, msg.Height-1)
 		}
 	}
 	return a

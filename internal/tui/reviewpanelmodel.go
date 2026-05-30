@@ -88,8 +88,8 @@ func (m *reviewPanelModel) TaskCursor() int {
 	return m.taskCursor
 }
 
-// Resize updates cached layout dimensions.
-func (m *reviewPanelModel) Resize(w, h int) {
+// SetSize updates cached layout dimensions.
+func (m *reviewPanelModel) SetSize(w, h int) {
 	if m == nil {
 		return
 	}
@@ -155,7 +155,7 @@ func (m *reviewPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel, t
 	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.Resize(msg.Width, msg.Height-1)
+		m.SetSize(msg.Width, msg.Height-1)
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg, svc)

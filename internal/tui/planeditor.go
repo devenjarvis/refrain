@@ -422,37 +422,41 @@ func (m *planEditorModel) Reload() {
 
 // Update routes a key event. The caller should already have dispatched
 // other tea.Msg types (resize, ticks).
-func (m *planEditorModel) Update(msg tea.Msg) tea.Cmd {
+func (m planEditorModel) Update(msg tea.Msg) (planEditorModel, tea.Cmd) {
 	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		// Forward non-key events to whichever component is active.
 		if m.mode == planEditorModeEdit {
-			return m.doc.UpdateTextarea(msg)
+			var cmd tea.Cmd
+			m.doc, cmd = m.doc.Update(msg)
+			return m, cmd
 		}
 		if m.mode == planEditorModeReviseInput {
 			var cmd tea.Cmd
 			m.reviseInput, cmd = m.reviseInput.Update(msg)
-			return cmd
+			return m, cmd
 		}
 		if m.mode == planEditorModeQuestion {
 			var cmd tea.Cmd
 			m.questionInput, cmd = m.questionInput.Update(msg)
-			return cmd
+			return m, cmd
 		}
-		return nil
+		return m, nil
 	}
 	m.errMsg = ""
 
+	var cmd tea.Cmd
 	switch m.mode {
 	case planEditorModeEdit:
-		return m.updateEdit(keyMsg)
+		cmd = m.updateEdit(keyMsg)
 	case planEditorModeReviseInput:
-		return m.updateReviseInput(keyMsg)
+		cmd = m.updateReviseInput(keyMsg)
 	case planEditorModeQuestion:
-		return m.updateQuestion(keyMsg)
+		cmd = m.updateQuestion(keyMsg)
 	default:
-		return m.updateScroll(keyMsg)
+		cmd = m.updateScroll(keyMsg)
 	}
+	return m, cmd
 }
 
 func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
@@ -632,7 +636,8 @@ func (m *planEditorModel) updateEdit(msg tea.KeyPressMsg) tea.Cmd {
 		return func() tea.Msg { return planEditorSavedMsg{sessionID: sessID} }
 	}
 	prev := m.doc.Value()
-	cmd := m.doc.UpdateTextarea(msg)
+	var cmd tea.Cmd
+	m.doc, cmd = m.doc.Update(msg)
 	if m.doc.Value() != prev {
 		m.dirty = true
 	}
@@ -902,7 +907,7 @@ func (m *planEditorModel) clampCursor() {
 }
 
 // View renders the full-page plan editor.
-func (m *planEditorModel) View() string {
+func (m planEditorModel) View() string {
 	var lines []string
 	lines = append(lines, m.renderHeader())
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, innerWidth(m.doc.width)))))

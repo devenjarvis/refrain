@@ -86,27 +86,31 @@ func (m *prComposeModal) SetSize(w, h int) {
 
 // Update routes a tea.Msg to updateScroll or updateEdit based on mode.
 // PasteMsg in edit mode is forwarded to the focused field before mode dispatch.
-func (m *prComposeModal) Update(msg tea.Msg) tea.Cmd {
+func (m prComposeModal) Update(msg tea.Msg) (prComposeModal, tea.Cmd) {
 	if !m.active {
-		return nil
+		return m, nil
 	}
 	if paste, ok := msg.(tea.PasteMsg); ok {
 		if m.mode == prComposeModeEdit {
 			if m.titleInput.Focused() {
 				var cmd tea.Cmd
 				m.titleInput, cmd = m.titleInput.Update(paste)
-				return cmd
+				return m, cmd
 			}
-			return m.doc.UpdateTextarea(paste)
+			var cmd tea.Cmd
+			m.doc, cmd = m.doc.Update(paste)
+			return m, cmd
 		}
-		return nil
+		return m, nil
 	}
+	var cmd tea.Cmd
 	switch m.mode {
 	case prComposeModeEdit:
-		return m.updateEdit(msg)
+		cmd = m.updateEdit(msg)
 	default:
-		return m.updateScroll(msg)
+		cmd = m.updateScroll(msg)
 	}
+	return m, cmd
 }
 
 func (m *prComposeModal) updateScroll(msg tea.Msg) tea.Cmd {
@@ -169,7 +173,9 @@ func (m *prComposeModal) updateEdit(msg tea.Msg) tea.Cmd {
 			m.titleInput, cmd = m.titleInput.Update(msg)
 			return cmd
 		}
-		return m.doc.UpdateTextarea(msg)
+		var cmd tea.Cmd
+		m.doc, cmd = m.doc.Update(msg)
+		return cmd
 	}
 	switch key.String() {
 	case "esc":
@@ -204,11 +210,13 @@ func (m *prComposeModal) updateEdit(msg tea.Msg) tea.Cmd {
 		m.titleInput, cmd = m.titleInput.Update(msg)
 		return cmd
 	}
-	return m.doc.UpdateTextarea(msg)
+	var cmd tea.Cmd
+	m.doc, cmd = m.doc.Update(msg)
+	return cmd
 }
 
 // View renders the full-page PR compose. Only call when Active() is true.
-func (m *prComposeModal) View() string {
+func (m prComposeModal) View() string {
 	var lines []string
 	lines = append(lines, m.renderHeader())
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, innerWidth(m.doc.width)))))

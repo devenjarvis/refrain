@@ -44,30 +44,42 @@ type repoChecksModel struct {
 	activeInput repoChecksInput
 	nameInput   textinput.Model
 	cmdInput    textinput.Model
+	width       int
+	height      int
 }
 
 // newRepoChecksModel seeds the editor from an existing checks list. The
 // caller must pass a fresh copy if it wants edits to be discardable on cancel.
-func newRepoChecksModel(repoName string, checks []config.ValidationCheck) *repoChecksModel {
+func newRepoChecksModel(repoName string, checks []config.ValidationCheck) repoChecksModel {
 	cp := make([]config.ValidationCheck, len(checks))
 	copy(cp, checks)
-	return &repoChecksModel{
+	return repoChecksModel{
 		repoName: repoName,
 		checks:   cp,
 	}
 }
 
-// Update handles a key event for the editor.
-func (m *repoChecksModel) Update(msg tea.Msg) tea.Cmd {
+// SetSize informs the editor of the space it has to render in.
+func (m *repoChecksModel) SetSize(w, h int) {
+	m.width = w
+	m.height = h
+}
+
+// Update handles a key event for the editor. It returns the next editor state
+// and any command to run (CONVENTIONS.md §3).
+func (m repoChecksModel) Update(msg tea.Msg) (repoChecksModel, tea.Cmd) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
-		return nil
+		return m, nil
 	}
 
+	var cmd tea.Cmd
 	if m.editing {
-		return m.updateEditing(key)
+		cmd = m.updateEditing(key)
+	} else {
+		cmd = m.updateList(key)
 	}
-	return m.updateList(key)
+	return m, cmd
 }
 
 func (m *repoChecksModel) updateList(msg tea.KeyPressMsg) tea.Cmd {
@@ -190,7 +202,7 @@ func (m *repoChecksModel) commitEdit() {
 
 // View renders the editor body (no surrounding border — that's the overlay's
 // job).
-func (m *repoChecksModel) View() string {
+func (m repoChecksModel) View() string {
 	subtitle := StyleSubtle.Render("Commands run with sh -c against the worktree during the review panel's Checks tab.")
 	var body string
 	if len(m.checks) == 0 {

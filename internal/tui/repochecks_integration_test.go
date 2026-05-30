@@ -46,11 +46,12 @@ func TestRepoChecks_RoundTrip_FormToEditorToDisk(t *testing.T) {
 	}
 
 	// Add a check via the editor and commit it.
-	editor.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	*editor, _ = editor.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	editor.nameInput.SetValue("Smoke")
 	editor.cmdInput.SetValue("true")
-	editor.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	saveCmd := editor.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	*editor, _ = editor.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	var saveCmd tea.Cmd
+	*editor, saveCmd = editor.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if saveCmd == nil {
 		t.Fatal("expected non-nil cmd from ctrl+s in editor")
 	}
@@ -132,7 +133,8 @@ func TestRepoChecks_CancelDiscardsPending(t *testing.T) {
 	app = model.(App)
 	editor := app.modals.RepoChecks()
 	editor.checks = []config.ValidationCheck{{Name: "Replaced", Command: "false"}}
-	cancelCmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	var cancelCmd tea.Cmd
+	*editor, cancelCmd = editor.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cancelCmd == nil {
 		t.Fatal("esc should produce a cancel cmd")
 	}

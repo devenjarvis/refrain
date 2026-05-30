@@ -20,7 +20,7 @@ import (
 type PanelModel interface {
 	Update(msg tea.Msg, svc PanelServices) (PanelModel, tea.Cmd)
 	View(svc PanelServices) string
-	Resize(w, h int)
+	SetSize(w, h int)
 }
 
 // Panels close synchronously by calling svc.ClosePanel(). The callback is
