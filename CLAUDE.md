@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> **Architecture & code conventions:** see [`CONVENTIONS.md`](CONVENTIONS.md). This file describes *what the system does*; `CONVENTIONS.md` describes *how the code must be structured* (component architecture, message/render rules, layering). Read it before writing or changing code.
+
 ## Project
 
 Refrain is a terminal-native TUI for orchestrating multiple Claude Code agents in parallel, designed around the BCG/2026 finding that oversight cost exceeds output value beyond ~3 concurrent agents. The product is a single opinionated workflow — one primary goal, ≤3 agents, a defined review point, a 90-minute block — and every feature is evaluated against that frame. Written in Go 1.25.
