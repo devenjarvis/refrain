@@ -5,7 +5,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -79,7 +78,7 @@ func (m *prComposeModal) Active() bool { return m.active }
 // SetSize updates the viewport dimensions.
 func (m *prComposeModal) SetSize(w, h int) {
 	m.doc.SetSize(w, h)
-	m.titleInput.SetWidth(w - 4)
+	m.titleInput.SetWidth(modalContentWidth(w))
 	m.doc.textarea.SetHeight(m.doc.BodyHeight(8))
 	rendered := m.doc.RenderLines()
 	m.doc.ClampScroll(len(rendered))
@@ -212,7 +211,7 @@ func (m *prComposeModal) updateEdit(msg tea.Msg) tea.Cmd {
 func (m *prComposeModal) View() string {
 	var lines []string
 	lines = append(lines, m.renderHeader())
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, m.doc.width-2))))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, innerWidth(m.doc.width)))))
 	switch m.mode {
 	case prComposeModeEdit:
 		lines = append(lines, m.renderEditBody())
@@ -274,7 +273,7 @@ func (m *prComposeModal) renderScrollBody() string {
 }
 
 func (m *prComposeModal) renderFooter() string {
-	divider := StyleSubtle.Render(strings.Repeat("─", max(1, m.doc.width-2)))
+	divider := StyleSubtle.Render(strings.Repeat("─", max(1, innerWidth(m.doc.width))))
 	var hints string
 	switch m.mode {
 	case prComposeModeEdit:
@@ -293,16 +292,16 @@ func (m *prComposeModal) renderFooter() string {
 }
 
 func (m *prComposeModal) renderHeader() string {
-	title := lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render("PR DRAFT")
+	title := StyleHeading.Render("PR DRAFT")
 	left := title
 	if m.sessName != "" {
 		left = title + "  " + StyleSubtle.Render("›") + "  " + m.sessName
 	}
 	var draftLabel string
 	if m.draft {
-		draftLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).Render("● draft")
+		draftLabel = StyleWarning.Bold(true).Render("● draft")
 	} else {
-		draftLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).Render("● ready")
+		draftLabel = StyleSuccess.Bold(true).Render("● ready")
 	}
 	gap := m.doc.width - ansi.StringWidth(left) - ansi.StringWidth(draftLabel) - 4
 	if gap < 1 {

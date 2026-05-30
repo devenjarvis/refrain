@@ -208,7 +208,7 @@ func (f configForm) View() string {
 	}
 
 	labelStyle := lipgloss.NewStyle().Width(22).Foreground(ColorText)
-	focusedLabelStyle := lipgloss.NewStyle().Width(22).Foreground(ColorSecondary).Bold(true)
+	focusedLabelStyle := StyleActive.Bold(true).Width(22)
 	toggleOn := StyleSuccess.Render("[x]")
 	toggleOff := StyleSubtle.Render("[ ]")
 

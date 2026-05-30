@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
-	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/vt"
 )
 
@@ -61,11 +60,6 @@ type sessionTicker struct {
 	nextAdvance time.Time
 	atEnd       bool
 }
-
-// ColorWaiting is the accent used for agents in StatusWaiting (permission
-// prompts, input blocks). Scoped to the dashboard because no other view
-// needs it today — add to theme.go if another view ever surfaces waiting.
-var ColorWaiting = initColor("#D946EF")
 
 // listItemKind distinguishes repo headers, session rows, and agent rows in the dashboard list.
 type listItemKind int
@@ -266,10 +260,7 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 // fixedTermWidth() must return the same value on any given frame, otherwise
 // the sidebar and the agent VT will disagree about column counts.
 func (d dashboardModel) listWidth() int {
-	if d.sidebarWidth > 0 {
-		return d.sidebarWidth
-	}
-	return config.DefaultSidebarWidth
+	return resolveSidebarWidth(d.sidebarWidth)
 }
 
 func (d dashboardModel) View() string {
@@ -290,14 +281,14 @@ func (d dashboardModel) View() string {
 }
 
 func (d dashboardModel) contentHeight() int {
-	return d.height - 2 // statusbar + title
+	return d.height - statusBarHeight - titleHeight
 }
 
 // fixedTermWidth returns the terminal column count that all agents should use.
 // Held constant across panel focus changes so transitions never trigger a
 // resize.
 func (d dashboardModel) fixedTermWidth() int {
-	return d.width - d.listWidth() - 1 - 2 // list border + preview border
+	return previewTermWidth(d.width, d.listWidth())
 }
 
 // fixedTermHeight returns the terminal row count that all agents should use.
@@ -305,7 +296,7 @@ func (d dashboardModel) fixedTermWidth() int {
 // the PR line — accepting 1 row of clipping when PR is visible is better than
 // per-session resize churn.
 func (d dashboardModel) fixedTermHeight() int {
-	return d.contentHeight() - 2 - 2 // 2 metadata rows (sessionInfo + blank) + 2 border rows
+	return d.contentHeight() - 2 - 2*borderWidth // 2 metadata rows (sessionInfo + blank) + 2 border rows
 }
 
 // renderRepoConfigOverlay renders the per-repo settings form full-screen. It's
@@ -539,17 +530,17 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 		}
 	}
 	if hasError {
-		return lipgloss.NewStyle().Foreground(ColorError).Render("✗ error")
+		return StyleError.Render("✗ error")
 	}
 	if waitingCount > 0 {
 		badge := fmt.Sprintf("⏸ %d waiting", waitingCount)
 		if firstWaitingReason != "" {
 			badge += " — " + truncateVisible(firstWaitingReason, 40)
 		}
-		return lipgloss.NewStyle().Foreground(ColorWaiting).Render(badge)
+		return StyleWaiting.Render(badge)
 	}
 	if idleAskingCount > 0 {
-		return lipgloss.NewStyle().Foreground(ColorWarning).Render(fmt.Sprintf("? %d idle — may need input", idleAskingCount))
+		return StyleWarning.Render(fmt.Sprintf("? %d idle — may need input", idleAskingCount))
 	}
 	// Progress bar takes priority over the idle/reviewable badge so it
 	// stays visible while the agent pauses between tasks. Once all tasks
@@ -588,10 +579,10 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 		}
 	}
 	if sess.IsReviewable() && sess.DoneAt().IsZero() && activeCount == 0 {
-		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ idle — press m to review")
+		return StyleSuccess.Render("✓ idle — press m to review")
 	}
 	if !sess.DoneAt().IsZero() {
-		return lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ finished — awaiting prompt")
+		return StyleSuccess.Render("✓ finished — awaiting prompt")
 	}
 	return StyleSubtle.Render(fmt.Sprintf("%d active, %d idle", activeCount, idleCount))
 }
@@ -726,7 +717,7 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	// strips ANSI (e2e screenshots, terminal recordings). The "> " stays
 	// leftmost so the muted repo prefix never gets between the cursor and the
 	// stripe.
-	nameStyled := lipgloss.NewStyle().Foreground(ColorText).Bold(true).Render(sess.GetDisplayName())
+	nameStyled := StyleCardTitle.Render(sess.GetDisplayName())
 	if repoName != "" {
 		nameStyled = StyleSubtle.Render(repoName+" › ") + nameStyled
 	}
@@ -772,7 +763,7 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	if planningPhase {
 		descStyle := StyleSubtle
 		if descPending {
-			descStyle = lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
+			descStyle = StyleMutedItalic
 		}
 		line2 = stripe + indent + descStyle.Render(descLine1)
 		line3 = stripe + indent
@@ -783,7 +774,7 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 		// Line 2: session description — StyleSubtle or muted-italic when pending.
 		descStyle := StyleSubtle
 		if descPending {
-			descStyle = lipgloss.NewStyle().Foreground(ColorMuted).Italic(true)
+			descStyle = StyleMutedItalic
 		}
 		line2 = stripe + indent + descStyle.Render(descLine1)
 		// Line 3: current task (label muted, name bold) or description overflow.
@@ -795,7 +786,7 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 				taskBudget = 0
 			}
 			taskLabel := StyleSubtle.Render("current task: ")
-			taskName := lipgloss.NewStyle().Bold(true).Render(truncateVisible(task, taskBudget))
+			taskName := StyleBold.Render(truncateVisible(task, taskBudget))
 			line3 = stripe + indent + taskLabel + taskName
 		} else if descLine2 != "" {
 			line3 = stripe + indent + descStyle.Render(descLine2)
@@ -897,17 +888,17 @@ func renderBranchLabel(branch string) string {
 func planningStatusBadge(sess *agent.Session) string {
 	if sess.IsDrafting() {
 		if cur, max := sess.DraftAttempt(); cur > 1 && max > 0 {
-			return lipgloss.NewStyle().Foreground(ColorWarning).Render(
+			return StyleWarning.Render(
 				fmt.Sprintf("✎ retrying… (%d/%d)", cur, max),
 			)
 		}
-		return lipgloss.NewStyle().Foreground(ColorWarning).Render("✎ drafting…")
+		return StyleWarning.Render("✎ drafting…")
 	}
 	if sess.IsRevising() {
-		return lipgloss.NewStyle().Foreground(ColorWarning).Render("✎ revising…")
+		return StyleWarning.Render("✎ revising…")
 	}
 	if err := sess.DraftError(); err != nil {
-		return lipgloss.NewStyle().Foreground(ColorError).Render("✗ draft failed")
+		return StyleError.Render("✗ draft failed")
 	}
 	plan, present := sess.CachedPlan()
 	if !present {
@@ -915,9 +906,9 @@ func planningStatusBadge(sess *agent.Session) string {
 	}
 	total, done := planTaskCounts(plan)
 	if total == 0 {
-		return lipgloss.NewStyle().Foreground(ColorPrimary).Render("✎ plan ready")
+		return StyleAccent.Render("✎ plan ready")
 	}
-	return lipgloss.NewStyle().Foreground(ColorPrimary).Render(
+	return StyleAccent.Render(
 		fmt.Sprintf("✎ %d/%d tasks", done, total),
 	)
 }
@@ -1176,9 +1167,9 @@ func (d dashboardModel) renderPipelineWidget(width int) string {
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		cell("PLANNING", planning, ColorMuted, false),
-		cell("BUILDING", building, lipgloss.Color("#7ec8e3"), false),
+		cell("BUILDING", building, ColorBuilding, false),
 		cell("REVIEWING", reviewing, ColorWarning, reviewing > 0),
-		cell("SHIPPING", shipping, lipgloss.Color("#5ab58a"), false),
+		cell("SHIPPING", shipping, ColorShipping, false),
 	)
 }
 
@@ -1443,7 +1434,7 @@ func (d dashboardModel) renderBreakOverlay(width, height int) string {
 
 	animBlock := d.renderBreatheBlock(width, height)
 
-	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
+	titleStyle := StyleHeading.Foreground(ColorBreakTitle)
 	title := titleStyle.Render("BREAK")
 
 	var blockLine string
@@ -1529,9 +1520,8 @@ func (d dashboardModel) renderBreakCompleteOverlay(width, height int) string {
 		blockLine = StyleSubtle.Render(fmt.Sprintf("Block %d so far", d.focusBlockCount))
 	}
 
-	prompt := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#34D399")).
-		Bold(true).
+	prompt := StyleBold.
+		Foreground(ColorBreakAccent).
 		Render("[b] resume focus session")
 	hint := StyleSubtle.Render("(no rush — the timer won't drag you back in)")
 
@@ -1656,7 +1646,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		lines = append(lines, StyleSubtle.Render("SHIPPING"))
 		for i, item := range shippingItems {
 			selected := d.cursor.Section() == focusSectionShipping && i == d.cursor.Index(focusSectionShipping)
-			row := d.renderQueueRow(item.session, item.repoName, item.repoPath, selected, lipgloss.Color("#5ab58a"), width)
+			row := d.renderQueueRow(item.session, item.repoName, item.repoPath, selected, ColorShipping, width)
 			lines = append(lines, row...)
 			if i < len(shippingItems)-1 {
 				lines = append(lines, "")
@@ -1697,7 +1687,7 @@ func (d dashboardModel) renderQueueRow(sess *agent.Session, repoName, repoPath s
 	// The (reviewing) tag distinguishes InReview rows in the merged Reviewing
 	// section so the user can tell which session is open in the panel.
 	if sess.LifecyclePhase() == agent.LifecycleInReview {
-		tag := lipgloss.NewStyle().Foreground(lipgloss.Color("#9b7fdb")).Render(" (reviewing)")
+		tag := StyleAccent.Foreground(ColorReviewing).Render(" (reviewing)")
 		nameRendered += tag
 	}
 	line1 := prefix + nameRendered
@@ -1715,7 +1705,7 @@ func (d dashboardModel) renderQueueRow(sess *agent.Session, repoName, repoPath s
 
 	var taskDisplay string
 	if d.prDraftSessionID != "" && sess.ID == d.prDraftSessionID && repoPath == d.prDraftRepoPath {
-		taskDisplay = lipgloss.NewStyle().Foreground(ColorWarning).Render(reviewSpinnerFrame(d.now) + " drafting PR…")
+		taskDisplay = StyleWarning.Render(reviewSpinnerFrame(d.now) + " drafting PR…")
 	} else {
 		origPrompt := sess.OriginalPrompt()
 		switch {

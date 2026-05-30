@@ -38,7 +38,7 @@ func newFeedbackNoteModal() feedbackNoteModal {
 func (m *feedbackNoteModal) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	m.ta.SetWidth(modalWidth(w) - 4)
+	m.ta.SetWidth(modalContentWidth(modalWidth(w)))
 }
 
 // Open shows the modal, pre-populating the textarea with an existing note.
@@ -46,7 +46,7 @@ func (m *feedbackNoteModal) Open(itemKey, existing string) tea.Cmd {
 	m.active = true
 	m.itemKey = itemKey
 	m.ta.SetValue(existing)
-	m.ta.SetWidth(modalWidth(m.width) - 4)
+	m.ta.SetWidth(modalContentWidth(modalWidth(m.width)))
 	return m.ta.Focus()
 }
 
@@ -84,7 +84,7 @@ func (m *feedbackNoteModal) Update(msg tea.Msg) (tea.Cmd, bool, string) {
 // View renders the modal box. Caller should overlay this when Active().
 func (m *feedbackNoteModal) View() string {
 	w := modalWidth(m.width)
-	innerW := w - 4
+	innerW := modalContentWidth(w)
 
 	// Header: "FEEDBACK NOTE" left, truncated itemKey right.
 	left := StyleSubtle.Render("FEEDBACK NOTE")

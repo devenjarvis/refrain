@@ -211,17 +211,7 @@ func (m *repoPickerModel) applyFilter() {
 
 // View renders the two-panel picker. The App wraps this with a statusbar.
 func (m repoPickerModel) View() string {
-	leftWidth := m.width / 2
-	if leftWidth < 30 {
-		leftWidth = 30
-	}
-	if leftWidth > m.width-20 && m.width > 20 {
-		leftWidth = m.width - 20
-	}
-	rightWidth := m.width - leftWidth - 1
-	if rightWidth < 0 {
-		rightWidth = 0
-	}
+	leftWidth, rightWidth := splitColumns(m.width, columnStrategy{num: 1, den: 2, min: 30, reserve: 20}, separatorWidth)
 
 	left := m.renderList(leftWidth)
 	right := m.renderDetails(rightWidth)
@@ -250,7 +240,7 @@ func (m repoPickerModel) renderList(width int) string {
 		titleText = "MANAGE REPOS"
 	}
 	title := StyleTitle.Render(titleText)
-	sepWidth := width - 2
+	sepWidth := innerWidth(width)
 	if sepWidth < 0 {
 		sepWidth = 0
 	}
@@ -292,7 +282,7 @@ func (m repoPickerModel) renderList(width int) string {
 
 		if idx == repoPickerAddRepoIdx {
 			label := "+ add new repo…"
-			lines = append(lines, prefix+StyleActive.Render(truncateVisible(label, width-4)))
+			lines = append(lines, prefix+StyleActive.Render(truncateVisible(label, modalContentWidth(width))))
 			continue
 		}
 
@@ -306,7 +296,7 @@ func (m repoPickerModel) renderList(width int) string {
 		// Reserve room: prefix (2) + countLabel + 1 space gap.
 		countWidth := lipgloss.Width(countLabel)
 		// Inner width available for name + path; allow a couple cells of padding.
-		nameRoom := width - 2 - countWidth - 2
+		nameRoom := innerWidth(width) - countWidth - 2
 		if nameRoom < 4 {
 			nameRoom = 4
 		}

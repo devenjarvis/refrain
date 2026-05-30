@@ -18,7 +18,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	var lines []string
 
 	// ── Header ────────────────────────────────────────────────────────────────
-	headerLeft := lipgloss.NewStyle().Foreground(lipgloss.Color("#5ab58a")).Bold(true).Render("SHIPPING") +
+	headerLeft := StyleHeading.Foreground(ColorShipping).Render("SHIPPING") +
 		"  " + StyleSubtle.Render("›") +
 		"  " + lipgloss.NewStyle().Render(sess.GetDisplayName())
 	var headerRight string
@@ -30,12 +30,12 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 		gap = 1
 	}
 	lines = append(lines, headerLeft+strings.Repeat(" ", gap)+headerRight)
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 
 	if entry == nil || entry.pr == nil {
 		lines = append(lines, StyleSubtle.Render("  fetching PR status…"))
 		lines = append(lines, "")
-		lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+		lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 		lines = append(lines, shippingHints(false))
 		return strings.Join(lines, "\n")
 	}
@@ -43,15 +43,15 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	pr := entry.pr
 
 	// ── PR summary ────────────────────────────────────────────────────────────
-	titleLine := "  " + lipgloss.NewStyle().Bold(true).Render(pr.Title)
+	titleLine := "  " + StyleBold.Render(pr.Title)
 	lines = append(lines, titleLine)
 
 	var mergeableLabel string
 	switch pr.MergeableState {
 	case "clean":
-		mergeableLabel = lipgloss.NewStyle().Foreground(ColorSuccess).Render("✓ mergeable")
+		mergeableLabel = StyleSuccess.Render("✓ mergeable")
 	case "dirty":
-		mergeableLabel = lipgloss.NewStyle().Foreground(ColorError).Render("✗ conflicts")
+		mergeableLabel = StyleError.Render("✗ conflicts")
 	default:
 		mergeableLabel = StyleSubtle.Render("⋯ checking")
 	}
@@ -65,7 +65,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	}
 	lines = append(lines, baseLine)
 	lines = append(lines, "")
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 
 	// ── CI checks ─────────────────────────────────────────────────────────────
 	lines = append(lines, StyleSubtle.Render("CI CHECKS"))
@@ -77,7 +77,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 
 	// ── Review feedback (two-pane) ────────────────────────────────────────────
 	lines = append(lines, StyleSubtle.Render("REVIEW FEEDBACK"))
@@ -103,17 +103,13 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 			if detailH < 2 {
 				detailH = 2
 			}
-			w := width - 2
+			w := innerWidth(width)
 			lines = append(lines, renderFeedbackList(items, cursor, triage, w, listH)...)
-			lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+			lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 			lines = append(lines, renderFeedbackDetail(items, cursor, triage, scroll, w, detailH)...)
 		} else {
 			// Wide: side-by-side panes.
-			leftW := width * 4 / 10
-			if leftW < 30 {
-				leftW = 30
-			}
-			rightW := width - leftW - 5
+			leftW, rightW := splitColumns(width, columnStrategy{num: 4, den: 10, min: 30}, 5)
 			if rightW < 20 {
 				rightW = 20
 			}
@@ -146,7 +142,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	if remaining := height - used; remaining > 0 {
 		lines = append(lines, strings.Repeat("\n", remaining-1))
 	}
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 	lines = append(lines, shippingHints(isMergeReady(entry)))
 
 	return strings.Join(lines, "\n")
@@ -184,7 +180,7 @@ func renderFeedbackList(items []feedbackItem, cursor int, triage map[string]*fee
 		}
 	}
 
-	cursorBar := lipgloss.NewStyle().Foreground(ColorPrimary).Render("│")
+	cursorBar := StyleAccent.Render("│")
 
 	end := offset + rowsH
 	if end > len(items) {
@@ -237,7 +233,7 @@ func renderFeedbackList(items []feedbackItem, cursor int, triage map[string]*fee
 		rowText := glyph + " " + labelStr + noteGlyph
 
 		if selected {
-			contentW := w - 4
+			contentW := modalContentWidth(w)
 			if rw := ansi.StringWidth(rowText); rw < contentW {
 				rowText += strings.Repeat(" ", contentW-rw)
 			}
@@ -275,7 +271,7 @@ func renderFeedbackDetail(items []feedbackItem, cursor int, triage map[string]*f
 		}
 		heading = StyleSubtle.Render(loc) + "  " + stateStyle.Render(strings.ToLower(strings.ReplaceAll(item.State, "_", " ")))
 	} else {
-		heading = lipgloss.NewStyle().Bold(true).Render(item.Reviewer) + "  " + stateStyle.Render(strings.ToLower(strings.ReplaceAll(item.State, "_", " ")))
+		heading = StyleBold.Render(item.Reviewer) + "  " + stateStyle.Render(strings.ToLower(strings.ReplaceAll(item.State, "_", " ")))
 	}
 	lines = append(lines, heading, "")
 
@@ -335,13 +331,13 @@ func renderCheckRow(run github.CheckRun, width int) string {
 	switch {
 	case run.Status != "completed":
 		icon = "○"
-		iconStyle = lipgloss.NewStyle().Foreground(ColorWarning)
+		iconStyle = StyleWarning
 	case run.Conclusion == "success" || run.Conclusion == "skipped" || run.Conclusion == "neutral":
 		icon = "✓"
-		iconStyle = lipgloss.NewStyle().Foreground(ColorSuccess)
+		iconStyle = StyleSuccess
 	default:
 		icon = "✗"
-		iconStyle = lipgloss.NewStyle().Foreground(ColorError)
+		iconStyle = StyleError
 	}
 
 	var dur string
@@ -357,7 +353,7 @@ func renderCheckRow(run github.CheckRun, width int) string {
 	name := truncateVisible(run.Name, width-20)
 	row := "  " + iconStyle.Render(icon) + "  " + name
 	if dur != "" {
-		padW := width - 4 - ansi.StringWidth(name) - ansi.StringWidth(dur) - 6
+		padW := modalContentWidth(width) - ansi.StringWidth(name) - ansi.StringWidth(dur) - 6
 		if padW < 1 {
 			padW = 1
 		}
@@ -433,13 +429,12 @@ func feedbackItemKey(item feedbackItem) string {
 
 // shippingHints returns the action hint line for the shipping panel footer.
 func shippingHints(mergeReady bool) string {
-	mKey := lipgloss.NewStyle().Foreground(lipgloss.Color("#5ab58a")).Render("m")
+	mKey := StyleAccent.Foreground(ColorShipping).Render("m")
 	mDesc := StyleSubtle.Render(" — merge")
 	if !mergeReady {
 		mKey = StyleSubtle.Render("m")
 	}
-	blue := lipgloss.Color("#7ec8e3")
-	key := func(s string) string { return lipgloss.NewStyle().Foreground(blue).Render(s) }
+	key := func(s string) string { return StyleAccent.Foreground(ColorBuilding).Render(s) }
 	return "  " +
 		mKey + mDesc +
 		"   " + StyleSubtle.Render("M — force merge") +

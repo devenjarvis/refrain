@@ -11,7 +11,6 @@ import (
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/audio"
 	"github.com/devenjarvis/refrain/internal/config"
-	"github.com/devenjarvis/refrain/internal/github"
 	"github.com/devenjarvis/refrain/internal/state"
 )
 
@@ -55,24 +54,23 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 }
 
 func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
-	if msg.err != nil {
-		a.setError(msg.err.Error())
-		return a, nil
+	_ = msg
+	if a.cfg == nil {
+		a.cfg = &config.Config{}
 	}
-	a.cfg = msg.cfg
+	// Surface any non-fatal wiring warning from cmd/ (e.g. unreadable global
+	// settings) transiently, preserving the pre-injection behavior.
+	if a.initWarning != "" {
+		a.setError(a.initWarning)
+	}
 	now := time.Now()
 	a.wellness.appStart = now
 	a.wellness.sessionStart = now
 	a.wellness.lastInputAt = now
 
-	// Load global settings and run one-time migration.
-	globalSettings, err := config.LoadGlobalSettings()
-	if err != nil {
-		a.setError(err.Error())
-	} else {
-		a.globalSettings = globalSettings
-		_ = config.MigrateBypassPermissions(a.cfg)
-	}
+	// Derive UI state from the injected global settings. config.Resolve here is
+	// a pure derivation, not wiring — globalSettings was loaded in cmd/ and
+	// injected via NewAppFromDeps.
 	resolved := config.Resolve(a.globalSettings, nil)
 	a.dashboard.sidebarWidth = resolved.SidebarWidth
 	a.wellness.focusSessionMinutes = resolved.FocusSessionMinutes
@@ -81,32 +79,18 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 	// Default activeRepo to the first registered repo so the pipeline
 	// header shows "repo: <name>" and workflow keys ('n', 'a', 'o') target
 	// a known repo on a fresh dashboard.
-	if a.activeRepo == "" && len(msg.cfg.Repos) > 0 {
-		a.activeRepo = msg.cfg.Repos[0].Path
-	}
-
-	// Load per-repo settings and build resolved cache.
-	for _, repo := range msg.cfg.Repos {
-		rs, _ := config.LoadRepoSettings(repo.Path)
-		a.repoSettings[repo.Path] = rs
-		a.resolvedCache[repo.Path] = config.Resolve(a.globalSettings, rs)
+	if a.activeRepo == "" && len(a.cfg.Repos) > 0 {
+		a.activeRepo = a.cfg.Repos[0].Path
 	}
 
 	// Initialize audio player (best-effort — nil on failure).
 	if p, err := audio.NewPlayer(); err == nil {
 		a.audioPlayer = p
 	}
-	// Initialize GitHub client (best-effort — nil on failure).
-	if ghc, err := github.NewClient(); err == nil {
-		a.ghClient = ghc
-	}
-	// Create a manager for every registered repo and start event listeners.
+	// Start event listeners for every injected manager.
 	var cmds []tea.Cmd
-	for _, repo := range msg.cfg.Repos {
-		if a.managers[repo.Path] == nil {
-			mgr := agent.NewManager(repo.Path, a.resolvedCache[repo.Path])
-			a.managers[repo.Path] = mgr
-			ensureGitignore(repo.Path)
+	for _, repo := range a.cfg.Repos {
+		if mgr := a.managers[repo.Path]; mgr != nil {
 			cmds = append(cmds, listenEvents(mgr), listenPlannerQuestions(mgr))
 		}
 	}
@@ -117,9 +101,9 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 		resumeCfg agent.Config
 		sessions  []state.SessionState
 	}
-	resumeItems := make([]resumeItem, 0, len(msg.cfg.Repos))
+	resumeItems := make([]resumeItem, 0, len(a.cfg.Repos))
 	totalPruned := 0
-	for _, repo := range msg.cfg.Repos {
+	for _, repo := range a.cfg.Repos {
 		bs, err := state.Load(repo.Path)
 		if err != nil || bs == nil {
 			continue

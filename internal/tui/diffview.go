@@ -238,7 +238,7 @@ func (d diffModel) View() string {
 	}
 	header := d.renderHeader()
 	if d.model == nil || len(d.model.Files) == 0 {
-		empty := lipgloss.NewStyle().Foreground(ColorMuted).Render(
+		empty := StyleSubtle.Render(
 			fmt.Sprintf("No changes for %s", d.agentName),
 		)
 		body := padViewBody(empty, d.width, d.bodyHeight())
@@ -267,7 +267,7 @@ func (d diffModel) renderHeader() string {
 		if d.sideBySide && d.width >= diff.SideBySideMinWidth {
 			mode = "side-by-side"
 		}
-		sub = lipgloss.NewStyle().Foreground(ColorMuted).Render(
+		sub = StyleSubtle.Render(
 			fmt.Sprintf("  %s  [%s]", d.selected, mode),
 		)
 	}
@@ -280,7 +280,7 @@ func (d diffModel) renderHeader() string {
 
 // renderVerticalSeparator returns a 1-col vertical rule of `h` rows.
 func renderVerticalSeparator(h int) string {
-	style := lipgloss.NewStyle().Foreground(ColorMuted)
+	style := StyleSubtle
 	lines := make([]string, h)
 	for i := range lines {
 		lines[i] = style.Render("│")

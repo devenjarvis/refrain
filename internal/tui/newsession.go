@@ -51,7 +51,9 @@ var promptModalPlaceholders = []string{
 var pickPrompt = func(n int) int { return rand.IntN(n) }
 
 const (
-	newSessionSidebarWidth  = 28
+	// newSessionSidebarWidth matches the dashboard sidebar (defaultSidebarWidth)
+	// so the new-session form lines up with the pipeline view behind it.
+	newSessionSidebarWidth  = defaultSidebarWidth
 	newSessionSidebarMinVP  = 110 // sidebar shown only when viewport width >= this
 	newSessionMaxTextareaW  = 120
 	newSessionVerticalSlack = 8 // rows consumed by header + title + blank rows + footer
@@ -211,7 +213,7 @@ func (m *newSessionModel) renderSidebar() string {
 	w := newSessionSidebarWidth
 
 	flowLabel := StyleSubtle.Render("FLOW")
-	flow := lipgloss.NewStyle().Foreground(ColorPrimary).Render("Plan → Build → Review → Ship")
+	flow := StyleAccent.Render("Plan → Build → Review → Ship")
 	flowBlock := lipgloss.JoinVertical(lipgloss.Left, flowLabel, flow)
 
 	exLabel := StyleSubtle.Render("EXAMPLES")

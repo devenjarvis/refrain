@@ -33,7 +33,7 @@ func (a App) updateFileBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			a.repoPicker.width = a.width
-			a.repoPicker.height = a.height - 1
+			a.repoPicker.height = a.height - statusBarHeight
 			a.repoPicker.setRepos(a.cfg.Repos, counts, newPath)
 			a.view = ViewRepoPicker
 			return a, cmd
@@ -213,7 +213,7 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.repoPickerPending = true
 		a.repoBrowser = newFileBrowserModel()
 		a.repoBrowser.width = a.width
-		a.repoBrowser.height = a.height - 1
+		a.repoBrowser.height = a.height - statusBarHeight
 		a.view = ViewFileBrowser
 		return a, nil
 

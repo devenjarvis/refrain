@@ -48,13 +48,13 @@ func verdictBadge(rec *taskVerdictRecord, now time.Time) (icon, label string, st
 	// User flag wins over the AI verdict: the human reviewer is explicitly
 	// asking for rework on this task.
 	if rec.userFlagged {
-		return "⚑", "flagged", lipgloss.NewStyle().Foreground(ColorWarning)
+		return "⚑", "flagged", StyleWarning
 	}
 	switch rec.state {
 	case verdictPending:
 		return "⋯", "Pending", StyleSubtle
 	case verdictRunning:
-		return reviewSpinnerFrame(now), "Reviewing…", lipgloss.NewStyle().Foreground(ColorPrimary)
+		return reviewSpinnerFrame(now), "Reviewing…", StyleAccent
 	case verdictDone:
 		switch rec.verdict.Kind {
 		case agent.VerdictPass:
@@ -80,7 +80,7 @@ func checkBadge(result validationCheckResult, now time.Time) (icon string, style
 	case checkPending:
 		return "⋯", StyleSubtle
 	case checkRunning:
-		return reviewSpinnerFrame(now), lipgloss.NewStyle().Foreground(ColorPrimary)
+		return reviewSpinnerFrame(now), StyleAccent
 	case checkPassed:
 		return "✓", StyleSuccess
 	case checkFailed:
@@ -108,7 +108,7 @@ func renderChecksTab(cs *checksTabState, width, height int, now time.Time) []str
 	}
 
 	// Build list pane.
-	header := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("CHECKS")
+	header := StyleHeading.Foreground(ColorSecondary).Render("CHECKS")
 	listLines := make([]string, 0, len(cs.checks)+1)
 	listLines = append(listLines, header)
 	for i, ch := range cs.checks {
@@ -147,7 +147,7 @@ func renderChecksTab(cs *checksTabState, width, height int, now time.Time) []str
 
 	// Build output pane.
 	var outputLines []string
-	outputLines = append(outputLines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	outputLines = append(outputLines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 	if cs.cursor < len(cs.results) {
 		result := cs.results[cs.cursor]
 		out := result.output
@@ -185,7 +185,7 @@ func renderReviewHeader(sess *agent.Session, width int, now time.Time) []string 
 		mins := int(now.Sub(sess.DoneAt()).Minutes())
 		age = fmt.Sprintf("done %dm ago", mins)
 	}
-	headerLeft := lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render("REVIEW") +
+	headerLeft := StyleHeading.Render("REVIEW") +
 		"  " + StyleSubtle.Render("›") +
 		"  " + lipgloss.NewStyle().Render(sess.GetDisplayName())
 	headerRight := StyleSubtle.Render(age)
@@ -242,7 +242,7 @@ func renderReviewHeader(sess *agent.Session, width int, now time.Time) []string 
 	for _, l := range intentLines {
 		lines = append(lines, "  "+l)
 	}
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 	return lines
 }
 
@@ -265,7 +265,7 @@ func renderReviewPlaceholderTab(label string, width, height int) []string {
 // inactive tabs in StyleSubtle. Line 1: a subtle horizontal divider.
 func renderReviewTabBar(activeTab, width int) []string {
 	labels := []string{"Tasks", "Diff", "Checks"}
-	activeStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
+	activeStyle := StyleActive.Bold(true)
 	var parts []string
 	for i, label := range labels {
 		if i == activeTab {
@@ -275,7 +275,7 @@ func renderReviewTabBar(activeTab, width int) []string {
 		}
 	}
 	labelLine := "  " + strings.Join(parts, "  ")
-	divider := StyleSubtle.Render(strings.Repeat("─", width-2))
+	divider := StyleSubtle.Render(strings.Repeat("─", innerWidth(width)))
 	return []string{labelLine, divider}
 }
 
@@ -337,9 +337,9 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 		if detailH < 2 {
 			detailH = 2
 		}
-		paneW := width - 2
+		paneW := innerWidth(width)
 		bodyLines = append(bodyLines, renderTaskListPane(entry, paneW, listH, cursor, now)...)
-		bodyLines = append(bodyLines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+		bodyLines = append(bodyLines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, paneW, detailH, now)...)
 	}
 
@@ -351,13 +351,13 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 
 	// In-flight PR draft status line.
 	if prDraftInFlight {
-		draftStatus := lipgloss.NewStyle().Foreground(ColorWarning).Render(reviewSpinnerFrame(now) + " Pushing branch and drafting PR…")
+		draftStatus := StyleWarning.Render(reviewSpinnerFrame(now) + " Pushing branch and drafting PR…")
 		lines = append(lines, draftStatus)
 	}
 
 	// Action footer.
 	lines = append(lines, "")
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 	var pHint string
 	if prDraftInFlight {
 		pHint = StyleSubtle.Render("p — (in progress…)")
@@ -416,7 +416,7 @@ func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLe
 // Row format: <icon> [N] <truncated text>  +X -Y
 func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now time.Time) []string {
 	const headerLines = 2
-	planTasksStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true)
+	planTasksStyle := StyleHeading.Foreground(ColorSecondary)
 	header := []string{
 		planTasksStyle.Render("PLAN TASKS"),
 		StyleSubtle.Render(strings.Repeat("─", ansi.StringWidth("PLAN TASKS"))),
@@ -467,7 +467,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 	// cursor row. We reserve 2 columns globally (one per side) so moving the
 	// cursor never reflows text — both selected and unselected rows have the
 	// same content budget.
-	cursorBar := lipgloss.NewStyle().Foreground(ColorPrimary).Render("│")
+	cursorBar := StyleAccent.Render("│")
 	subtleGreen := StyleSuccess
 	subtleRed := StyleError
 
@@ -535,7 +535,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 		rowText := iconStr + " " + StyleSubtle.Render(label) + " " + textStr
 		if statStr != "" {
 			usedW := iconW + 1 + labelW + 1 + ansi.StringWidth(textStr)
-			padW := width - 4 - usedW - 2 - statW
+			padW := modalContentWidth(width) - usedW - 2 - statW
 			if padW < 1 {
 				padW = 1
 			}
@@ -543,7 +543,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 		}
 
 		if selected {
-			contentW := width - 4
+			contentW := modalContentWidth(width)
 			if w := ansi.StringWidth(rowText); w < contentW {
 				rowText += strings.Repeat(" ", contentW-w)
 			}
@@ -640,7 +640,7 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int, now
 	maxW := measure - 2
 
 	// H2 heading style: matches colHeading2 / styleH2 in mdrender.
-	headingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true)
+	headingStyle := StyleHeading.Foreground(ColorSecondary)
 
 	// (1) Task heading with H2 color and thin underline.
 	heading := ""
@@ -743,9 +743,9 @@ func sortFileStatsByChurn(files []git.FileStat) {
 // sess and plan are passed so callers can cache plan reads; if plan is empty
 // or the session has no plan, shows a brief "no plan available" message.
 func renderReviewSpecOverlay(sess *agent.Session, plan string, scrollOffset, width, height int) string {
-	titleStyle := lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+	titleStyle := StyleHeading
 	title := titleStyle.Render("SPEC") + "  " + StyleSubtle.Render("›") + "  " + sess.GetDisplayName()
-	header := title + "\n" + StyleSubtle.Render(strings.Repeat("─", width-2))
+	header := title + "\n" + StyleSubtle.Render(strings.Repeat("─", innerWidth(width)))
 	bodyH := height - 2 // title + divider
 	if bodyH < 1 {
 		bodyH = 1
@@ -758,7 +758,7 @@ func renderReviewSpecOverlay(sess *agent.Session, plan string, scrollOffset, wid
 
 	sections := agent.ParsePlanSections(plan)
 	r := mdrender.New(docEditorChromaStyle)
-	contentW := width - 4
+	contentW := modalContentWidth(width)
 
 	type namedSection struct {
 		heading string
@@ -804,7 +804,7 @@ func renderReviewSpecOverlay(sess *agent.Session, plan string, scrollOffset, wid
 	body := strings.Join(window, "\n")
 
 	// Footer hint.
-	footer := "\n" + StyleSubtle.Render(strings.Repeat("─", width-2)) + "\n" +
+	footer := "\n" + StyleSubtle.Render(strings.Repeat("─", innerWidth(width))) + "\n" +
 		"  " + StyleActive.Render("pgdn") + StyleSubtle.Render("/") + StyleActive.Render("pgup") + StyleSubtle.Render(" — scroll") +
 		"  " + StyleActive.Render("g") + StyleSubtle.Render("/") + StyleActive.Render("G") + StyleSubtle.Render(" — top/bottom") +
 		"  " + StyleActive.Render("esc") + StyleSubtle.Render(" — back to review")

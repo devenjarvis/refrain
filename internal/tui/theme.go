@@ -18,6 +18,20 @@ var (
 	ColorText      = initColor("#F9FAFB")
 	ColorBg        = initColor("#111827")
 
+	// ColorWaiting is the accent for agents in StatusWaiting (permission
+	// prompts, input blocks); surfaced as a status badge in the dashboard.
+	ColorWaiting = initColor("#D946EF")
+
+	// Pipeline-section accents: the colors that identify the BUILDING,
+	// REVIEWING, and SHIPPING stages across the dashboard and panels.
+	ColorBuilding  = initColor("#7ec8e3")
+	ColorReviewing = initColor("#9b7fdb")
+	ColorShipping  = initColor("#5ab58a")
+
+	// Break-overlay accents: the wellness break overlay's title and resume cue.
+	ColorBreakTitle  = initColor("#38BDF8")
+	ColorBreakAccent = initColor("#34D399")
+
 	StyleTitle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorPrimary)
@@ -25,6 +39,7 @@ var (
 	StyleSubtle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
 
+	// Status badges: colored, non-bold status text rendered in section rows.
 	StyleSuccess = lipgloss.NewStyle().
 			Foreground(ColorSuccess)
 
@@ -34,12 +49,39 @@ var (
 	StyleWarning = lipgloss.NewStyle().
 			Foreground(ColorWarning)
 
+	StyleWaiting = lipgloss.NewStyle().
+			Foreground(ColorWaiting)
+
 	StyleActive = lipgloss.NewStyle().
 			Foreground(ColorSecondary)
 
 	StyleLink = lipgloss.NewStyle().
 			Underline(true).
 			Foreground(ColorSecondary)
+
+	// Section headings: bold accent text titling a panel/section (REVIEW,
+	// CHECKS, SHIPPING…). Override the foreground inline for non-primary
+	// sections, e.g. StyleHeading.Foreground(ColorShipping).
+	StyleHeading = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorPrimary)
+
+	// StyleCardTitle is a session/card name: bold body-text color.
+	StyleCardTitle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorText)
+
+	// StyleBold is plain bold text that inherits or overrides its color inline.
+	StyleBold = lipgloss.NewStyle().Bold(true)
+
+	// StyleMutedItalic is a de-emphasized description line.
+	StyleMutedItalic = lipgloss.NewStyle().
+				Foreground(ColorMuted).
+				Italic(true)
+
+	// StyleAccent is plain primary-accent text: cursor bars and primary badges.
+	StyleAccent = lipgloss.NewStyle().
+			Foreground(ColorPrimary)
 
 	StyleStatusBar = lipgloss.NewStyle().
 			Foreground(ColorText).

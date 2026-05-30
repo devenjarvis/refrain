@@ -712,7 +712,7 @@ func (a App) handleReviewOpenTaskDiff(msg reviewOpenTaskDiffMsg) (tea.Model, tea
 		return a, nil
 	}
 	a.view = ViewDiff
-	a.diff = newDiffModel(msg.taskLabel, m, a.width, a.height-1)
+	a.diff = newDiffModel(msg.taskLabel, m, a.width, a.height-statusBarHeight)
 	return a, nil
 }
 

@@ -2,8 +2,6 @@ package tui
 
 import (
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 type keyHint struct {
@@ -113,12 +111,8 @@ var (
 )
 
 func renderStatusBar(hints []keyHint, width int) string {
-	keyStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(ColorText)
-
-	descStyle := lipgloss.NewStyle().
-		Foreground(ColorMuted)
+	keyStyle := StyleBold.Foreground(ColorText)
+	descStyle := StyleSubtle
 
 	parts := make([]string, 0, len(hints))
 	for _, h := range hints {
