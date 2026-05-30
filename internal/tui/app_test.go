@@ -5801,8 +5801,9 @@ func TestRecordInput_MouseClick(t *testing.T) {
 // the idle-decay path starts from a known reference rather than the zero value.
 func TestInit_SeedsLastInputAt(t *testing.T) {
 	app := NewApp()
+	app.cfg = &config.Config{}
 	before := time.Now()
-	model, _ := app.Update(initAppMsg{cfg: &config.Config{}})
+	model, _ := app.Update(initAppMsg{})
 	after := time.Now()
 	app = model.(App)
 

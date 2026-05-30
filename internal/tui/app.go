@@ -95,11 +95,11 @@ type diffStatsMsg struct {
 	stats     *diffSummaryData
 }
 
-// initAppMsg carries the result of app initialization.
-type initAppMsg struct {
-	cfg *config.Config
-	err error
-}
+// initAppMsg triggers the post-wiring TUI init in handleInit. Config, managers,
+// and the GitHub client are already injected by cmd/ (see NewAppFromDeps), so
+// this message carries no payload — it just kicks the Update loop into starting
+// event listeners and background session resume.
+type initAppMsg struct{}
 
 // resumeDoneMsg signals that background session resume has completed.
 type resumeDoneMsg struct {
@@ -151,6 +151,11 @@ type App struct {
 	managers   map[string]SessionManager
 	activeRepo string
 	cfg        *config.Config
+
+	// managerFactory builds a SessionManager when a repo is added at runtime
+	// (addRepo). NewApp() defaults it to DefaultManagerFactory; tests override
+	// it to assert wiring without building a real Manager. See deps.go.
+	managerFactory ManagerFactory
 
 	// debugDumpPath, when non-empty, names a file that the latest composed
 	// dashboard frame is written to on every tick. Set once at startup from
@@ -339,6 +344,7 @@ func NewApp() App {
 		cursor:          NewFocusedCursor(),
 		keys:            DefaultKeyMap(),
 		wellness:        newWellnessState(),
+		managerFactory:  DefaultManagerFactory,
 		managers:        make(map[string]SessionManager),
 		repoSettings:    make(map[string]*config.RepoSettings),
 		resolvedCache:   make(map[string]config.ResolvedSettings),
@@ -362,22 +368,10 @@ func (a App) Init() tea.Cmd {
 
 func initAppCmd() tea.Cmd {
 	return func() tea.Msg {
-		cfg, err := config.Load()
-		if err != nil {
-			return initAppMsg{err: err}
-		}
-
-		if len(cfg.Repos) == 0 {
-			// Auto-register the current working directory on first run.
-			if err := config.AddRepo(cfg, "."); err != nil {
-				return initAppMsg{err: err}
-			}
-			if err := config.Save(cfg); err != nil {
-				return initAppMsg{err: err}
-			}
-		}
-
-		return initAppMsg{cfg: cfg}
+		// Config, settings, managers, and the GitHub client are wired in cmd/
+		// and injected via NewAppFromDeps. The remaining init work (listeners,
+		// resume) lives in handleInit; this just dispatches into it.
+		return initAppMsg{}
 	}
 }
 
@@ -540,9 +534,8 @@ func (a *App) addRepo(path string) tea.Cmd {
 	a.resolvedCache[absPath] = config.Resolve(a.globalSettings, rs)
 
 	if a.managers[absPath] == nil {
-		mgr := agent.NewManager(absPath, a.resolvedCache[absPath])
+		mgr := a.managerFactory(absPath, a.resolvedCache[absPath])
 		a.managers[absPath] = mgr
-		ensureGitignore(absPath)
 		a.refreshAgentList()
 		return tea.Batch(listenEvents(mgr), listenPlannerQuestions(mgr))
 	}
