@@ -11,7 +11,7 @@ import (
 // dashboardModel.View/Update (and their render helpers), so the dashboard reads
 // live App state without mirroring it onto its own struct — the CONVENTIONS.md
 // §5/§6 replacement for the old syncModalsToDashboard / refreshAgentList sync
-// path. It is the dashboard's analogue of PanelServices.
+// path. It is the dashboard's analogue of the panels' construction-injected deps.
 //
 // Purity rule (§5): every time-derived field here is computed from the
 // tick-refreshed render clock (dashboardModel.now), never time.Now(), because

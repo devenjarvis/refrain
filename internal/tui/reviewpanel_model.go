@@ -3,7 +3,10 @@ package tui
 import (
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/github"
 )
 
 const (
@@ -26,24 +29,55 @@ type reviewPanelModel struct {
 	checksCursor      int // cursor position in the Checks tab list
 	checksScroll      int // scroll offset for the Checks tab output pane
 
+	// dashboardTopY is the screen Y offset where dashboard content begins.
+	// App pushes this in via SetDashboardTopY; handleClick reads it instead of
+	// reaching through a services value (§3 fold).
+	dashboardTopY int
+
+	// drafting reflects whether a PR draft is in flight for THIS session. App
+	// pushes it via SetDrafting whenever the draft flags change; View renders
+	// from it instead of querying App.
+	drafting bool
+
 	// now is the render clock, refreshed from the app tick via SetNow. View
 	// derives elapsed/age strings and the verdict spinner from it so rendering
 	// stays pure (§5: no clock read at render time).
 	now time.Time
 
+	// deps carries the App-level reference handles the panel reaches through
+	// for lookups and cmd factories. Bound once at construction to maps and
+	// pointers that outlive App value-copies (§3 fold).
+	deps reviewDeps
+
 	width, height int
+}
+
+// reviewDeps holds the reference-typed App handles the review panel needs.
+// Bound at construction to the App's maps/pointers (never to App itself) so the
+// closures stay live across App value-copies (App.Update is a value receiver).
+type reviewDeps struct {
+	Manager     func(repoPath string) SessionManager
+	Resolved    func(repoPath string) config.ResolvedSettings
+	GHClient    func() *github.Client
+	PRCache     func(repoPath, sessionID string) *prCacheEntry
+	ReviewCache func(repoPath, sessionID string) *reviewDiffEntry
+
+	ValidationRuns         func(repoPath, sessID string) *validationRunState
+	TriggerValidationRerun func(sessID, repoPath, worktreePath string, checks []config.ValidationCheck) tea.Cmd
+	KillSessionCmd         func(sess *agent.Session, repoPath string) tea.Cmd
 }
 
 // newReviewPanel constructs a review panel for sess at the given size.
 // repoPath pins which repo's manager is used for all key handlers — it must
 // match the repo the session belongs to so multi-repo ID collisions are safe.
-func newReviewPanel(sess *agent.Session, repoPath string, width, height int) *reviewPanelModel {
+func newReviewPanel(sess *agent.Session, repoPath string, width, height int, deps reviewDeps) *reviewPanelModel {
 	return &reviewPanelModel{
 		session:  sess,
 		repoPath: repoPath,
 		width:    width,
 		height:   height,
 		now:      time.Now(),
+		deps:     deps,
 	}
 }
 
@@ -90,4 +124,24 @@ func (m *reviewPanelModel) SetSize(w, h int) {
 	}
 	m.width = w
 	m.height = h
+}
+
+// SetDashboardTopY records the screen Y offset where dashboard content begins.
+// App pushes this whenever it sets the panel size or the offset changes; the
+// click-handler reads it instead of reaching through a services struct.
+func (m *reviewPanelModel) SetDashboardTopY(y int) {
+	if m == nil {
+		return
+	}
+	m.dashboardTopY = y
+}
+
+// SetDrafting records whether a PR draft is in flight for this session. App
+// pushes the updated value whenever its draft flags change; View renders the
+// "Drafting PR…" footer from it.
+func (m *reviewPanelModel) SetDrafting(v bool) {
+	if m == nil {
+		return
+	}
+	m.drafting = v
 }

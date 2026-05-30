@@ -342,7 +342,7 @@ func (a App) handleKeysReviewPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 	if snapshot == nil {
 		return a, nil, false
 	}
-	updated, cmd := snapshot.Update(msg, a.panelServices())
+	updated, cmd := snapshot.Update(msg)
 	if rp, ok := updated.(*reviewPanelModel); ok {
 		a.modals.CompareAndSetReview(snapshot, rp)
 	}
@@ -356,7 +356,7 @@ func (a App) handleKeysShippingPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 	if snapshot == nil {
 		return a, nil, false
 	}
-	updated, cmd := snapshot.Update(msg, a.panelServices())
+	updated, cmd := snapshot.Update(msg)
 	if sp, ok := updated.(*shippingPanelModel); ok {
 		a.modals.CompareAndSetShipping(snapshot, sp)
 	}
@@ -830,7 +830,8 @@ func (a App) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	// focusReview: delegate left-pane row clicks to the panel.
 	if rp := a.modals.Review(); rp != nil {
 		before := rp.TaskCursor()
-		rp.handleClick(msg, a.panelServices())
+		rp.SetDashboardTopY(dashboardTopY)
+		rp.handleClick(msg)
 		if rp.TaskCursor() != before {
 			return a, nil
 		}
@@ -1149,7 +1150,7 @@ func (a App) handlePipelineOpenReview() (App, tea.Cmd, bool) {
 	item := reviewItems[idx]
 	sess := item.session
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	a.openReview(newReviewPanel(sess, item.repoPath, a.width, a.height))
+	a.openReviewPanel(sess, item.repoPath)
 	if _, ok := a.reviewDiffCache[cacheKey(item.repoPath, sess.ID)]; !ok {
 		return a, tea.Batch(
 			a.fetchReviewDiffCmd(sess, item.repoPath),
@@ -1157,7 +1158,7 @@ func (a App) handlePipelineOpenReview() (App, tea.Cmd, bool) {
 		), true
 	}
 	// Diff already cached; start validation if not already running.
-	if a.validationRuns[sess.ID] == nil {
+	if a.validationRuns[cacheKey(item.repoPath, sess.ID)] == nil {
 		return a, a.startValidationChecksCmd(sess, item.repoPath), true
 	}
 	return a, nil, true

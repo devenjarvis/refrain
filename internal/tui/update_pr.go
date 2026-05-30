@@ -19,6 +19,7 @@ func (a App) handlePRDraftReady(msg prDraftReadyMsg) (tea.Model, tea.Cmd) {
 	a.prDraftInFlight = false
 	a.prDraftSessionID = ""
 	a.prDraftRepoPath = ""
+	a.syncReviewDrafting()
 	if msg.err != nil {
 		a.setError("PR draft failed: " + msg.err.Error())
 		return a, nil
@@ -546,15 +547,14 @@ func entryThreads(entry *prCacheEntry) []github.ReviewThread {
 	return entry.threads
 }
 
-// setFeedbackVerdict lazily allocates the per-session triage map and sets the
-// verdict on the item with the given key. For feedbackNeutral with an empty
-// note, the entry is deleted to keep the map clean.
-func (a *App) mergePRCmd(sessionID, repoPath string) tea.Cmd {
-	return a.mergePRCmdWithMode(sessionID, repoPath, false)
-}
-
-func (a *App) forceMergePRCmd(sessionID, repoPath string) tea.Cmd {
-	return a.mergePRCmdWithMode(sessionID, repoPath, true)
+// mergePRCmdFor returns the shipping panel's MergePRCmd dep. mergePRCmdWithMode
+// reads only reference-typed App state (ghClient, prCache, resolvedCache) and
+// builds an async cmd without mutating App scalars, so capturing a value copy
+// of App at construction is safe (those maps/pointer are shared, not copied).
+func (a App) mergePRCmdFor() func(sessionID, repoPath string, force bool) tea.Cmd {
+	return func(sessionID, repoPath string, force bool) tea.Cmd {
+		return a.mergePRCmdWithMode(sessionID, repoPath, force)
+	}
 }
 
 func (a *App) mergePRCmdWithMode(sessionID, repoPath string, force bool) tea.Cmd {

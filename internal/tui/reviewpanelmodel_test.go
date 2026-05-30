@@ -13,74 +13,57 @@ import (
 	"github.com/devenjarvis/refrain/internal/github"
 )
 
-// panel-level test pattern: instantiate the panel directly, supply a stub
-// PanelServices, drive it with messages, assert state. No full App spin-up,
-// no goroutines, no claude binary.
+// panel-level test pattern (post-§3 fold): instantiate the panel directly with
+// a reviewDeps built from a stub App, drive it with messages, and assert on the
+// panel's own state plus the tea.Cmds/msgs it returns. Cross-cutting effects
+// (close, error, open-in-launch, PR draft) now flow as messages, so the helpers
+// below run a returned cmd and classify the resulting message.
 
-func newTestSvc() (PanelServices, *testServiceState) {
-	state := &testServiceState{}
-	svc := PanelServices{
-		Width:  120,
-		Height: 40,
-		Manager: func(string) SessionManager {
-			return nil
-		},
-		Resolved:    func(string) config.ResolvedSettings { return config.ResolvedSettings{} },
-		GHClient:    func() *github.Client { return nil },
-		PRCache:     func(string, string) *prCacheEntry { return nil },
-		ReviewCache: func(string, string) *reviewDiffEntry { return nil },
-		ClosePanel: func() {
-			state.closed = true
-		},
-		OpenInLaunch: func(*agent.Session, string) bool {
-			state.openInLaunchCalled = true
-			return state.openInLaunchResult
-		},
-		OpenPlanEditor: func(*agent.Session, string) {},
-		OpenURL:        func(string) error { return nil },
-		SetError: func(msg string) {
-			state.errMsg = msg
-		},
-		MergePRCmd: func(string, string, bool) tea.Cmd { return nil },
-		StartPRDraftCmd: func(*agent.Session, string, bool) tea.Cmd {
-			return func() tea.Msg { return nil }
-		},
-		KillSessionCmd: func(*agent.Session, string) tea.Cmd {
-			state.killSessionCalled = true
-			return func() tea.Msg { return nil }
-		},
-		FetchReviewDiff: func(*agent.Session, string) tea.Cmd { return nil },
-		FeedbackTriage: func(string, string) map[string]*feedbackTriageEntry {
-			return nil
-		},
-		SetFeedbackVerdict: func(string, string, string, feedbackVerdict) {},
-		SetFeedbackNote:    func(string, string, string, string) {},
-		prDraftInFlightFor: func(string, string) bool { return false },
-		ValidationRuns:     func(string) *validationRunState { return nil },
-		TriggerValidationRerun: func(string, string, string, []config.ValidationCheck) tea.Cmd {
-			return nil
-		},
-	}
-	return svc, state
+// reviewTestApp returns an App seeded with empty caches plus a stub manager
+// factory so buildReviewDeps yields live, no-op-friendly handles. Tests mutate
+// app.* maps to inject behaviour, then call app.buildReviewDeps().
+func reviewTestApp() App {
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	return app
 }
 
-type testServiceState struct {
-	closed             bool
-	errMsg             string
-	openInLaunchCalled bool
-	openInLaunchResult bool
-	killSessionCalled  bool
+// runReviewCmd runs cmd (if non-nil) and returns the single message it yields,
+// or nil. tea.Batch results are flattened one level via runCmdAll.
+func runReviewCmd(t *testing.T, cmd tea.Cmd) []tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		return nil
+	}
+	return runCmdAll(t, cmd)
+}
+
+// cmdClosesPanel reports whether cmd yields a panelCloseMsg.
+func cmdClosesPanel(t *testing.T, cmd tea.Cmd) bool {
+	t.Helper()
+	_, found := findMsg[panelCloseMsg](runReviewCmd(t, cmd))
+	return found
+}
+
+// cmdSetsError returns the error text from a setErrorMsg in cmd's output, or "".
+func cmdSetsError(t *testing.T, cmd tea.Cmd) string {
+	t.Helper()
+	if m, ok := findMsg[setErrorMsg](runReviewCmd(t, cmd)); ok {
+		return m.text
+	}
+	return ""
 }
 
 // TestReviewPanelModel_TabSwitching verifies 1–3 and tab/shift+tab change activeTab.
 func TestReviewPanelModel_TabSwitching(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, _ := newTestSvc()
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
 	press := func(msg tea.KeyPressMsg) {
 		t.Helper()
-		_, _ = panel.Update(msg, svc)
+		_, _ = panel.Update(msg)
 	}
 
 	// Numeric keys jump directly.
@@ -119,11 +102,9 @@ func TestReviewPanelModel_TabSwitching(t *testing.T) {
 func TestReviewPanelModel_ChecksTab_JKMovesCursor(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, _ := newTestSvc()
 
-	app := NewApp()
-	app.validationRuns[sess.ID] = &validationRunState{
+	app := reviewTestApp()
+	app.validationRuns[cacheKey("", sess.ID)] = &validationRunState{
 		runID: 1,
 		checks: []config.ValidationCheck{
 			{Name: "A", Command: "echo a"},
@@ -136,24 +117,22 @@ func TestReviewPanelModel_ChecksTab_JKMovesCursor(t *testing.T) {
 			{state: checkRunning},
 		},
 	}
-	svc.ValidationRuns = func(sessID string) *validationRunState {
-		return app.validationRuns[sessID]
-	}
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
 	// Switch to Checks tab.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: '3', Text: "3"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: '3', Text: "3"})
 
 	// Press j twice.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if panel.checksCursor != 1 {
 		t.Errorf("after j: checksCursor = %d, want 1", panel.checksCursor)
 	}
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if panel.checksCursor != 2 {
 		t.Errorf("after j j: checksCursor = %d, want 2", panel.checksCursor)
 	}
 	// Press k.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'k', Text: "k"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	if panel.checksCursor != 1 {
 		t.Errorf("after k: checksCursor = %d, want 1", panel.checksCursor)
 	}
@@ -163,46 +142,33 @@ func TestReviewPanelModel_ChecksTab_JKMovesCursor(t *testing.T) {
 func TestReviewPanelModel_ChecksTab_RKeyTriggersRerun(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "/repo", 120, 40)
-	svc, _ := newTestSvc()
 
-	app := NewApp()
+	app := reviewTestApp()
 	app.resolvedCache["/repo"] = config.ResolvedSettings{
 		ValidationChecks: []config.ValidationCheck{
 			{Name: "Tests", Command: "echo test"},
 		},
 	}
-	app.validationRuns[sess.ID] = &validationRunState{
+	app.validationRuns[cacheKey("/repo", sess.ID)] = &validationRunState{
 		runID:   1,
 		checks:  []config.ValidationCheck{{Name: "Tests", Command: "echo test"}},
 		results: []validationCheckResult{{state: checkPassed}},
 	}
-	svc.ValidationRuns = func(sessID string) *validationRunState {
-		return app.validationRuns[sessID]
-	}
-	svc.TriggerValidationRerun = func(sessID, repoPath, worktreePath string, checks []config.ValidationCheck) tea.Cmd {
-		run := app.validationRuns[sessID]
-		if run != nil {
-			run.runID++
-			for i := range run.results {
-				run.results[i] = validationCheckResult{state: checkRunning}
-			}
-		}
-		return func() tea.Msg { return nil }
-	}
+	panel := newReviewPanel(sess, "/repo", 120, 40, app.buildReviewDeps())
 
 	// Switch to Checks tab.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: '3', Text: "3"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: '3', Text: "3"})
 
-	priorRunID := app.validationRuns[sess.ID].runID
+	priorRunID := app.validationRuns[cacheKey("/repo", sess.ID)].runID
 
-	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'r', Text: "r"}, svc)
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if cmd == nil {
 		t.Fatal("r on Checks tab must return a non-nil cmd")
 	}
 
-	if app.validationRuns[sess.ID].runID <= priorRunID {
-		t.Errorf("runID should have incremented; got %d, prior %d", app.validationRuns[sess.ID].runID, priorRunID)
+	if app.validationRuns[cacheKey("/repo", sess.ID)].runID <= priorRunID {
+		t.Errorf("runID should have incremented; got %d, prior %d",
+			app.validationRuns[cacheKey("/repo", sess.ID)].runID, priorRunID)
 	}
 }
 
@@ -210,7 +176,7 @@ func TestReviewPanelModel_ChecksTab_RKeyTriggersRerun(t *testing.T) {
 // the correct runID updates the matching check result without touching others.
 func TestHandleValidationResult_MatchingRunID(t *testing.T) {
 	app := NewApp()
-	app.validationRuns["s1"] = &validationRunState{
+	app.validationRuns[cacheKey("", "s1")] = &validationRunState{
 		runID: 1,
 		checks: []config.ValidationCheck{
 			{Name: "A", Command: "echo a"},
@@ -232,7 +198,7 @@ func TestHandleValidationResult_MatchingRunID(t *testing.T) {
 	}
 	app.handleValidationCheckResult(msg)
 
-	run := app.validationRuns["s1"]
+	run := app.validationRuns[cacheKey("", "s1")]
 	if run.results[0].state != checkPassed {
 		t.Errorf("results[0].state = %v, want checkPassed", run.results[0].state)
 	}
@@ -245,7 +211,7 @@ func TestHandleValidationResult_MatchingRunID(t *testing.T) {
 // runID is silently discarded.
 func TestHandleValidationResult_StaleRunID(t *testing.T) {
 	app := NewApp()
-	app.validationRuns["s1"] = &validationRunState{
+	app.validationRuns[cacheKey("", "s1")] = &validationRunState{
 		runID:  2,
 		checks: []config.ValidationCheck{{Name: "A", Command: "echo a"}},
 		results: []validationCheckResult{
@@ -261,7 +227,7 @@ func TestHandleValidationResult_StaleRunID(t *testing.T) {
 	}
 	app.handleValidationCheckResult(msg)
 
-	run := app.validationRuns["s1"]
+	run := app.validationRuns[cacheKey("", "s1")]
 	if run.results[0].state != checkRunning {
 		t.Errorf("stale result should be discarded; results[0].state = %v, want checkRunning", run.results[0].state)
 	}
@@ -271,7 +237,8 @@ func TestHandleValidationResult_StaleRunID(t *testing.T) {
 // initialises checksCursor and checksScroll to 0.
 func TestReviewPanelModel_ChecksFieldsZeroValue(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	panel := newReviewPanel(sess, "", 120, 40)
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 	if panel.checksCursor != 0 {
 		t.Errorf("checksCursor = %d, want 0", panel.checksCursor)
 	}
@@ -284,7 +251,8 @@ func TestReviewPanelModel_ChecksFieldsZeroValue(t *testing.T) {
 // activeTab to 0 (Tasks tab). Zero-value initialisation covers this, but the
 // test pins the contract so a future refactor can't silently break it.
 func TestReviewPanelModel_DefaultTab(t *testing.T) {
-	panel := newReviewPanel(nil, "", 80, 40)
+	app := reviewTestApp()
+	panel := newReviewPanel(nil, "", 80, 40, app.buildReviewDeps())
 	if panel.activeTab != 0 {
 		t.Errorf("activeTab = %d, want 0 (Tasks)", panel.activeTab)
 	}
@@ -302,27 +270,28 @@ func TestReviewPanelModel_NoDiffViewport(t *testing.T) {
 	if _, found := v.FieldByName("diffCacheByTask"); found {
 		t.Error("reviewPanelModel must not have a diffCacheByTask field")
 	}
-	panel := newReviewPanel(nil, "", 80, 40)
+	app := reviewTestApp()
+	panel := newReviewPanel(nil, "", 80, 40, app.buildReviewDeps())
 	type refresher interface {
-		RefreshDiffViewport(PanelServices)
+		RefreshDiffViewport()
 	}
 	if _, ok := any(panel).(refresher); ok {
 		t.Error("reviewPanelModel must not implement RefreshDiffViewport")
 	}
 }
 
-// TestReviewPanelModel_EscCloses verifies that pressing esc invokes
-// svc.ClosePanel() and otherwise leaves session lifecycle untouched.
+// TestReviewPanelModel_EscCloses verifies that pressing esc emits a
+// panelCloseMsg and otherwise leaves session lifecycle untouched.
 func TestReviewPanelModel_EscCloses(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
-	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyEscape}, svc)
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 
-	if !state.closed {
-		t.Fatal("expected ClosePanel to fire on esc")
+	if !cmdClosesPanel(t, cmd) {
+		t.Fatal("expected panelCloseMsg on esc")
 	}
 	if sess.LifecyclePhase() != agent.LifecycleInReview {
 		t.Errorf("esc must preserve InReview phase, got %v", sess.LifecyclePhase())
@@ -334,13 +303,13 @@ func TestReviewPanelModel_EscCloses(t *testing.T) {
 func TestReviewPanelModel_DKeyDefers(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'd', Text: "d"}, svc)
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 
-	if !state.closed {
-		t.Fatal("expected ClosePanel to fire on d")
+	if !cmdClosesPanel(t, cmd) {
+		t.Fatal("expected panelCloseMsg on d")
 	}
 	if sess.LifecyclePhase() != agent.LifecycleReadyForReview {
 		t.Errorf("d must transition to ReadyForReview, got %v", sess.LifecyclePhase())
@@ -348,23 +317,27 @@ func TestReviewPanelModel_DKeyDefers(t *testing.T) {
 }
 
 // TestReviewPanelModel_TKeyClosesEvenOnFailure verifies the 't' key always
-// closes the panel and surfaces an error when the session has no agents.
-// Mirrors pre-refactor behaviour: 't' is exit-the-panel-intent regardless
-// of whether the open succeeds.
+// closes the panel and requests the agent terminal with a fallback error.
+// Mirrors pre-refactor behaviour: 't' is exit-the-panel-intent regardless of
+// whether the open succeeds.
 func TestReviewPanelModel_TKeyClosesEvenOnFailure(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
-	state.openInLaunchResult = false
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 't', Text: "t"}, svc)
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+	msgs := runReviewCmd(t, cmd)
 
-	if !state.closed {
-		t.Fatal("expected ClosePanel even on open failure")
+	if _, ok := findMsg[panelCloseMsg](msgs); !ok {
+		t.Fatal("expected panelCloseMsg even on open failure")
 	}
-	if state.errMsg == "" {
-		t.Error("expected error surfaced when session has no agents")
+	req, ok := findMsg[openAgentTerminalRequestMsg](msgs)
+	if !ok {
+		t.Fatal("expected openAgentTerminalRequestMsg")
+	}
+	if req.fallbackError == "" {
+		t.Error("expected fallbackError set so App surfaces an error when no agents")
 	}
 }
 
@@ -373,25 +346,21 @@ func TestReviewPanelModel_TKeyClosesEvenOnFailure(t *testing.T) {
 func TestReviewPanelModel_CKeyMarksComplete(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
-	// Wire Manager to return a non-nil SessionManager so the panel reaches the
-	// kill path. The actual manager pointer is not exercised here because
-	// KillSessionCmd is stubbed.
-	svc.Manager = func(string) SessionManager {
-		return &agent.Manager{}
-	}
+	repo := "/repo"
+	app := reviewTestApp()
+	// Non-nil manager so the panel reaches the kill path; the fake records the
+	// kill call.
+	fake := newFakeManager(repo, sess)
+	app.managers[repo] = fake
+	panel := newReviewPanel(sess, repo, 120, 40, app.buildReviewDeps())
 
-	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'c', Text: "c"}, svc)
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 
-	if !state.closed {
-		t.Fatal("expected ClosePanel on c")
+	if !cmdClosesPanel(t, cmd) {
+		t.Fatal("expected panelCloseMsg on c")
 	}
 	if sess.LifecyclePhase() != agent.LifecycleComplete {
 		t.Errorf("c must transition to Complete, got %v", sess.LifecyclePhase())
-	}
-	if !state.killSessionCalled {
-		t.Error("expected KillSessionCmd to be invoked")
 	}
 	if cmd == nil {
 		t.Error("expected a cmd batch (close + kill); got nil")
@@ -403,7 +372,6 @@ func TestReviewPanelModel_CKeyMarksComplete(t *testing.T) {
 func TestReviewPanelModel_TaskCursorMovesWithJK(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{
 			{Index: 1, Text: "task one"},
@@ -411,21 +379,22 @@ func TestReviewPanelModel_TaskCursorMovesWithJK(t *testing.T) {
 			{Index: 3, Text: "task three"},
 		},
 	}
-	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
 	if got := panel.TaskCursor(); got != 0 {
 		t.Fatalf("cursor starts at 0, got %d", got)
 	}
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if got := panel.TaskCursor(); got != 1 {
 		t.Errorf("after j, cursor=%d, want 1", got)
 	}
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if got := panel.TaskCursor(); got != 2 {
 		t.Errorf("after second j, cursor=%d, want 2", got)
 	}
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'k', Text: "k"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	if got := panel.TaskCursor(); got != 1 {
 		t.Errorf("after k, cursor=%d, want 1", got)
 	}
@@ -434,21 +403,21 @@ func TestReviewPanelModel_TaskCursorMovesWithJK(t *testing.T) {
 func TestReviewPanelModel_TaskCursorClampsAtTopAndBottom(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1}, {Index: 2}},
 	}
-	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
 	// k at top is a no-op.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'k', Text: "k"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	if got := panel.TaskCursor(); got != 0 {
 		t.Errorf("k at top moved cursor to %d, want 0", got)
 	}
 	// j past last clamps.
 	for range 5 {
-		_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, svc)
+		_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
 	if got := panel.TaskCursor(); got != reviewTaskCount(entry)-1 {
 		t.Errorf("over-scroll cursor=%d, want %d", got, reviewTaskCount(entry)-1)
@@ -458,20 +427,20 @@ func TestReviewPanelModel_TaskCursorClampsAtTopAndBottom(t *testing.T) {
 func TestReviewPanelModel_FKey_TogglesUserFlag(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 7, Text: "task one"}},
 	}
-	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'f', Text: "f"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	rec := entry.verdicts[7]
 	if rec == nil || !rec.userFlagged {
 		t.Fatalf("expected verdict[7].userFlagged=true, got %+v", rec)
 	}
 	// Toggle off.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'f', Text: "f"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	if entry.verdicts[7].userFlagged {
 		t.Error("second f should toggle userFlagged back to false")
 	}
@@ -479,9 +448,9 @@ func TestReviewPanelModel_FKey_TogglesUserFlag(t *testing.T) {
 
 func TestReviewPanelModel_FKey_NoCache_NoOp(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, _ := newTestSvc() // ReviewCache returns nil
-	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'f', Text: "f"}, svc)
+	app := reviewTestApp() // ReviewCache returns nil (empty map)
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	if cmd != nil {
 		t.Errorf("f without cache produced cmd %T, want nil", cmd())
 	}
@@ -490,17 +459,17 @@ func TestReviewPanelModel_FKey_NoCache_NoOp(t *testing.T) {
 func TestReviewPanelModel_BKey_NoFlags_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1}},
 	}
-	svc, state := newTestSvc()
-	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
-	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'b', Text: "b"}, svc)
-	if cmd != nil {
-		t.Errorf("b without flagged tasks should return nil cmd, got %T", cmd())
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	if _, ok := findMsg[reviewReworkRequestMsg](runReviewCmd(t, cmd)); ok {
+		t.Error("b without flagged tasks should not emit a rework request")
 	}
-	if state.errMsg == "" {
+	if cmdSetsError(t, cmd) == "" {
 		t.Error("expected error message when no tasks are flagged")
 	}
 }
@@ -508,16 +477,16 @@ func TestReviewPanelModel_BKey_NoFlags_SetsError(t *testing.T) {
 func TestReviewPanelModel_BKey_WithFlag_EmitsReworkMsg(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "/repoB", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1, Text: "task one"}},
 		verdicts: map[int]*taskVerdictRecord{
 			1: {state: verdictPending, userFlagged: true},
 		},
 	}
-	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
-	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'b', Text: "b"}, svc)
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("/repoB", sess.ID)] = entry
+	panel := newReviewPanel(sess, "/repoB", 120, 40, app.buildReviewDeps())
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	if cmd == nil {
 		t.Fatal("expected rework cmd")
 	}
@@ -541,7 +510,6 @@ func TestReviewPanelModel_BKey_WithFlag_EmitsReworkMsg(t *testing.T) {
 func TestReviewPanelModel_EnterEmitsDiffMsg(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
 	rawDiff := "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,4 @@\n package main\n \n+// marker\n func A() {}\n"
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 3, Text: "Add tab-switching keys"}},
@@ -551,10 +519,11 @@ func TestReviewPanelModel_EnterEmitsDiffMsg(t *testing.T) {
 		}},
 		verdicts: map[int]*taskVerdictRecord{3: {state: verdictPending}},
 	}
-	svc, state := newTestSvc()
-	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
-	_, cmd := panel.Update(keyNamed(tea.KeyEnter), svc)
+	_, cmd := panel.Update(keyNamed(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("enter on task with rawDiff must return a cmd")
@@ -570,7 +539,7 @@ func TestReviewPanelModel_EnterEmitsDiffMsg(t *testing.T) {
 	if diffMsg.taskLabel != "[3] Add tab-switching keys" {
 		t.Errorf("taskLabel = %q, want %q", diffMsg.taskLabel, "[3] Add tab-switching keys")
 	}
-	if state.closed {
+	if _, closed := findMsg[panelCloseMsg](msgs); closed {
 		t.Error("enter must not close the review panel")
 	}
 }
@@ -580,16 +549,16 @@ func TestReviewPanelModel_EnterEmitsDiffMsg(t *testing.T) {
 func TestReviewPanelModel_EnterNoopOnEmptyDiff(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
 		groups:   []taskReviewGroup{{taskIndex: 1, rawDiff: ""}},
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
-	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
-	_, cmd := panel.Update(keyNamed(tea.KeyEnter), svc)
+	_, cmd := panel.Update(keyNamed(tea.KeyEnter))
 	if cmd != nil {
 		t.Errorf("enter on task with no rawDiff must be a no-op, got cmd %T", cmd())
 	}
@@ -599,15 +568,12 @@ func TestReviewPanelModel_EnterNoopOnEmptyDiff(t *testing.T) {
 func TestReviewPanelModel_SpaceIsNoOp(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
-	_, cmd := panel.Update(tea.KeyPressMsg{Code: ' ', Text: " "}, svc)
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if cmd != nil {
 		t.Errorf("space should be a no-op, got cmd %T", cmd())
-	}
-	if state.closed {
-		t.Error("space must not close the panel")
 	}
 }
 
@@ -618,11 +584,10 @@ func TestReviewPanelModel_SpaceIsNoOp(t *testing.T) {
 func TestReviewPanelModel_ClickWithTabBarOffset(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	// Panel width 120; DashboardTopY defaults to 0 in newTestSvc.
+	// Panel width 120; dashboardTopY defaults to 0.
 	// renderReviewHeader returns 3 lines for this session (title+prompt+divider) → headerH=3.
 	// Tab bar adds 2 lines → paneTop should be 5.
 	// listHeaderLines=2 → first task row at Y=7.
-	panel := newReviewPanel(sess, "", 120, 40)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{
 			{Index: 1, Text: "task one"},
@@ -633,18 +598,19 @@ func TestReviewPanelModel_ClickWithTabBarOffset(t *testing.T) {
 			2: {state: verdictPending},
 		},
 	}
-	svc, _ := newTestSvc()
-	svc.ReviewCache = func(string, string) *reviewDiffEntry { return entry }
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
 	// Move cursor to row 1 first so we can verify the click brings it back to 0.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	if panel.TaskCursor() != 1 {
 		t.Fatalf("precondition: cursor should be 1 after j, got %d", panel.TaskCursor())
 	}
 
 	// Click at the first task row: Y=7 (headerH=3 + tabBarH=2 + listHeaderLines=2).
 	click := tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 7}
-	_, _ = panel.Update(click, svc)
+	_, _ = panel.Update(click)
 
 	if panel.TaskCursor() != 0 {
 		t.Errorf("click at Y=7 should move cursor to row 0, got %d (tab bar offset missing?)", panel.TaskCursor())
@@ -657,8 +623,8 @@ func TestReviewPanelModel_FormerScrollKeys_AreNoOp(t *testing.T) {
 	// cursor or close the panel.
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
 	keys := []tea.KeyPressMsg{
 		{Code: tea.KeyPgDown},
@@ -669,16 +635,13 @@ func TestReviewPanelModel_FormerScrollKeys_AreNoOp(t *testing.T) {
 		{Code: 'G', Text: "G"},
 	}
 	for _, k := range keys {
-		_, cmd := panel.Update(k, svc)
+		_, cmd := panel.Update(k)
 		if cmd != nil {
 			t.Errorf("formerly-scroll key %v produced cmd %T, want nil", k, cmd())
 		}
 	}
 	if panel.TaskCursor() != 0 {
 		t.Errorf("taskCursor = %d after keys, want 0", panel.TaskCursor())
-	}
-	if state.closed {
-		t.Error("these keys must not close the panel")
 	}
 }
 
@@ -688,9 +651,9 @@ func TestReviewPanelModel_QKey_NoPlan_DoesNotOpenSpec(t *testing.T) {
 	if sess.HasPlan() {
 		t.Skip("test prereq: session should not have a plan")
 	}
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, _ := newTestSvc()
-	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"}, svc)
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	if panel.specOverlay {
 		t.Error("? opened spec overlay without a plan present")
 	}
@@ -707,9 +670,9 @@ func TestReviewPanelModel_QKey_WithPlan_OpensSpec(t *testing.T) {
 	if !sess.HasPlan() {
 		t.Fatal("test prereq: HasPlan should be true after writing plan.md")
 	}
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, _ := newTestSvc()
-	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"}, svc)
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	if !panel.specOverlay {
 		t.Error("? should have opened spec overlay")
 	}
@@ -722,35 +685,35 @@ func TestReviewPanelModel_SpecOverlay_Keys(t *testing.T) {
 	if err := writePlanForTest(planDir, sess, "# Goal\n"); err != nil {
 		t.Fatalf("write plan: %v", err)
 	}
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, _ := newTestSvc()
-	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"}, svc)
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 	if !panel.specOverlay {
 		t.Fatal("test prereq: spec overlay should be open")
 	}
 
 	// pgdown advances scroll.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if panel.specOverlayScroll <= 0 {
 		t.Errorf("specOverlayScroll = %d after pgdown, want > 0", panel.specOverlayScroll)
 	}
 	// pgup back to 0 (clamped).
-	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyPgUp}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if panel.specOverlayScroll != 0 {
 		t.Errorf("specOverlayScroll = %d after pgup, want 0 (clamp)", panel.specOverlayScroll)
 	}
 	// G jumps to bottom.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'G', Text: "G"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
 	if panel.specOverlayScroll != 9999 {
 		t.Errorf("specOverlayScroll = %d after G, want 9999", panel.specOverlayScroll)
 	}
 	// g jumps to top.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'g', Text: "g"}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
 	if panel.specOverlayScroll != 0 {
 		t.Errorf("specOverlayScroll = %d after g, want 0", panel.specOverlayScroll)
 	}
 	// esc closes the overlay.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyEscape}, svc)
+	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if panel.specOverlay {
 		t.Error("esc should close spec overlay")
 	}
@@ -766,14 +729,14 @@ func TestReviewPanelModel_SpecOverlay_OtherKeys_AreSwallowed(t *testing.T) {
 		t.Fatalf("write plan: %v", err)
 	}
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
-	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"}, svc)
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
 
 	// 'd' in main mode would defer the panel — must NOT do that while spec
 	// overlay is open.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'd', Text: "d"}, svc)
-	if state.closed {
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if cmdClosesPanel(t, cmd) {
 		t.Error("'d' while spec overlay open closed the panel — should be swallowed")
 	}
 	if sess.LifecyclePhase() != agent.LifecycleInReview {
@@ -787,51 +750,48 @@ func TestReviewPanelModel_SpecOverlay_OtherKeys_AreSwallowed(t *testing.T) {
 func TestReviewPanelModel_PKey_WithCachedPR_OpensURL(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
+	app := reviewTestApp()
+	app.prCache[cacheKey("", sess.ID)] = &prCacheEntry{pr: &github.PRState{URL: "https://example.com/pr/1"}}
+
 	var openedURL string
-	svc.PRCache = func(string, string) *prCacheEntry {
-		return &prCacheEntry{pr: &github.PRState{URL: "https://example.com/pr/1"}}
-	}
-	svc.OpenURL = func(u string) error {
-		openedURL = u
-		return nil
-	}
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"}, svc)
+	openURL = func(u string) error { openedURL = u; return nil }
+	t.Cleanup(restoreOpenURL())
+
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	msgs := runReviewCmd(t, cmd)
+
 	if openedURL != "https://example.com/pr/1" {
-		t.Errorf("OpenURL got %q, want %q", openedURL, "https://example.com/pr/1")
+		t.Errorf("openURL got %q, want %q", openedURL, "https://example.com/pr/1")
 	}
 	if sess.LifecyclePhase() != agent.LifecycleShipping {
 		t.Errorf("p with existing PR should transition to Shipping, got %v", sess.LifecyclePhase())
 	}
-	if !state.closed {
+	if _, closed := findMsg[panelCloseMsg](msgs); !closed {
 		t.Error("p with existing PR should close the panel")
 	}
 }
 
 func TestReviewPanelModel_PKey_NoPR_NoGHClient_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
-	svc.GHClient = func() *github.Client { return nil }
-	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"}, svc)
-	if cmd != nil {
-		t.Errorf("p with no PR and no GH client should return nil cmd, got %T", cmd())
+	app := reviewTestApp() // ghClient is nil
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	if _, ok := findMsg[startPRDraftRequestMsg](runReviewCmd(t, cmd)); ok {
+		t.Error("p with no GH client should not request a PR draft")
 	}
-	if state.errMsg == "" {
+	if cmdSetsError(t, cmd) == "" {
 		t.Error("expected error when GitHub auth missing")
 	}
 }
 
 func TestReviewPanelModel_EKey_NoIDECommand_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTestWithPath("s1", "fix-auth", t.TempDir())
-	panel := newReviewPanel(sess, "/repo", 120, 40)
-	svc, state := newTestSvc()
-	svc.Resolved = func(string) config.ResolvedSettings {
-		return config.ResolvedSettings{IDECommand: ""}
-	}
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'e', Text: "e"}, svc)
-	if state.errMsg == "" {
+	app := reviewTestApp()
+	app.resolvedCache["/repo"] = config.ResolvedSettings{IDECommand: ""}
+	panel := newReviewPanel(sess, "/repo", 120, 40, app.buildReviewDeps())
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+	if cmdSetsError(t, cmd) == "" {
 		t.Error("expected error when IDE command not configured")
 	}
 }
@@ -839,23 +799,21 @@ func TestReviewPanelModel_EKey_NoIDECommand_SetsError(t *testing.T) {
 func TestReviewPanelModel_UnknownKey_NoOp(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "", 120, 40)
-	svc, state := newTestSvc()
+	app := reviewTestApp()
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
 	before := struct {
 		cursor int
 		spec   bool
-		closed bool
-		errMsg string
 		phase  agent.LifecyclePhase
-	}{panel.TaskCursor(), panel.specOverlay, state.closed, state.errMsg, sess.LifecyclePhase()}
+	}{panel.TaskCursor(), panel.specOverlay, sess.LifecyclePhase()}
 
 	for _, k := range []tea.KeyPressMsg{
 		{Code: 'z', Text: "z"},
 		{Code: 'x', Text: "x"},
 		{Code: 'w', Mod: tea.ModCtrl},
 	} {
-		_, cmd := panel.Update(k, svc)
+		_, cmd := panel.Update(k)
 		if cmd != nil {
 			t.Errorf("unknown key %v produced cmd %T, want nil", k, cmd())
 		}
@@ -864,10 +822,8 @@ func TestReviewPanelModel_UnknownKey_NoOp(t *testing.T) {
 	after := struct {
 		cursor int
 		spec   bool
-		closed bool
-		errMsg string
 		phase  agent.LifecyclePhase
-	}{panel.TaskCursor(), panel.specOverlay, state.closed, state.errMsg, sess.LifecyclePhase()}
+	}{panel.TaskCursor(), panel.specOverlay, sess.LifecyclePhase()}
 
 	if before != after {
 		t.Errorf("unknown keys changed state: before=%+v after=%+v", before, after)
@@ -875,52 +831,42 @@ func TestReviewPanelModel_UnknownKey_NoOp(t *testing.T) {
 }
 
 // TestReviewPanel_PKey_UsesPinnedRepoPath_NotFirstMatch verifies that pressing
-// 'p' (draft PR) passes the panel's pinned repoPath to StartPRDraftCmd, not
-// the first-match repoPath from ManagerFor — the multi-repo collision fix.
+// 'p' (draft PR) emits a startPRDraftRequestMsg carrying the panel's pinned
+// repoPath, not a first-match repoPath — the multi-repo collision fix.
 func TestReviewPanel_PKey_UsesPinnedRepoPath_NotFirstMatch(t *testing.T) {
 	sess := agent.NewSessionForTest("session-1", "my-task")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "/repoB", 120, 40)
-	svc, _ := newTestSvc()
+	app := reviewTestApp()
+	app.ghClient = new(github.Client) // non-nil so the panel reaches the draft path
+	panel := newReviewPanel(sess, "/repoB", 120, 40, app.buildReviewDeps())
 
-	var recordedRepoPath string
-	svc.StartPRDraftCmd = func(_ *agent.Session, repoPath string, _ bool) tea.Cmd {
-		recordedRepoPath = repoPath
-		return func() tea.Msg { return nil }
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	req, ok := findMsg[startPRDraftRequestMsg](runReviewCmd(t, cmd))
+	if !ok {
+		t.Fatal("expected startPRDraftRequestMsg")
 	}
-	// non-nil GHClient so the code passes the auth check and reaches StartPRDraftCmd
-	svc.GHClient = func() *github.Client { return new(github.Client) }
-	svc.PRCache = func(string, string) *prCacheEntry { return nil }
-
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"}, svc)
-
-	if recordedRepoPath != "/repoB" {
-		t.Errorf("StartPRDraftCmd received repoPath=%q, want /repoB (pinned)", recordedRepoPath)
+	if req.repoPath != "/repoB" {
+		t.Errorf("startPRDraftRequestMsg repoPath=%q, want /repoB (pinned)", req.repoPath)
 	}
 }
 
 // TestReviewPanel_CKey_UsesPinnedManager verifies that pressing 'c' (mark
 // complete) resolves the manager via the panel's pinned repoPath, not the
-// first-match lookup.
+// first-match lookup. The kill cmd only fires when the pinned repo has a
+// manager, so a kill-result msg confirms the pinned lookup succeeded.
 func TestReviewPanel_CKey_UsesPinnedManager(t *testing.T) {
 	sess := agent.NewSessionForTest("session-1", "my-task")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	panel := newReviewPanel(sess, "/repoB", 120, 40)
-	svc, state := newTestSvc()
+	repo := "/repoB"
+	app := reviewTestApp()
+	fake := newFakeManager(repo, sess)
+	app.managers[repo] = fake
+	panel := newReviewPanel(sess, repo, 120, 40, app.buildReviewDeps())
 
-	var managerCalledWith string
-	svc.Manager = func(repoPath string) SessionManager {
-		managerCalledWith = repoPath
-		return &agent.Manager{} // non-nil so kill path is taken
-	}
-
-	_, _ = panel.Update(tea.KeyPressMsg{Code: 'c', Text: "c"}, svc)
-
-	if managerCalledWith != "/repoB" {
-		t.Errorf("Manager called with %q, want /repoB (pinned)", managerCalledWith)
-	}
-	if !state.killSessionCalled {
-		t.Error("expected KillSessionCmd to be invoked on non-nil manager")
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	msgs := runReviewCmd(t, cmd)
+	if _, ok := findMsg[killResultMsg](msgs); !ok {
+		t.Error("expected killResultMsg — manager must resolve via pinned repoPath")
 	}
 }
 
@@ -932,4 +878,11 @@ func writePlanForTest(planDir string, sess *agent.Session, content string) error
 		return err
 	}
 	return os.WriteFile(filepath.Join(planDir, "plan.md"), []byte(content), 0o644)
+}
+
+// restoreOpenURL captures the current openURL and returns a cleanup that
+// restores it, so tests that swap openURL don't leak across cases.
+func restoreOpenURL() func() {
+	orig := openURL
+	return func() { openURL = orig }
 }

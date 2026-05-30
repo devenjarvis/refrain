@@ -16,11 +16,12 @@ import tea "charm.land/bubbletea/v2"
 // value receivers and returns the updated value; View uses a value receiver;
 // SetSize uses a pointer receiver because it mutates stored dimensions.
 //
-// PanelModel (panel.go) is the deliberate services-injecting variant of this
-// contract: its Update/View additionally take a PanelServices value so panels
-// can reach app-level state without a back-pointer to App. Folding panels into
-// this shape (dropping PanelServices, moving panel state off App) is deferred
-// to Phase 5 of the CONVENTIONS migration.
+// PanelModel (panel.go) is the pointer-receiver sibling of this contract for
+// the review/shipping panels: the same Update(tea.Msg)/View() shape, but the
+// panels are nil-able pointer fields in Modals. They reach app-level state
+// through deps injected at construction and signal App-scalar mutations via
+// messages. Phase 5b completed this fold and removed the old per-tick services
+// value (CONVENTIONS.md §3).
 type Component interface {
 	// Update handles a message and returns the next state of this component
 	// plus any command to run. It must be pure w.r.t. I/O: side effects go in

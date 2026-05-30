@@ -1808,10 +1808,12 @@ func TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel(t *testing.T) {
 func TestReviewPanel_CKey_MarksComplete(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height, app.buildReviewDeps()))
 
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	app = model.(App)
+	// 'c' batches a panelCloseMsg (+ kill cmd); pump it so the close applies.
+	app = pumpPanelCmd(t, app, cmd)
 
 	if app.modals.Current() != focusList {
 		t.Errorf("expected panelFocus=focusList after c, got %v", app.modals.Current())
@@ -1834,12 +1836,20 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openReview(newReviewPanel(sess, dir, app.width, app.height))
+	app.openReview(newReviewPanel(sess, dir, app.width, app.height, app.buildReviewDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	got := model.(App)
+
+	if cmd == nil {
+		t.Fatal("expected a cmd to trigger panel close + async session cleanup after marking complete")
+	}
+
+	// 'c' batches a panelCloseMsg and the KillSession cmd; pump both back through
+	// App.Update so the panel closes and the killResultMsg cleanup runs.
+	got = pumpPanelCmd(t, got, cmd)
 
 	if got.modals.Current() != focusList {
 		t.Errorf("expected panelFocus=focusList after c, got %v", got.modals.Current())
@@ -1847,19 +1857,10 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 	if got.modals.Review() != nil {
 		t.Errorf("expected reviewSession cleared after c, got %v", got.modals.Review())
 	}
-	if cmd == nil {
-		t.Fatal("expected a cmd to trigger async session cleanup after marking complete")
-	}
-
-	// Run the cleanup cmd and dispatch the resulting killResultMsg.
-	killMsg := cmd()
-	model2, _ := got.Update(killMsg)
-	got2 := model2.(App)
-
 	if mgr.GetSession("sess-review") != nil {
 		t.Error("session should be removed from manager after marking complete")
 	}
-	if got2.closingSessions["sess-review"] {
+	if got.closingSessions[cacheKey(dir, "sess-review")] {
 		t.Error("closingSessions should be cleared after killResultMsg")
 	}
 }
@@ -1872,10 +1873,13 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 func TestReviewPanel_TKey_NoAgents_ShowsError(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height, app.buildReviewDeps()))
 
-	model, _ := app.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
 	app = model.(App)
+	// 't' batches a panelCloseMsg and an openAgentTerminalRequestMsg; pump both
+	// so the close applies and App surfaces the no-agents fallback error.
+	app = pumpPanelCmd(t, app, cmd)
 
 	if app.err == "" {
 		t.Fatal("expected error when session has no agents")
@@ -1904,7 +1908,7 @@ func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height, app.buildReviewDeps()))
 	app.prComposeModal.SetSize(120, 39)
 	_ = app.prComposeModal.Open("My PR Title", "My PR Body", false, "ship-it")
 
@@ -1924,12 +1928,18 @@ func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
 func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
 	sessR.SetLifecyclePhase(agent.LifecycleInReview)
-	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
 	// ghClient must be non-nil to pass the auth guard before startPRDraftCmd.
+	// Set it BEFORE building the review panel's deps: the panel binds its
+	// GHClient handle at construction (post-§3 fold), so a later assignment
+	// would be invisible to it.
 	app.ghClient = &github.Client{}
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height, app.buildReviewDeps()))
 
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	app = model.(App)
+	// 'p' with no cached PR emits a startPRDraftRequestMsg; pump it so the
+	// handler sets the in-flight draft flags.
+	app = pumpPanelCmd(t, app, cmd)
 
 	// Pressing p with no open PR now starts the push+draft pipeline.
 	// The in-flight flag must be set; no error banner should appear.
@@ -1939,8 +1949,9 @@ func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	}
 
 	// Press ESC to close the panel — session stays InReview.
-	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	model, cmd = app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	app = model.(App)
+	app = pumpPanelCmd(t, app, cmd)
 
 	if app.modals.Current() != focusList {
 		t.Errorf("expected panelFocus=focusList after esc, got %v", app.modals.Current())
@@ -3035,7 +3046,7 @@ func TestMergePRMsg_ClosesPanel(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, dir, app.width, app.height))
+	app.openShipping(newShippingPanel(sess, dir, app.width, app.height, app.buildShippingDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -3078,7 +3089,7 @@ func TestPRPollMsg_ExternalMergeClosesPanelAndTransitions(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, "", app.width, app.height))
+	app.openShipping(newShippingPanel(sess, "", app.width, app.height, app.buildShippingDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -3124,7 +3135,7 @@ func TestPRPollMsg_ExternalCloseCleansSession(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, "", app.width, app.height))
+	app.openShipping(newShippingPanel(sess, "", app.width, app.height, app.buildShippingDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -3224,7 +3235,7 @@ func TestPRPollMsg_ExternalOpenPRPromotesInReviewToShipping_ClosesReviewPanel(t 
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openReview(newReviewPanel(sess, dir, app.width, app.height))
+	app.openReview(newReviewPanel(sess, dir, app.width, app.height, app.buildReviewDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
@@ -3496,7 +3507,7 @@ func TestHandlePRCreated_UsesMsgRepoPath_ForAutoOpen(t *testing.T) {
 // TestMergePRMsg_ErrorSetsError verifies that a mergePRMsg error is surfaced.
 func TestMergePRMsg_ErrorSetsError(t *testing.T) {
 	app := NewApp()
-	app.openShipping(newShippingPanel(agent.NewSessionForTest("s", "ship"), "", app.width, app.height))
+	app.openShipping(newShippingPanel(agent.NewSessionForTest("s", "ship"), "", app.width, app.height, app.buildShippingDeps()))
 
 	model, _ := app.Update(mergePRMsg{sessionID: "s", err: errors.New("403 forbidden")})
 	got := model.(App)
@@ -3516,13 +3527,16 @@ func TestShippingPanel_MKeyGatedOnReady(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, "", app.width, app.height))
-	app.prCache = map[string]*prCacheEntry{
-		sess.ID: {pr: &github.PRState{Number: 1, MergeableState: "dirty"}},
-	}
+	// Seed the cache BEFORE building deps: the shipping panel binds its PRCache
+	// handle to this map at construction (post-§3 fold), so the entry must be
+	// present (and repo-keyed) before newShippingPanel captures it.
+	app.prCache[cacheKey("", sess.ID)] = &prCacheEntry{pr: &github.PRState{Number: 1, MergeableState: "dirty"}}
+	app.openShipping(newShippingPanel(sess, "", app.width, app.height, app.buildShippingDeps()))
 
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 	got := model.(App)
+	// 'm' on a not-ready PR emits a setErrorMsg; pump it so the error applies.
+	got = pumpPanelCmd(t, got, cmd)
 
 	// Panel stays open, error is shown.
 	if got.modals.Current() != focusShipping {
@@ -4610,7 +4624,7 @@ func TestShippingPanel_CursorAndScrollKeys(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
 	const repo = "/repo"
-	app.openShipping(newShippingPanel(sess, repo, app.width, app.height))
+	app.openShipping(newShippingPanel(sess, repo, app.width, app.height, app.buildShippingDeps()))
 	app.width = 120
 	app.height = 40
 	app.prCache[cacheKey(repo, sess.ID)] = &prCacheEntry{
@@ -4674,7 +4688,7 @@ func TestShippingPanel_VerdictKeys(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
 	const repo = "/repo"
-	app.openShipping(newShippingPanel(sess, repo, app.width, app.height))
+	app.openShipping(newShippingPanel(sess, repo, app.width, app.height, app.buildShippingDeps()))
 	app.width = 120
 	app.height = 40
 	sessKey := cacheKey(repo, sess.ID)
@@ -4725,7 +4739,7 @@ func TestAddressFeedback_ClearsTriage(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, dir, app.width, app.height))
+	app.openShipping(newShippingPanel(sess, dir, app.width, app.height, app.buildShippingDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 	app.width = 120
@@ -4785,7 +4799,7 @@ func TestAddressFeedback_RefusesOnMergedPR(t *testing.T) {
 			mgr.AddSessionForTest(sess)
 
 			app := NewApp()
-			app.openShipping(newShippingPanel(sess, dir, app.width, app.height))
+			app.openShipping(newShippingPanel(sess, dir, app.width, app.height, app.buildShippingDeps()))
 			app.managers[dir] = mgr
 			app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 			app.width = 120
@@ -4853,7 +4867,7 @@ func TestReviewPanel_EnterOpensDiffViewer(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height, app.buildReviewDeps()))
 	app.reviewDiffCache[cacheKey("", sessR.ID)] = entry
 
 	// Press enter: panel emits reviewOpenTaskDiffMsg, app handles it next tick.
@@ -4903,7 +4917,7 @@ func TestReviewPanel_SpaceIsNoOp(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.openReview(newReviewPanel(sessR, "", app.width, app.height))
+	app.openReview(newReviewPanel(sessR, "", app.width, app.height, app.buildReviewDeps()))
 	app.reviewDiffCache[cacheKey("", sessR.ID)] = entry
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
@@ -5496,9 +5510,9 @@ func TestAutoPromoteToReview_TriggersValidation(t *testing.T) {
 		repoPath: dir,
 	})
 
-	run := app.validationRuns[sess.ID]
+	run := app.validationRuns[cacheKey(dir, sess.ID)]
 	if run == nil {
-		t.Fatal("validationRuns[sess.ID] is nil — validation was not triggered")
+		t.Fatal("validationRuns[cacheKey(dir, sess.ID)] is nil — validation was not triggered")
 	}
 	if len(run.results) != 2 {
 		t.Errorf("len(results) = %d, want 2", len(run.results))
@@ -5544,12 +5558,73 @@ func TestManualMarkReady_TriggersValidation(t *testing.T) {
 
 	app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"}) //nolint:errcheck
 
-	run := app.validationRuns[sess.ID]
+	run := app.validationRuns[cacheKey(dir, sess.ID)]
 	if run == nil {
-		t.Fatal("validationRuns[sess.ID] is nil — validation was not triggered on manual m")
+		t.Fatal("validationRuns[cacheKey(dir, sess.ID)] is nil — validation was not triggered on manual m")
 	}
 	if len(run.results) != 1 {
 		t.Errorf("len(results) = %d, want 1", len(run.results))
+	}
+}
+
+// TestValidationRuns_RepoKeyedNoCollision verifies that two repos hosting a
+// session with the SAME ID get independent validationRuns entries (keyed by
+// cacheKey(repoPath, sessionID)), and that cleanStaleCaches removes only the
+// composite key whose session no longer exists. Before the repo-keying fix,
+// validationRuns was keyed by bare sessionID, so the two repos collided.
+func TestValidationRuns_RepoKeyedNoCollision(t *testing.T) {
+	const repoA = "/repo/a"
+	const repoB = "/repo/b"
+	checks := []config.ValidationCheck{{Name: "Tests", Command: "echo test"}}
+
+	app := NewApp()
+
+	sessA := agent.NewSessionForTest("s1", "feat-a")
+	sessB := agent.NewSessionForTest("s1", "feat-b")
+	app.managers[repoA] = newFakeManager(repoA, sessA)
+	app.managers[repoB] = newFakeManager(repoB, sessB)
+
+	// Trigger validation in both repos for the colliding session ID.
+	triggerValidationRun(&app, sessA.ID, repoA, "", checks)
+	triggerValidationRun(&app, sessB.ID, repoB, "", checks)
+
+	// Two distinct composite keys must coexist; a bare-ID key would collapse them.
+	if got := len(app.validationRuns); got != 2 {
+		t.Fatalf("validationRuns has %d entries, want 2 (repo collision on bare session ID)", got)
+	}
+	runA := app.validationRuns[cacheKey(repoA, sessA.ID)]
+	runB := app.validationRuns[cacheKey(repoB, sessB.ID)]
+	if runA == nil || runB == nil {
+		t.Fatalf("expected both repo-keyed entries present; runA=%v runB=%v", runA, runB)
+	}
+	if runA == runB {
+		t.Fatal("repoA and repoB share the same validationRunState — keys collided")
+	}
+
+	// A result for repoA must update only repoA's run, leaving repoB untouched.
+	app.handleValidationCheckResult(validationCheckResultMsg{
+		sessionID:  sessA.ID,
+		repoPath:   repoA,
+		checkIndex: 0,
+		runID:      runA.runID,
+		state:      checkPassed,
+	})
+	if runA.results[0].state != checkPassed {
+		t.Errorf("repoA result not applied: state=%v, want checkPassed", runA.results[0].state)
+	}
+	if runB.results[0].state != checkRunning {
+		t.Errorf("repoB result mutated by repoA message: state=%v, want checkRunning", runB.results[0].state)
+	}
+
+	// Drop repoB's session, keep repoA's. cleanStaleCaches must delete only the
+	// stale repoB composite key and leave the active repoA entry intact.
+	app.managers[repoB] = newFakeManager(repoB) // no sessions
+	app.cleanStaleCaches()
+	if _, ok := app.validationRuns[cacheKey(repoA, sessA.ID)]; !ok {
+		t.Error("cleanStaleCaches removed the still-active repoA entry")
+	}
+	if _, ok := app.validationRuns[cacheKey(repoB, sessB.ID)]; ok {
+		t.Error("cleanStaleCaches leaked the stale repoB entry")
 	}
 }
 

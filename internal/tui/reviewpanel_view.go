@@ -842,7 +842,7 @@ func wrapText(s string, maxWidth int) []string {
 }
 
 // View renders the review panel — either the spec overlay or the main panel.
-func (m *reviewPanelModel) View(svc PanelServices) string {
+func (m *reviewPanelModel) View() string {
 	if m == nil || m.session == nil {
 		return ""
 	}
@@ -850,11 +850,11 @@ func (m *reviewPanelModel) View(svc PanelServices) string {
 		plan, _ := m.session.CachedPlan()
 		return renderReviewSpecOverlay(m.session, plan, m.specOverlayScroll, m.width, m.height)
 	}
-	entry := svc.ReviewCache(m.repoPath, m.session.ID)
-	prDraftInFlight := svc.prDraftInFlightFor(m.session.ID, m.repoPath)
+	entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
+	prDraftInFlight := m.drafting
 	var checkState *checksTabState
-	if svc.ValidationRuns != nil {
-		if run := svc.ValidationRuns(m.session.ID); run != nil {
+	if m.deps.ValidationRuns != nil {
+		if run := m.deps.ValidationRuns(m.repoPath, m.session.ID); run != nil {
 			checkState = &checksTabState{
 				checks:  run.checks,
 				results: run.results,

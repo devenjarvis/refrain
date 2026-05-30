@@ -204,7 +204,7 @@ type App struct {
 	// state live each frame via dashboardProps(); there is no mirror to sync.
 	modals          Modals
 	reviewDiffCache map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
-	validationRuns  map[string]*validationRunState             // keyed by sessionID; lifetime exceeds panel
+	validationRuns  map[string]*validationRunState             // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
 	feedbackTriage  map[string]map[string]*feedbackTriageEntry // keyed by cacheKey(repoPath, sessionID) → itemKey
 	newSession      newSessionModel                            // full-viewport new-session composition screen
 
@@ -261,8 +261,25 @@ func (a *App) openReview(rp *reviewPanelModel) {
 	a.modals.OpenReview(rp)
 }
 
+// openReviewPanel constructs a review panel for sess (deps bound, layout +
+// drafting state pushed) and opens it. The single review-panel entry point so
+// every call site wires the same deps and pushes the same live scalars.
+func (a *App) openReviewPanel(sess *agent.Session, repoPath string) {
+	rp := newReviewPanel(sess, repoPath, a.width, a.height, a.buildReviewDeps())
+	rp.SetDashboardTopY(a.dashboardTopY())
+	rp.SetDrafting(a.prDraftInFlight && a.prDraftSessionID == sess.ID && a.prDraftRepoPath == repoPath)
+	a.modals.OpenReview(rp)
+}
+
 // openShipping opens the shipping panel.
 func (a *App) openShipping(sp *shippingPanelModel) {
+	a.modals.OpenShipping(sp)
+}
+
+// openShippingPanel constructs a shipping panel for sess (deps bound) and opens
+// it. The single shipping-panel entry point.
+func (a *App) openShippingPanel(sess *agent.Session, repoPath string) {
+	sp := newShippingPanel(sess, repoPath, a.width, a.height-statusBarHeight, a.buildShippingDeps())
 	a.modals.OpenShipping(sp)
 }
 
@@ -390,6 +407,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleShippingFeedbackRequest(msg)
 	case feedbackNoteSubmitMsg:
 		return a.handleFeedbackNoteSubmit(msg)
+	case panelCloseMsg:
+		return a.handlePanelClose(msg)
+	case setErrorMsg:
+		return a.handleSetError(msg)
+	case startPRDraftRequestMsg:
+		return a.handleStartPRDraftRequest(msg)
+	case openAgentTerminalRequestMsg:
+		return a.handleOpenAgentTerminalRequest(msg)
+	case openURLResultMsg:
+		return a.handleOpenURLResult(msg)
 	case initAppMsg:
 		return a.handleInit(msg)
 	case tickMsg:
@@ -628,95 +655,161 @@ func (a *App) screenToTermCellFocusLaunch(screenX, screenY int) (termX, termY in
 	return termX, termY, inViewport
 }
 
-// panelServices builds a fresh PanelServices struct closing over a's current
-// state. Panels receive this on every Update so they always see live App
-// state without holding a back-pointer. Cmd factories returned here must be
-// pure: they produce tea.Cmds, never mutate App directly.
-func (a *App) panelServices() PanelServices {
-	return PanelServices{
-		Width:         a.width,
-		Height:        a.height,
-		DashboardTopY: a.dashboardTopY(),
-		Manager: func(repoPath string) SessionManager {
-			return a.managers[repoPath]
-		},
-		Resolved: func(repoPath string) config.ResolvedSettings {
-			return a.resolvedCache[repoPath]
-		},
-		GHClient: func() *github.Client { return a.ghClient },
+// panelCloseMsg asks App to drop the active overlay panel and return focus to
+// the pipeline. Panels emit it instead of mutating App directly (§4).
+type panelCloseMsg struct{}
+
+// handlePanelClose closes the active overlay panel.
+func (a App) handlePanelClose(_ panelCloseMsg) (tea.Model, tea.Cmd) {
+	a.closeModal()
+	return a, nil
+}
+
+// setErrorMsg carries a transient error string a panel wants surfaced. App is
+// the only place that mutates the error sink (§4).
+type setErrorMsg struct{ text string }
+
+// handleSetError surfaces a panel-supplied error transiently.
+func (a App) handleSetError(msg setErrorMsg) (tea.Model, tea.Cmd) {
+	a.setError(msg.text)
+	return a, nil
+}
+
+// startPRDraftRequestMsg asks App to begin the push+draft pipeline for a
+// session. App owns the prDraft* scalar flags, so the panel signals intent
+// rather than flipping them itself (§4).
+type startPRDraftRequestMsg struct {
+	session            *agent.Session
+	repoPath           string
+	transitionShipping bool
+}
+
+// handleStartPRDraftRequest sets the in-flight draft flags and kicks off the
+// async draft command. Mirrors the former StartPRDraftCmd closure.
+func (a App) handleStartPRDraftRequest(msg startPRDraftRequestMsg) (tea.Model, tea.Cmd) {
+	if msg.session == nil {
+		return a, nil
+	}
+	a.prDraftInFlight = true
+	a.prDraftSessionID = msg.session.ID
+	a.prDraftRepoPath = msg.repoPath
+	a.prModalTransitionShipping = msg.transitionShipping
+	a.syncReviewDrafting()
+	return a, a.startPRDraftCmd(msg.session, msg.repoPath, msg.transitionShipping)
+}
+
+// openAgentTerminalRequestMsg asks App to open the session's most-active agent
+// in the fullscreen launch terminal, falling back to fallbackURL (when set) or
+// surfacing fallbackError when no agent is available.
+type openAgentTerminalRequestMsg struct {
+	session       *agent.Session
+	repoPath      string
+	fallbackURL   string
+	fallbackError string
+}
+
+// handleOpenAgentTerminalRequest opens the agent terminal, applying the
+// caller's exact fallback when the session has no agents.
+func (a App) handleOpenAgentTerminalRequest(msg openAgentTerminalRequestMsg) (tea.Model, tea.Cmd) {
+	if a.openSessionInFocusLaunch(msg.session, msg.repoPath) {
+		return a, nil
+	}
+	if msg.fallbackURL != "" {
+		return a, a.openURLCmd(msg.fallbackURL)
+	}
+	if msg.fallbackError != "" {
+		a.setError(msg.fallbackError)
+	}
+	return a, nil
+}
+
+// openURLResultMsg carries the outcome of an async openURL call.
+type openURLResultMsg struct{ err error }
+
+// handleOpenURLResult surfaces an open-URL failure transiently (mirrors the
+// ideOpenedMsg pattern).
+func (a App) handleOpenURLResult(msg openURLResultMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		a.setError(fmt.Sprintf("failed to open: %v", msg.err))
+	}
+	return a, nil
+}
+
+// openURLCmd returns a pure tea.Cmd that opens url in the browser and reports
+// the result via openURLResultMsg. Panels return this instead of calling
+// openURL synchronously so the side effect flows through App.Update.
+func (a App) openURLCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		return openURLResultMsg{err: openURL(url)}
+	}
+}
+
+// buildReviewDeps binds the review panel's reference-typed handles to App's
+// maps/pointers. These are allocated once in NewApp / injected by cmd via
+// NewAppFromDeps before any panel opens, so binding to them (rather than to a)
+// keeps the closures live across App value-copies.
+func (a *App) buildReviewDeps() reviewDeps {
+	managers := a.managers
+	resolved := a.resolvedCache
+	prCache := a.prCache
+	reviewCache := a.reviewDiffCache
+	validationRuns := a.validationRuns
+	closingAgents := a.closingAgents
+	closingSessions := a.closingSessions
+	ghClient := a.ghClient
+	return reviewDeps{
+		Manager:  func(repoPath string) SessionManager { return managers[repoPath] },
+		Resolved: func(repoPath string) config.ResolvedSettings { return resolved[repoPath] },
+		GHClient: func() *github.Client { return ghClient },
 		PRCache: func(repoPath, sessionID string) *prCacheEntry {
-			return a.prCache[cacheKey(repoPath, sessionID)]
+			return prCache[cacheKey(repoPath, sessionID)]
 		},
 		ReviewCache: func(repoPath, sessionID string) *reviewDiffEntry {
-			return a.reviewDiffCache[cacheKey(repoPath, sessionID)]
+			return reviewCache[cacheKey(repoPath, sessionID)]
 		},
-		ClosePanel: func() {
-			// Drop the active overlay panel and return focus to the pipeline.
-			// Modals.Close enforces the invariant by nilling every owned model.
-			a.closeModal()
-		},
-		OpenInLaunch: func(sess *agent.Session, repoPath string) bool {
-			return a.openSessionInFocusLaunch(sess, repoPath)
-		},
-		OpenPlanEditor: func(sess *agent.Session, repoPath string) {
-			a.openPlanEditor(sess, repoPath)
-		},
-		OpenURL:  openURL,
-		SetError: a.setError,
-		MergePRCmd: func(sessionID, repoPath string, force bool) tea.Cmd {
-			if force {
-				return a.forceMergePRCmd(sessionID, repoPath)
-			}
-			return a.mergePRCmd(sessionID, repoPath)
-		},
-		StartPRDraftCmd: func(sess *agent.Session, repoPath string, transitionShipping bool) tea.Cmd {
-			a.prDraftInFlight = true
-			a.prDraftSessionID = sess.ID
-			a.prDraftRepoPath = repoPath
-			a.prModalTransitionShipping = transitionShipping
-			return a.startPRDraftCmd(sess, repoPath, transitionShipping)
-		},
-		KillSessionCmd: func(sess *agent.Session, repoPath string) tea.Cmd {
-			if repoPath == "" {
-				return nil
-			}
-			mgr := a.managers[repoPath]
-			if mgr == nil {
-				return nil
-			}
-			var agentIDs []string
-			for _, ag := range sess.Agents() {
-				agentIDs = append(agentIDs, ag.ID)
-				a.closingAgents[agentCacheKey(repoPath, ag.ID)] = true
-			}
-			sessID := sess.ID
-			a.closingSessions[cacheKey(repoPath, sessID)] = true
-			return func() tea.Msg {
-				return killResultMsg{
-					scope:     killScopeSession,
-					repoPath:  repoPath,
-					sessionID: sessID,
-					agentIDs:  agentIDs,
-					err:       filterNotFound(mgr.KillSession(sessID)),
-				}
-			}
-		},
-		FetchReviewDiff: func(sess *agent.Session, repoPath string) tea.Cmd { return a.fetchReviewDiffCmd(sess, repoPath) },
-		prDraftInFlightFor: func(sessionID, repoPath string) bool {
-			return a.prDraftInFlight && a.prDraftSessionID == sessionID && a.prDraftRepoPath == repoPath
-		},
-		ValidationRuns: func(sessID string) *validationRunState {
-			return a.validationRuns[sessID]
+		ValidationRuns: func(repoPath, sessID string) *validationRunState {
+			return validationRuns[cacheKey(repoPath, sessID)]
 		},
 		TriggerValidationRerun: func(sessID, repoPath, worktreePath string, checks []config.ValidationCheck) tea.Cmd {
-			return triggerValidationRun(a, sessID, repoPath, worktreePath, checks)
+			return triggerValidationRunOn(managers, validationRuns, sessID, repoPath, worktreePath, checks)
+		},
+		KillSessionCmd: killSessionCmdFor(managers, closingAgents, closingSessions),
+	}
+}
+
+// buildShippingDeps binds the shipping panel's reference-typed handles. The
+// feedback setters are free functions over the feedbackTriage map so they stay
+// live across App value-copies.
+func (a *App) buildShippingDeps() shippingDeps {
+	prCache := a.prCache
+	feedbackTriage := a.feedbackTriage
+	return shippingDeps{
+		PRCache: func(repoPath, sessionID string) *prCacheEntry {
+			return prCache[cacheKey(repoPath, sessionID)]
 		},
 		FeedbackTriage: func(repoPath, sessionID string) map[string]*feedbackTriageEntry {
-			return a.feedbackTriage[cacheKey(repoPath, sessionID)]
+			return feedbackTriage[cacheKey(repoPath, sessionID)]
 		},
-		SetFeedbackVerdict: a.setFeedbackVerdict,
-		SetFeedbackNote:    a.setFeedbackNote,
+		SetFeedbackVerdict: func(repoPath, sessID, itemKey string, v feedbackVerdict) {
+			setFeedbackVerdictOn(feedbackTriage, repoPath, sessID, itemKey, v)
+		},
+		SetFeedbackNote: func(repoPath, sessID, itemKey, note string) {
+			setFeedbackNoteOn(feedbackTriage, repoPath, sessID, itemKey, note)
+		},
+		MergePRCmd: a.mergePRCmdFor(),
 	}
+}
+
+// syncReviewDrafting pushes the current PR-draft-in-flight state for the active
+// review panel's session into the panel, so its footer reflects the live flags.
+// Call after any mutation of the prDraft* scalars while a review panel may be
+// open. No-op when no review panel is active.
+func (a *App) syncReviewDrafting() {
+	rp := a.modals.Review()
+	if rp == nil {
+		return
+	}
+	rp.SetDrafting(a.prDraftInFlight && a.prDraftSessionID == rp.SessionID() && a.prDraftRepoPath == rp.repoPath)
 }
 
 // dashboardTopY returns the screen Y offset where the dashboard content
@@ -986,13 +1079,13 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 	case focusSectionReview:
 		sess.SetLifecyclePhase(agent.LifecycleInReview)
 		rp := items[idx].repoPath
-		a.openReview(newReviewPanel(sess, rp, a.width, a.height))
+		a.openReviewPanel(sess, rp)
 		if _, ok := a.reviewDiffCache[cacheKey(rp, sess.ID)]; !ok {
 			return a.fetchReviewDiffCmd(sess, rp), true
 		}
 		return nil, true
 	case focusSectionShipping:
-		a.openShipping(newShippingPanel(sess, items[idx].repoPath, a.width, a.height-statusBarHeight))
+		a.openShippingPanel(sess, items[idx].repoPath)
 		return nil, true
 	}
 	return nil, false
@@ -1040,14 +1133,14 @@ func (a App) View() tea.View {
 			if a.prComposeModal.Active() {
 				panelStr = a.prComposeModal.View()
 			} else {
-				panelStr = rp.View(a.panelServices())
+				panelStr = rp.View()
 			}
 			v := tea.NewView(panelStr)
 			v.AltScreen = true
 			return v
 		}
 		if sp := a.modals.Shipping(); sp != nil {
-			panel := sp.View(a.panelServices())
+			panel := sp.View()
 			if sp.NoteActive() {
 				panel = placeCentered(a.width, a.height, sp.NoteView())
 			}
@@ -1296,6 +1389,11 @@ func (a *App) cleanStaleCaches() {
 	for k := range a.feedbackTriage {
 		if !activeSessions[k] {
 			delete(a.feedbackTriage, k)
+		}
+	}
+	for k := range a.validationRuns {
+		if !activeSessions[k] {
+			delete(a.validationRuns, k)
 		}
 	}
 	for k := range a.lastKnownStatus {

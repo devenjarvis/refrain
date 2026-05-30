@@ -81,7 +81,7 @@ func (a App) handleReviewVerdict(msg reviewVerdictMsg) (tea.Model, tea.Cmd) {
 // up the validationRunState by sessionID, verifies the runID matches (dropping
 // stale results), then updates the result at checkIndex.
 func (a *App) handleValidationCheckResult(msg validationCheckResultMsg) {
-	run := a.validationRuns[msg.sessionID]
+	run := a.validationRuns[cacheKey(msg.repoPath, msg.sessionID)]
 	if run == nil || run.runID != msg.runID {
 		return
 	}
@@ -167,15 +167,15 @@ func reviewTaskCount(entry *reviewDiffEntry) int {
 	return n
 }
 
-// setFeedbackVerdict records a triage verdict for one feedback item, scoped by
-// (repoPath, sessID) so two repos with overlapping session counters don't share
-// the same triage map.
-func (a *App) setFeedbackVerdict(repoPath, sessID, itemKey string, v feedbackVerdict) {
+// setFeedbackVerdictOn applies a triage verdict to the given triage map. It is
+// a free function over the map (not a method) so the shipping panel can bind it
+// at construction and stay live across App value-copies (§3 fold).
+func setFeedbackVerdictOn(triage map[string]map[string]*feedbackTriageEntry, repoPath, sessID, itemKey string, v feedbackVerdict) {
 	key := cacheKey(repoPath, sessID)
-	if a.feedbackTriage[key] == nil {
-		a.feedbackTriage[key] = make(map[string]*feedbackTriageEntry)
+	if triage[key] == nil {
+		triage[key] = make(map[string]*feedbackTriageEntry)
 	}
-	m := a.feedbackTriage[key]
+	m := triage[key]
 	if v == feedbackNeutral {
 		if e := m[itemKey]; e == nil || strings.TrimSpace(e.Note) == "" {
 			delete(m, itemKey)
@@ -188,16 +188,15 @@ func (a *App) setFeedbackVerdict(repoPath, sessID, itemKey string, v feedbackVer
 	m[itemKey].Verdict = v
 }
 
-// setFeedbackNote lazily allocates the per-session triage map and sets the
-// note on the item. If the resulting entry is neutral with an empty note, it
-// is deleted. Keyed by (repoPath, sessID) for the same reason as
-// setFeedbackVerdict.
-func (a *App) setFeedbackNote(repoPath, sessID, itemKey, note string) {
+// setFeedbackNoteOn applies a note to the given triage map. If the resulting
+// entry is neutral with an empty note, it is deleted. Free function over the
+// map for the same reason as setFeedbackVerdictOn.
+func setFeedbackNoteOn(triage map[string]map[string]*feedbackTriageEntry, repoPath, sessID, itemKey, note string) {
 	key := cacheKey(repoPath, sessID)
-	if a.feedbackTriage[key] == nil {
-		a.feedbackTriage[key] = make(map[string]*feedbackTriageEntry)
+	if triage[key] == nil {
+		triage[key] = make(map[string]*feedbackTriageEntry)
 	}
-	m := a.feedbackTriage[key]
+	m := triage[key]
 	if m[itemKey] == nil {
 		if note == "" {
 			return
@@ -212,15 +211,14 @@ func (a *App) setFeedbackNote(repoPath, sessID, itemKey, note string) {
 }
 
 // handleFeedbackNoteSubmit forwards a feedbackNoteSubmitMsg to the active
-// shipping panel so it can persist the note via svc.SetFeedbackNote. Mirrors
-// the snapshot-and-restore pattern of handleKeysShippingPanel; the message is
-// otherwise local to the shipping panel.
+// shipping panel so it can persist the note via its injected SetFeedbackNote
+// dep. The message is otherwise local to the shipping panel.
 func (a App) handleFeedbackNoteSubmit(msg feedbackNoteSubmitMsg) (tea.Model, tea.Cmd) {
 	snapshot := a.modals.Shipping()
 	if snapshot == nil {
 		return a, nil
 	}
-	updated, cmd := snapshot.Update(msg, a.panelServices())
+	updated, cmd := snapshot.Update(msg)
 	if sp, ok := updated.(*shippingPanelModel); ok {
 		a.modals.CompareAndSetShipping(snapshot, sp)
 	}
@@ -809,13 +807,24 @@ func runValidationCheckCmd(sessionID, repoPath, worktreePath string, checkIndex,
 
 // triggerValidationRun creates or replaces the validationRuns entry for
 // sessionID, increments the runID, sets all results to checkRunning, and
-// returns a batched tea.Cmd with one runValidationCheckCmd per check.
+// returns a batched tea.Cmd with one runValidationCheckCmd per check. Thin
+// wrapper over triggerValidationRunOn for App callers.
 func triggerValidationRun(a *App, sessionID, repoPath, worktreePath string, checks []config.ValidationCheck) tea.Cmd {
+	return triggerValidationRunOn(a.managers, a.validationRuns, sessionID, repoPath, worktreePath, checks)
+}
+
+// triggerValidationRunOn creates or replaces the validationRuns entry, keyed in
+// the given runs map. It is a free function over the map (not a method) so the
+// review panel can bind it at construction and stay live across App value-copies
+// (§3 fold). The managers param is accepted for signature symmetry with the
+// other deps factories; it is currently unused but kept so the binding site
+// reads uniformly.
+func triggerValidationRunOn(_ map[string]SessionManager, runs map[string]*validationRunState, sessionID, repoPath, worktreePath string, checks []config.ValidationCheck) tea.Cmd {
 	if len(checks) == 0 {
 		return nil
 	}
 
-	prior := a.validationRuns[sessionID]
+	prior := runs[cacheKey(repoPath, sessionID)]
 	runID := 1
 	if prior != nil {
 		runID = prior.runID + 1
@@ -826,7 +835,7 @@ func triggerValidationRun(a *App, sessionID, repoPath, worktreePath string, chec
 		results[i] = validationCheckResult{state: checkRunning}
 	}
 
-	a.validationRuns[sessionID] = &validationRunState{
+	runs[cacheKey(repoPath, sessionID)] = &validationRunState{
 		checks:  checks,
 		results: results,
 		runID:   runID,
@@ -837,6 +846,41 @@ func triggerValidationRun(a *App, sessionID, repoPath, worktreePath string, chec
 		cmds[i] = runValidationCheckCmd(sessionID, repoPath, worktreePath, i, runID, ch.Command)
 	}
 	return tea.Batch(cmds...)
+}
+
+// killSessionCmdFor returns a closure matching the panel's KillSessionCmd dep.
+// It writes the closingAgents/closingSessions maps (bound here, not to App) and
+// returns a killResultMsg-producing tea.Cmd. Mirrors the former
+// panelServices.KillSessionCmd closure.
+func killSessionCmdFor(
+	managers map[string]SessionManager,
+	closingAgents, closingSessions map[string]bool,
+) func(sess *agent.Session, repoPath string) tea.Cmd {
+	return func(sess *agent.Session, repoPath string) tea.Cmd {
+		if repoPath == "" {
+			return nil
+		}
+		mgr := managers[repoPath]
+		if mgr == nil {
+			return nil
+		}
+		var agentIDs []string
+		for _, ag := range sess.Agents() {
+			agentIDs = append(agentIDs, ag.ID)
+			closingAgents[agentCacheKey(repoPath, ag.ID)] = true
+		}
+		sessID := sess.ID
+		closingSessions[cacheKey(repoPath, sessID)] = true
+		return func() tea.Msg {
+			return killResultMsg{
+				scope:     killScopeSession,
+				repoPath:  repoPath,
+				sessionID: sessID,
+				agentIDs:  agentIDs,
+				err:       filterNotFound(mgr.KillSession(sessID)),
+			}
+		}
+	}
 }
 
 // ensureGitignore adds .refrain/ to .gitignore in the given path if not already present.
