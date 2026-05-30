@@ -184,8 +184,7 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 	}
 	// Always start on the dashboard — single repo or many.
 	a.view = ViewDashboard
-	a.refreshAgentList()
-	a.updateDashboardPRCache()
+	a.clampCursor()
 	return a, tea.Batch(cmds...)
 }
 
@@ -237,7 +236,8 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 			a.audioPlayer.Play()
 		}
 	}
-	a.refreshAgentList()
+	// Keep the pipeline cursor in range as sessions transition phases.
+	a.clampCursor()
 	// Refresh every component's render clock from a single tick timestamp so
 	// their View()/render helpers stay pure (§5: no clock read at render time).
 	renderNow := time.Now()
@@ -248,49 +248,40 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 	if rp := a.modals.Review(); rp != nil {
 		rp.SetNow(renderNow)
 	}
-	// Detect Active->Idle transitions for diff-stats refresh. Chime
-	// notifications are fired in the EventStatusChanged handler below,
-	// which reacts the instant Claude's Stop hook arrives.
-	idleTransition := false
-	for _, item := range a.dashboard.items {
+	// Snapshot the live item list for this tick's per-agent status bookkeeping
+	// and alt-screen resize. (advanceTickers and the debug dump below build
+	// their own props, which re-derive the list — cheap, and managers don't
+	// mutate mid-Update.)
+	items := a.listItems()
+	// Track per-agent status so cross-status logic (e.g. session-close cleanup)
+	// has a prior value to compare against.
+	for _, item := range items {
 		if item.kind != listItemAgent || item.agent == nil {
 			continue
 		}
-		ag := item.agent
-		currentStatus := ag.Status()
-		key := agentCacheKey(item.repoPath, ag.ID)
-		if prev, ok := a.lastKnownStatus[key]; ok {
-			if prev == agent.StatusActive && currentStatus == agent.StatusIdle && !ag.IsShell {
-				idleTransition = true
-			}
-		}
-		a.lastKnownStatus[key] = currentStatus
+		a.lastKnownStatus[agentCacheKey(item.repoPath, item.agent.ID)] = item.agent.Status()
 	}
 	// Detect alt-screen transitions and trigger a resize so Claude's TUI
 	// redraws cleanly (replaces the old splashResizeMsg delayed timer).
 	fixedW := a.dashboard.fixedTermWidth()
 	fixedH := a.dashboard.fixedTermHeight()
 	if fixedW > 0 && fixedH > 0 {
-		selected := a.dashboard.selectedAgent()
-		for _, item := range a.dashboard.items {
+		launchAgent := a.modals.LaunchAgent()
+		for _, item := range items {
 			if item.kind != listItemAgent || item.agent == nil {
 				continue
 			}
 			if item.agent.AltScreenEntered() {
 				// The focusLaunch agent renders fullscreen, so resize it
 				// to the fullscreen dimensions instead of shrinking it
-				// back to the preview size.
-				if launchAgent := a.modals.LaunchAgent(); launchAgent != nil && item.agent.ID == launchAgent.ID {
+				// back to the preview size. VT history is cleared on
+				// alt-screen entry; any prior scrollOffset now indexes into
+				// an empty buffer, so snap the focusLaunch agent back to live.
+				if launchAgent != nil && item.agent.ID == launchAgent.ID {
 					item.agent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+					a.dashboard.scrollOffset = 0
 				} else {
 					item.agent.Resize(fixedH, fixedW)
-				}
-				// VT history is cleared on alt-screen entry; any prior
-				// scrollOffset now indexes into an empty buffer and would
-				// leave the preview visually frozen until the user hits
-				// home. Snap the currently focused agent back to live.
-				if item.agent == selected {
-					a.dashboard.scrollOffset = 0
 				}
 			}
 		}
@@ -303,36 +294,23 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 	}
 	// Clean stale diff cache entries periodically.
 	a.cleanStaleCaches()
-	// Refresh diff stats periodically or on idle transition.
-	var diffCmd tea.Cmd
-	if sess := a.dashboard.selectedSession(); sess != nil {
-		repoPath := a.dashboard.selectedRepoPath()
-		var entry *diffStatsEntry
-		if repoPath != "" {
-			entry = a.diffStatsCache[cacheKey(repoPath, sess.ID)]
-		}
-		stale := entry == nil || time.Since(entry.lastRefresh) > DiffStatsCacheTTL
-		if (stale || idleTransition) && !a.diffRefreshInFlight {
-			diffCmd = a.refreshDiffStatsCmd()
-		}
-	}
 	// Advance sidebar marquee tickers for overflowing session names. Reuse
 	// renderNow so all of the dashboard's time-derived state (now field +
 	// ticker advance) is coherent from a single per-tick timestamp.
-	a.dashboard.advanceTickers(renderNow)
+	a.dashboard.advanceTickers(renderNow, a.dashboardProps())
 	// E2E debug-dump: write the latest composed dashboard frame to the file
 	// named by REFRAIN_E2E_DEBUG_DUMP (read once at startup). Kept out of any
 	// View()/render helper so rendering stays pure (§5); dashboard.View() is
 	// itself pure, so calling it here from the Update path is side-effect free.
 	if a.debugDumpPath != "" {
-		_ = os.WriteFile(a.debugDumpPath, []byte(a.dashboard.View()), 0o644)
+		_ = os.WriteFile(a.debugDumpPath, []byte(a.dashboard.View(a.dashboardProps())), 0o644)
 	}
 	// Adaptive per-session PR polling.
 	var prCmds []tea.Cmd
 	if a.ghClient != nil {
 		prCmds = a.pollAllSessions()
 	}
-	allCmds := append([]tea.Cmd{tickCmd(), diffCmd}, prCmds...)
+	allCmds := append([]tea.Cmd{tickCmd()}, prCmds...)
 	return a, tea.Batch(allCmds...)
 }
 
@@ -482,8 +460,8 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Refresh list on any agent event — all repos are visible in the dashboard.
-	a.refreshAgentList()
+	// Keep the cursor in range — an event may have advanced a session's phase.
+	a.clampCursor()
 	if mgr := a.managers[msg.repoPath]; mgr != nil {
 		if autoPromoteCmd != nil {
 			return a, tea.Batch(autoPromoteCmd, listenEvents(mgr))
@@ -505,13 +483,13 @@ func (a App) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 	if msg.isNewSession {
 		a.wellness.sessionsCreatedCount++
 	}
-	a.refreshAgentList()
+	a.clampCursor()
 	// Find the new agent by ID. Cursor always moves to the new session's
 	// row; focusLaunch is only entered when skipFocusLaunch is false.
 	if msg.agentID != "" {
-		for i, item := range a.dashboard.items {
+		items := a.listItems()
+		for _, item := range items {
 			if item.kind == listItemAgent && item.agent != nil && item.agent.ID == msg.agentID {
-				a.dashboard.selected = i
 				if !msg.skipFocusLaunch {
 					a.openLaunchPanel(item.session, item.agent, item.repoPath)
 					a.dashboard.scrollOffset = 0
@@ -525,10 +503,9 @@ func (a App) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 				if item.session != nil {
 				Sections:
 					for _, section := range focusSectionsInOrder() {
-						for idx, s := range a.dashboard.sectionItems(section) {
+						for idx, s := range items.sectionItems(section) {
 							if s.session == item.session {
 								a.cursor.JumpTo(section, idx)
-								a.syncFocusCursorToDashboard()
 								break Sections
 							}
 						}
@@ -574,32 +551,11 @@ func (a App) handleKillResult(msg killResultMsg) (tea.Model, tea.Cmd) {
 				a.dashboard.scrollOffset = 0
 			}
 		}
-		delete(a.diffStatsCache, sessKey)
 	}
 	if msg.err != nil {
 		a.setError(msg.err.Error())
 	}
-	a.refreshAgentList()
-	a.updateDashboardDiffStats()
-	return a, nil
-}
-
-func (a App) handleDiffStats(msg diffStatsMsg) (tea.Model, tea.Cmd) {
-	a.diffRefreshInFlight = false
-	if msg.repoPath == "" {
-		// Without a repoPath we can't key the cache safely; drop the result.
-		// All callers populate repoPath; this guard catches future regressions.
-		return a, nil
-	}
-	// Always update cache timestamp to prevent tight retry loops on persistent errors.
-	a.diffStatsCache[cacheKey(msg.repoPath, msg.sessionID)] = &diffStatsEntry{
-		stats:       msg.stats,
-		lastRefresh: time.Now(),
-	}
-	// Update dashboard with current session's stats.
-	if sess := a.dashboard.selectedSession(); sess != nil && sess.ID == msg.sessionID {
-		a.dashboard.diffStats = msg.stats
-	}
+	a.clampCursor()
 	return a, nil
 }
 
@@ -607,6 +563,6 @@ func (a App) handleResumeDone(msg resumeDoneMsg) (tea.Model, tea.Cmd) {
 	for _, repoPath := range msg.repoPaths {
 		_ = state.Remove(repoPath)
 	}
-	a.refreshAgentList()
+	a.clampCursor()
 	return a, nil
 }

@@ -7,15 +7,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/devenjarvis/refrain/internal/agent"
-	"github.com/devenjarvis/refrain/internal/config"
 )
 
 // These tests fill the per-key gaps in app.go's focusList dispatch
 // (app.go:1599-2193) and updateFocusLaunchKeys (app.go:2423-2520) that the
 // existing app_test.go suite did not yet cover.
 //
-// Most tests build the App synthetically (no claude subprocess) by injecting
-// pre-seeded sessions into dashboard.items + an empty manager for the temp
+// Most tests build the App synthetically (no claude subprocess) by seeding
+// pre-built sessions into a fakeManager via seedDashboardItems for the temp
 // repo dir. This keeps the suite fast and deterministic.
 
 // appWithSeededSession returns an App with a single test session at the given
@@ -37,9 +36,6 @@ func appWithSeededSession(t *testing.T, phase agent.LifecyclePhase) (App, *agent
 			t.Fatalf("git setup %v: %v\n%s", args, err, out)
 		}
 	}
-	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
-	t.Cleanup(func() { mgr.Shutdown() })
-
 	sess := agent.NewSessionForTest("s1", "session-1")
 	sess.SetLifecyclePhase(phase)
 
@@ -48,12 +44,11 @@ func appWithSeededSession(t *testing.T, phase agent.LifecyclePhase) (App, *agent
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.managers[dir] = mgr
 	app.activeRepo = dir
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: dir, repoName: "repo"},
 		{kind: listItemSession, repoPath: dir, session: sess},
-	}
+	})
 	// Position cursor on the seeded session's section.
 	switch phase {
 	case agent.LifecyclePlanning, agent.LifecycleDrafting:
@@ -176,7 +171,7 @@ func TestPipeline_UnknownKey_NoOp(t *testing.T) {
 		panel    panelFocus
 		err      string
 		confQuit bool
-	}{app.view, app.dashboard.panelFocus, app.err, app.confirmQuit}
+	}{app.view, app.modals.Current(), app.err, app.confirmQuit}
 
 	for _, k := range []tea.KeyPressMsg{
 		{Code: 'z', Text: "z"},
@@ -197,7 +192,7 @@ func TestPipeline_UnknownKey_NoOp(t *testing.T) {
 		panel    panelFocus
 		err      string
 		confQuit bool
-	}{app.view, app.dashboard.panelFocus, app.err, app.confirmQuit}
+	}{app.view, app.modals.Current(), app.err, app.confirmQuit}
 
 	if before != after {
 		t.Errorf("unknown keys changed state: before=%+v after=%+v", before, after)
@@ -225,12 +220,11 @@ func TestFocusLaunch_NilAgent_RoutesBackToList(t *testing.T) {
 	// directly — production code can't construct this state, but the guard at
 	// the top of updateFocusLaunchKeys must still handle it.
 	app.modals.OpenLaunch(nil, nil, "")
-	app.syncModalsToDashboard()
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.dashboard.panelFocus != focusList {
-		t.Errorf("nil focusLaunchAgent should route back to focusList, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusList {
+		t.Errorf("nil focusLaunchAgent should route back to focusList, got %v", app.modals.Current())
 	}
 }
 

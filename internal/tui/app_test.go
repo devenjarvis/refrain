@@ -43,7 +43,7 @@ func requireClaude(t *testing.T) {
 // returnToList exits the focusLaunch overlay (where keys forward to the agent
 // terminal) so app-level key handlers can fire.
 func returnToList(app App) App {
-	if app.dashboard.panelFocus == focusLaunch {
+	if app.modals.Current() == focusLaunch {
 		model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 		return model.(App)
 	}
@@ -128,7 +128,7 @@ func TestCreateAgentViaN(t *testing.T) {
 	app = createAgent(t, app)
 
 	t.Logf("After creation: view=%v, err=%q, agents=%d, dashboard=%d, focus=%v",
-		app.view, app.err, mgr.AgentCount(), len(app.dashboard.agentItems()), app.dashboard.panelFocus)
+		app.view, app.err, mgr.AgentCount(), len(app.listItems().agents()), app.modals.Current())
 
 	if app.view != ViewDashboard {
 		t.Errorf("Expected ViewDashboard, got %v", app.view)
@@ -139,13 +139,13 @@ func TestCreateAgentViaN(t *testing.T) {
 	if mgr.AgentCount() != 1 {
 		t.Errorf("Expected 1 agent, got %d", mgr.AgentCount())
 	}
-	if len(app.dashboard.agentItems()) != 1 {
-		t.Errorf("Expected 1 dashboard agent, got %d", len(app.dashboard.agentItems()))
+	if len(app.listItems().agents()) != 1 {
+		t.Errorf("Expected 1 dashboard agent, got %d", len(app.listItems().agents()))
 	}
 	// After creation the agent is auto-opened in focusLaunch (the fullscreen
 	// pipeline view's per-agent terminal).
-	if app.dashboard.panelFocus != focusLaunch {
-		t.Errorf("Expected focusLaunch after creation, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusLaunch {
+		t.Errorf("Expected focusLaunch after creation, got %v", app.modals.Current())
 	}
 	// Session should be present.
 	sessions := mgr.ListSessions()
@@ -189,7 +189,7 @@ func TestCreateMultipleAgentsViaTUI(t *testing.T) {
 	t.Log("=== Creating session 1 ===")
 	app = createAgent(t, app)
 	t.Logf("After session1: view=%v, err=%q, agents=%d, dashboard=%d",
-		app.view, app.err, mgr.AgentCount(), len(app.dashboard.agentItems()))
+		app.view, app.err, mgr.AgentCount(), len(app.listItems().agents()))
 
 	if app.err != "" {
 		t.Fatalf("Session 1 error: %s", app.err)
@@ -202,7 +202,7 @@ func TestCreateMultipleAgentsViaTUI(t *testing.T) {
 	t.Log("=== Creating session 2 ===")
 	app = createAgent(t, app)
 	t.Logf("After session2: view=%v, err=%q, agents=%d, dashboard=%d",
-		app.view, app.err, mgr.AgentCount(), len(app.dashboard.agentItems()))
+		app.view, app.err, mgr.AgentCount(), len(app.listItems().agents()))
 
 	if app.err != "" {
 		t.Fatalf("Session 2 error: %s", app.err)
@@ -210,15 +210,15 @@ func TestCreateMultipleAgentsViaTUI(t *testing.T) {
 	if mgr.AgentCount() != 2 {
 		t.Fatalf("Expected 2 agents, got %d", mgr.AgentCount())
 	}
-	if len(app.dashboard.agentItems()) != 2 {
-		t.Fatalf("Expected 2 dashboard agents, got %d", len(app.dashboard.agentItems()))
+	if len(app.listItems().agents()) != 2 {
+		t.Fatalf("Expected 2 dashboard agents, got %d", len(app.listItems().agents()))
 	}
 
 	// Create third session+agent
 	t.Log("=== Creating session 3 ===")
 	app = createAgent(t, app)
 	t.Logf("After session3: view=%v, err=%q, agents=%d, dashboard=%d",
-		app.view, app.err, mgr.AgentCount(), len(app.dashboard.agentItems()))
+		app.view, app.err, mgr.AgentCount(), len(app.listItems().agents()))
 
 	if app.err != "" {
 		t.Fatalf("Session 3 error: %s", app.err)
@@ -226,8 +226,8 @@ func TestCreateMultipleAgentsViaTUI(t *testing.T) {
 	if mgr.AgentCount() != 3 {
 		t.Fatalf("Expected 3 agents, got %d", mgr.AgentCount())
 	}
-	if len(app.dashboard.agentItems()) != 3 {
-		t.Fatalf("Expected 3 dashboard agents, got %d", len(app.dashboard.agentItems()))
+	if len(app.listItems().agents()) != 3 {
+		t.Fatalf("Expected 3 dashboard agents, got %d", len(app.listItems().agents()))
 	}
 
 	// Should have 3 sessions.
@@ -236,7 +236,7 @@ func TestCreateMultipleAgentsViaTUI(t *testing.T) {
 		t.Fatalf("Expected 3 sessions, got %d", len(sessions))
 	}
 
-	t.Logf("SUCCESS: Created %d sessions with %d agents", len(sessions), len(app.dashboard.agentItems()))
+	t.Logf("SUCCESS: Created %d sessions with %d agents", len(sessions), len(app.listItems().agents()))
 }
 
 func TestAddAgentToSessionViaC(t *testing.T) {
@@ -340,20 +340,20 @@ func TestPanelFocusSwitching(t *testing.T) {
 	app.activeRepo = dir
 
 	app = createAgent(t, app)
-	if len(app.dashboard.agentItems()) == 0 {
+	if len(app.listItems().agents()) == 0 {
 		t.Fatal("Expected at least one agent")
 	}
 
 	// After creation focusLaunch is open on the new agent.
-	if app.dashboard.panelFocus != focusLaunch {
-		t.Fatalf("Expected focusLaunch after creation, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusLaunch {
+		t.Fatalf("Expected focusLaunch after creation, got %v", app.modals.Current())
 	}
 
 	// Esc returns to the pipeline (focusList).
 	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	app = model.(App)
-	if app.dashboard.panelFocus != focusList {
-		t.Fatalf("Expected focusList after esc, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusList {
+		t.Fatalf("Expected focusList after esc, got %v", app.modals.Current())
 	}
 
 	// Sessions created by the legacy `n` path land in LifecyclePlanning by
@@ -365,8 +365,8 @@ func TestPanelFocusSwitching(t *testing.T) {
 	// Enter on the cursor-selected session re-opens focusLaunch.
 	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	app = model.(App)
-	if app.dashboard.panelFocus != focusLaunch {
-		t.Fatalf("Expected focusLaunch after enter, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusLaunch {
+		t.Fatalf("Expected focusLaunch after enter, got %v", app.modals.Current())
 	}
 }
 
@@ -408,8 +408,8 @@ func TestActionKeysBlockedInFocusLaunch(t *testing.T) {
 	app = createAgent(t, app)
 
 	// After creation focusLaunch is the active panel.
-	if app.dashboard.panelFocus != focusLaunch {
-		t.Fatalf("Expected focusLaunch after creation, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusLaunch {
+		t.Fatalf("Expected focusLaunch after creation, got %v", app.modals.Current())
 	}
 
 	// Press "n" — should be forwarded to agent, NOT create a new agent.
@@ -419,8 +419,8 @@ func TestActionKeysBlockedInFocusLaunch(t *testing.T) {
 	if app.view != ViewDashboard {
 		t.Fatalf("Expected ViewDashboard (n forwarded to agent, not new-agent), got %v", app.view)
 	}
-	if app.dashboard.panelFocus != focusLaunch {
-		t.Fatalf("Expected focusLaunch to persist after 'n', got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusLaunch {
+		t.Fatalf("Expected focusLaunch to persist after 'n', got %v", app.modals.Current())
 	}
 }
 
@@ -456,23 +456,23 @@ func TestShiftEscForwardsEscapeToAgent(t *testing.T) {
 	app.activeRepo = dir
 
 	app = createAgent(t, app)
-	if app.dashboard.panelFocus != focusLaunch {
-		t.Fatalf("Expected focusLaunch after creation, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusLaunch {
+		t.Fatalf("Expected focusLaunch after creation, got %v", app.modals.Current())
 	}
 
 	// Press shift+esc — should stay in focusLaunch (escape forwarded as
 	// interrupt to the agent, not a panel exit).
 	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEscape, Mod: tea.ModShift})
 	app = model.(App)
-	if app.dashboard.panelFocus != focusLaunch {
-		t.Fatalf("Expected focusLaunch after shift+esc (should forward, not exit), got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusLaunch {
+		t.Fatalf("Expected focusLaunch after shift+esc (should forward, not exit), got %v", app.modals.Current())
 	}
 
 	// Press plain esc — should exit to focusList.
 	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	app = model.(App)
-	if app.dashboard.panelFocus != focusList {
-		t.Fatalf("Expected focusList after esc, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusList {
+		t.Fatalf("Expected focusList after esc, got %v", app.modals.Current())
 	}
 }
 
@@ -493,12 +493,12 @@ func TestPipelineClickMovesCursor(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessB},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
-	}
+	})
 	app.cursor.SetSection(focusSectionBuilding)
 	app.cursor.SetIndex(focusSectionBuilding, 0)
 
@@ -546,11 +546,11 @@ func TestPipelineClickMovesCursor_PlanningAndShipping(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessP},
 		{kind: listItemSession, repoPath: "/r", session: sessS},
-	}
+	})
 	// Start the cursor on Building so a successful click has somewhere to move
 	// the selection FROM (Building is empty here, but the cursor is held there
 	// until the first click).
@@ -584,25 +584,25 @@ func TestPipelineDoubleClickActivatesReview(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
-	}
+	})
 
 	// With no active sessions, REVIEW QUEUE starts at row 7 (header(0) + sep(1)
 	// + pipeline(2..5) + blank(6) + "REVIEW QUEUE"(7) + queue0(8..9)).
 	first := tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 8}
 	model, _ := app.Update(first)
 	app = model.(App)
-	if app.dashboard.panelFocus == focusReview {
+	if app.modals.Current() == focusReview {
 		t.Fatal("single click should not enter focusReview")
 	}
 
 	// Second click within the double-click window opens the review panel.
 	model, _ = app.Update(first)
 	app = model.(App)
-	if app.dashboard.panelFocus != focusReview {
-		t.Fatalf("expected focusReview after double-click, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusReview {
+		t.Fatalf("expected focusReview after double-click, got %v", app.modals.Current())
 	}
 	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
 		t.Fatalf("expected reviewSession=sessR, got %v", app.modals.Review())
@@ -674,9 +674,6 @@ func TestMouseWheelForwardsInAltScreen(t *testing.T) {
 	app.dashboard.height = 39
 	app.managers[dir] = mgr
 	app.activeRepo = dir
-	app.dashboard.items = []listItem{
-		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
-	}
 	app.openLaunchPanel(sess, ag, dir)
 
 	// Set a non-zero offset so we can tell the wheel branch didn't mutate it.
@@ -730,14 +727,13 @@ func TestScrollOffsetResetsOnAltScreenEntry(t *testing.T) {
 	app.dashboard.height = 39
 	app.managers[dir] = mgr
 	app.activeRepo = dir
-	app.dashboard.items = []listItem{
-		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
-	}
-	app.dashboard.selected = 0
+	// Open the launch panel on this agent so modals.LaunchAgent() targets it;
+	// the alt-screen-entered consumer keys the scrollOffset reset off it.
+	app.openLaunchPanel(sess, ag, dir)
 	app.dashboard.scrollOffset = 42
 
-	// A tickMsg drives the alt-screen-entered consumer. Since selected==ag,
-	// the transition should reset scrollOffset to 0.
+	// A tickMsg drives the alt-screen-entered consumer. Since the launch agent
+	// is ag, the transition should reset scrollOffset to 0.
 	model, _ := app.Update(tickMsg(time.Now()))
 	app = model.(App)
 	if app.dashboard.scrollOffset != 0 {
@@ -826,15 +822,24 @@ func TestKillAgentAsyncMarksClosing(t *testing.T) {
 	app.dashboard.height = 39
 	app.managers[dir] = mgr
 	app.activeRepo = dir
-	app.refreshAgentList()
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+	app.clampCursor()
 
-	// Select the agent row.
-	for i, it := range app.dashboard.items {
-		if it.kind == listItemAgent && it.agent != nil && it.agent.ID == ag.ID {
-			app.dashboard.selected = i
+	// Position the pipeline cursor on the session so 'x' targets it. The session
+	// was created via CreateSessionWithCommand, so it lands in the Planning
+	// section by default.
+	planning := app.listItems().sectionItems(focusSectionPlanning)
+	idx := -1
+	for i, it := range planning {
+		if it.session != nil && it.session.ID == sess.ID {
+			idx = i
 			break
 		}
 	}
+	if idx < 0 {
+		t.Fatalf("session %s not found in planning section", sess.ID)
+	}
+	app.cursor.JumpTo(focusSectionPlanning, idx)
 
 	// Press 'x' — should mark closing and return a non-nil cmd. The agent
 	// must still be present in the manager because the kill is now async.
@@ -847,10 +852,6 @@ func TestKillAgentAsyncMarksClosing(t *testing.T) {
 	agentKey := agentCacheKey(dir, ag.ID)
 	if !app.closingAgents[agentKey] {
 		t.Fatalf("Expected closingAgents[%s]=true, got %v", agentKey, app.closingAgents)
-	}
-	// Dashboard should see the closing flag too.
-	if !app.dashboard.closingAgents[agentKey] {
-		t.Fatalf("Expected dashboard.closingAgents[%s]=true", agentKey)
 	}
 	// The manager still has the agent because the goroutine hasn't run yet.
 	if mgr.Get(ag.ID) == nil {
@@ -875,22 +876,22 @@ func TestKillAgentAsyncMarksClosing(t *testing.T) {
 	}
 
 	// Feed the killResultMsg back into the app — closing set should clear
-	// and refreshAgentList should drop the agent from dashboard items.
+	// and the live list should drop the agent.
 	model, _ = app.Update(kr)
 	app = model.(App)
 	if app.closingAgents[ag.ID] {
 		t.Fatalf("Expected closingAgents[%s] cleared after killResultMsg, still set", ag.ID)
 	}
-	for _, it := range app.dashboard.items {
+	for _, it := range app.listItems() {
 		if it.kind == listItemAgent && it.agent != nil && it.agent.ID == ag.ID {
-			t.Fatalf("Expected agent %s removed from dashboard after killResultMsg", ag.ID)
+			t.Fatalf("Expected agent %s removed from list after killResultMsg", ag.ID)
 		}
 	}
 }
 
 // TestKillResultMsgClearsClosingSet verifies the session-scope killResultMsg
-// path: closingSessions and closingAgents are both cleared, diff stats cache
-// is invalidated, and refreshAgentList runs.
+// path: closingSessions and closingAgents are both cleared and lastKnownStatus
+// is invalidated.
 func TestKillResultMsgClearsClosingSet(t *testing.T) {
 	app := NewApp()
 	app.width = 120
@@ -903,13 +904,12 @@ func TestKillResultMsgClearsClosingSet(t *testing.T) {
 	agentAKey := agentCacheKey(repo, "agent-a")
 	agentBKey := agentCacheKey(repo, "agent-b")
 
-	// Pre-populate closing sets and diff cache as if 'X' had dispatched.
+	// Pre-populate closing sets as if 'X' had dispatched.
 	app.closingSessions[sessKey] = true
 	app.closingAgents[agentAKey] = true
 	app.closingAgents[agentBKey] = true
 	app.lastKnownStatus[agentAKey] = agent.StatusActive
 	app.lastKnownStatus[agentBKey] = agent.StatusActive
-	app.diffStatsCache[sessKey] = &diffStatsEntry{}
 
 	model, _ := app.Update(killResultMsg{
 		scope:     killScopeSession,
@@ -925,18 +925,8 @@ func TestKillResultMsgClearsClosingSet(t *testing.T) {
 	if app.closingAgents[agentAKey] || app.closingAgents[agentBKey] {
 		t.Fatal("Expected closingAgents cleared for both agents")
 	}
-	if _, ok := app.diffStatsCache[sessKey]; ok {
-		t.Fatal("Expected diffStatsCache[sess-1] removed")
-	}
 	if _, ok := app.lastKnownStatus[agentAKey]; ok {
 		t.Fatal("Expected lastKnownStatus cleared for agent-a")
-	}
-	// Dashboard should also see the cleared maps (refreshAgentList was called).
-	if app.dashboard.closingSessions == nil {
-		t.Fatal("Expected dashboard.closingSessions wired up after refresh")
-	}
-	if app.dashboard.closingSessions[sessKey] {
-		t.Fatal("Expected dashboard.closingSessions[sess-1] cleared after refresh")
 	}
 }
 
@@ -971,104 +961,6 @@ func TestKillResultMsgClearsClosingSetOnError(t *testing.T) {
 	}
 }
 
-// TestRefreshAgentListRepoAffinity verifies that after killing the last agent
-// in a repo's session, the cursor lands on that repo's header — not on an item
-// in a different repo.
-func TestRefreshAgentListRepoAffinity(t *testing.T) {
-	requireClaude(t)
-	// Set up two temp repos with git init.
-	dir1, err := os.MkdirTemp("", "refrain-repo1-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.RemoveAll(dir1) }()
-	dir2, err := os.MkdirTemp("", "refrain-repo2-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.RemoveAll(dir2) }()
-
-	initRepo := func(dir string) {
-		for _, args := range [][]string{
-			{"git", "init"},
-			{"git", "config", "commit.gpgsign", "false"},
-			{"git", "commit", "--allow-empty", "-m", "init"},
-		} {
-			cmd := exec.Command(args[0], args[1:]...)
-			cmd.Dir = dir
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("cmd %v in %s: %v\n%s", args, dir, err, out)
-			}
-		}
-	}
-	initRepo(dir1)
-	initRepo(dir2)
-
-	mgr1 := agent.NewManager(dir1, config.Resolve(nil, nil))
-	defer mgr1.Shutdown()
-	mgr2 := agent.NewManager(dir2, config.Resolve(nil, nil))
-	defer mgr2.Shutdown()
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	app.managers[dir1] = mgr1
-	app.managers[dir2] = mgr2
-	app.activeRepo = dir1
-
-	app.cfg = &config.Config{
-		Repos: []config.Repo{
-			{Path: dir1, Name: "repo1"},
-			{Path: dir2, Name: "repo2"},
-		},
-	}
-
-	// Create an agent under repo1 (the first repo).
-	sess1, _, err := mgr1.CreateSessionWithCommand(
-		agent.Config{Name: "test-agent", Task: "test"},
-		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 999") },
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	app.refreshAgentList()
-	// List should be: [repo1, session1, agent1, repo2]
-	// Select the agent in repo1 (index 2).
-	for i, it := range app.dashboard.items {
-		if it.kind == listItemAgent && it.repoPath == dir1 {
-			app.dashboard.selected = i
-			break
-		}
-	}
-	if app.dashboard.items[app.dashboard.selected].repoPath != dir1 {
-		t.Fatalf("setup: expected selected item in repo1")
-	}
-
-	// Now kill the session, simulating what happens when 'X' is pressed.
-	_ = mgr1.KillSession(sess1.ID)
-	// Give the agent time to exit.
-	time.Sleep(200 * time.Millisecond)
-	// Refresh the list — list becomes [repo1, repo2].
-	// Without the fix, selected=2 clamps to 1 which is repo2 (wrong repo).
-	app.refreshAgentList()
-
-	// After refresh, the cursor should still be on a repo1 item (the repo header).
-	if len(app.dashboard.items) == 0 {
-		t.Fatal("expected non-empty items after refresh")
-	}
-	selected := app.dashboard.items[app.dashboard.selected]
-	if selected.repoPath != dir1 {
-		t.Errorf("cursor jumped to repo %q, want %q (selected=%d, kind=%v)",
-			selected.repoPath, dir1, app.dashboard.selected, selected.kind)
-	}
-	if selected.kind != listItemRepo {
-		t.Errorf("expected cursor on repo header, got kind=%v", selected.kind)
-	}
-}
-
 // Cursor-placement regression coverage for focusLaunch lives in the e2e suite;
 // the original split-panel preview cursor tests targeted screen offsets that
 // only exist in the deleted layout.
@@ -1098,7 +990,7 @@ func TestChimeSuppressionByStatus(t *testing.T) {
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 	defer mgr.Shutdown()
 
-	sess, ag, err := mgr.CreateSessionWithCommand(agent.Config{
+	_, ag, err := mgr.CreateSessionWithCommand(agent.Config{
 		Name: "chime-test", Task: "test", RepoPath: dir, Rows: 24, Cols: 80,
 	}, func(_ string) *exec.Cmd {
 		return exec.Command("bash", "-c", "sleep 10")
@@ -1122,9 +1014,6 @@ func TestChimeSuppressionByStatus(t *testing.T) {
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = resolved
-	app.dashboard.items = []listItem{
-		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
-	}
 
 	// Try to wire up a real audio player so MarkChimedForTurn() can actually
 	// fire. Best-effort — if the environment has no audio device the player
@@ -1195,7 +1084,7 @@ func TestRKey_NoopWithEmptyQueue(t *testing.T) {
 	// r with no queued sessions should be a no-op.
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	app = model.(App)
-	if app.dashboard.panelFocus == focusReview {
+	if app.modals.Current() == focusReview {
 		t.Error("r with empty review queue should not enter focusReview")
 	}
 }
@@ -1212,8 +1101,8 @@ func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	app = model.(App)
 
-	if app.dashboard.panelFocus != focusReview {
-		t.Fatalf("expected panelFocus=focusReview after r, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusReview {
+		t.Fatalf("expected panelFocus=focusReview after r, got %v", app.modals.Current())
 	}
 	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
 		t.Fatalf("expected reviewSession=sessR, got %v", app.modals.Review())
@@ -1281,8 +1170,8 @@ func TestSoftAgentLimitGuard(t *testing.T) {
 	// Return to list focus so 'n' reaches the app-level handler.
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	app = model.(App)
-	if app.dashboard.panelFocus != focusList {
-		t.Fatalf("Expected focusList after ctrl+e, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusList {
+		t.Fatalf("Expected focusList after ctrl+e, got %v", app.modals.Current())
 	}
 
 	// Enable focus mode.
@@ -1402,8 +1291,8 @@ func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 
 	// Return to list focus so 'n' reaches the app-level handler.
 	app = returnToList(app)
-	if app.dashboard.panelFocus != focusList {
-		t.Fatalf("Expected focusList after exit, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusList {
+		t.Fatalf("Expected focusList after exit, got %v", app.modals.Current())
 	}
 
 	// First 'n' press: should show modal and set sessionLimitModalActive; picker must NOT open.
@@ -1436,57 +1325,6 @@ func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
 	}
 }
 
-// TestClampToRepo verifies that clampToRepo always lands on a listItemRepo row.
-func TestClampToRepo(t *testing.T) {
-	sess := &agent.Session{Name: "s"}
-	ag := &agent.Agent{Name: "a"}
-
-	items := []listItem{
-		{kind: listItemRepo, repoPath: "/r1", repoName: "repo1"},         // 0
-		{kind: listItemSession, repoPath: "/r1", session: sess},          // 1
-		{kind: listItemAgent, repoPath: "/r1", session: sess, agent: ag}, // 2
-		{kind: listItemRepo, repoPath: "/r2", repoName: "repo2"},         // 3
-		{kind: listItemAgent, repoPath: "/r2", session: sess, agent: ag}, // 4
-	}
-
-	// Already on a repo row: no-op.
-	d := newDashboardModel()
-	d.items = items
-	d.selected = 0
-	d.clampToRepo()
-	if d.selected != 0 {
-		t.Fatalf("no-op case: expected 0, got %d", d.selected)
-	}
-
-	// On an agent row: should find the owning repo header above (backward search).
-	d.selected = 2
-	d.clampToRepo()
-	if d.selected != 0 {
-		t.Fatalf("agent in repo1: expected 0 (repo1 header), got %d", d.selected)
-	}
-
-	// On the session row: should find the repo header above.
-	d.selected = 1
-	d.clampToRepo()
-	if d.selected != 0 {
-		t.Fatalf("session row: expected 0 (repo1 header), got %d", d.selected)
-	}
-
-	// On agent in repo2 (index 4): repo2 header is at index 3, above.
-	d.selected = 4
-	d.clampToRepo()
-	if d.selected != 3 {
-		t.Fatalf("agent in repo2: expected 3 (repo2 header), got %d", d.selected)
-	}
-
-	// Out-of-range selected: should clamp down and then find a repo.
-	d.selected = 99
-	d.clampToRepo()
-	if d.items[d.selected].kind != listItemRepo {
-		t.Fatalf("out-of-range: expected listItemRepo, got kind=%d at selected=%d", d.items[d.selected].kind, d.selected)
-	}
-}
-
 // makeFocusModeApp wires up an App in focus mode with two in-progress sessions
 // and one ready-for-review session. Used by the tests below to exercise unified
 // cursor navigation across the Building and Reviewing sections.
@@ -1504,12 +1342,12 @@ func makeFocusModeApp(t *testing.T) (App, *agent.Session) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessB},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
-	}
+	})
 	return app, sessR
 }
 
@@ -1519,8 +1357,8 @@ func makeFocusModeApp(t *testing.T) (App, *agent.Session) {
 func TestFocusModeNavigationCrossesSections(t *testing.T) {
 	app, _ := makeFocusModeApp(t)
 	if app.cursor.Section() != focusSectionBuilding {
-		// clampFocusCursor only runs from refreshAgentList; here we drive the
-		// state directly. Make the starting condition explicit.
+		// The cursor is clamped via clampCursor() on ticks/events; here we
+		// drive the state directly. Make the starting condition explicit.
 		app.cursor.SetSection(focusSectionBuilding)
 	}
 
@@ -1557,9 +1395,9 @@ func TestFocusModeNavigationCrossesSections(t *testing.T) {
 		t.Fatalf("after k from review: expected active[1], got section=%v active=%d", app.cursor.Section(), app.cursor.Index(focusSectionBuilding))
 	}
 
-	// Verify the dashboard model received the synced state immediately.
-	if app.dashboard.cursor.Section() != focusSectionBuilding || app.dashboard.cursor.Index(focusSectionBuilding) != 1 {
-		t.Fatalf("dashboard not synced: section=%v active=%d", app.dashboard.cursor.Section(), app.dashboard.cursor.Index(focusSectionBuilding))
+	// Verify the cursor reflects the updated state immediately.
+	if app.cursor.Section() != focusSectionBuilding || app.cursor.Index(focusSectionBuilding) != 1 {
+		t.Fatalf("cursor not updated: section=%v active=%d", app.cursor.Section(), app.cursor.Index(focusSectionBuilding))
 	}
 }
 
@@ -1607,19 +1445,15 @@ func TestFocusModeEnterOnActiveOpensFocusLaunch(t *testing.T) {
 	app.dashboard.height = 39
 	app.managers[dir] = mgr
 	app.activeRepo = dir
-	app.dashboard.items = []listItem{
-		{kind: listItemRepo, repoPath: dir, repoName: "repo"},
-		{kind: listItemSession, repoPath: dir, session: sess},
-		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
-	}
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir, Alias: "repo"}}}
 	app.cursor.SetSection(focusSectionBuilding)
 	app.cursor.SetIndex(focusSectionBuilding, 0)
 
 	// Press enter on the active section: should jump into focusLaunch on ag.
 	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: ""})
 	app = model.(App)
-	if app.dashboard.panelFocus != focusLaunch {
-		t.Fatalf("expected panelFocus=focusLaunch after enter on active, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusLaunch {
+		t.Fatalf("expected panelFocus=focusLaunch after enter on active, got %v", app.modals.Current())
 	}
 	if app.modals.LaunchAgent() == nil || app.modals.LaunchAgent().ID != ag.ID {
 		t.Fatalf("expected focusLaunchAgent=ag, got %v", app.modals.LaunchAgent())
@@ -1641,32 +1475,32 @@ func TestFocusModeNavigationVisibleOnActiveOnly(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessB},
-	}
+	})
 	app.cursor.SetSection(focusSectionBuilding)
 
 	// j moves within active (active is the only non-empty section).
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.dashboard.cursor.Index(focusSectionBuilding) != 1 {
-		t.Fatalf("expected dashboard.focusBuildingIdx=1 after j, got %d", app.dashboard.cursor.Index(focusSectionBuilding))
+	if app.cursor.Index(focusSectionBuilding) != 1 {
+		t.Fatalf("expected focusBuildingIdx=1 after j, got %d", app.cursor.Index(focusSectionBuilding))
 	}
 
 	// j again at the bottom: no-op (no other section to fall through to).
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)
-	if app.dashboard.cursor.Index(focusSectionBuilding) != 1 {
-		t.Fatalf("expected dashboard.focusBuildingIdx=1 (no-op at end), got %d", app.dashboard.cursor.Index(focusSectionBuilding))
+	if app.cursor.Index(focusSectionBuilding) != 1 {
+		t.Fatalf("expected focusBuildingIdx=1 (no-op at end), got %d", app.cursor.Index(focusSectionBuilding))
 	}
 
 	// k moves back up.
 	model, _ = app.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	app = model.(App)
-	if app.dashboard.cursor.Index(focusSectionBuilding) != 0 {
-		t.Fatalf("expected dashboard.focusBuildingIdx=0 after k, got %d", app.dashboard.cursor.Index(focusSectionBuilding))
+	if app.cursor.Index(focusSectionBuilding) != 0 {
+		t.Fatalf("expected focusBuildingIdx=0 after k, got %d", app.cursor.Index(focusSectionBuilding))
 	}
 }
 
@@ -1683,14 +1517,14 @@ func TestClampFocusCursorHopsToNonEmptySection(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
-	}
+	})
 	app.cursor.SetSection(focusSectionBuilding)
 	app.cursor.SetIndex(focusSectionBuilding, 0)
 
-	app.cursor.Clamp(app.dashboard.sectionCounts())
+	app.cursor.Clamp(app.listItems().sectionCounts())
 	if app.cursor.Section() != focusSectionReview {
 		t.Fatalf("expected hop to review section, got %v", app.cursor.Section())
 	}
@@ -1737,8 +1571,9 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 	sess.MarkDone() // would qualify the session for "m" if it were intercepted
 
 	// Also queue a ReadyForReview session — would be picked up by "r" if intercepted.
-	sessR := &agent.Session{Name: "ready"}
+	sessR := agent.NewSessionForTest("ready", "ready")
 	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
+	mgr.AddSessionForTest(sessR)
 
 	app := NewApp()
 	app.width = 120
@@ -1747,20 +1582,15 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 	app.dashboard.height = 39
 	app.managers[dir] = mgr
 	app.activeRepo = dir
-	app.dashboard.items = []listItem{
-		{kind: listItemRepo, repoPath: dir, repoName: "repo"},
-		{kind: listItemSession, repoPath: dir, session: sess},
-		{kind: listItemAgent, repoPath: dir, session: sess, agent: ag},
-		{kind: listItemSession, repoPath: dir, session: sessR},
-	}
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir, Alias: "repo"}}}
 	app.openLaunchPanel(sess, ag, dir)
 
 	for _, ch := range []rune{'m', 'r'} {
 		model, _ := app.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
 		app = model.(App)
 
-		if app.dashboard.panelFocus != focusLaunch {
-			t.Fatalf("press %q: expected panelFocus=focusLaunch (key forwarded to agent), got %v", ch, app.dashboard.panelFocus)
+		if app.modals.Current() != focusLaunch {
+			t.Fatalf("press %q: expected panelFocus=focusLaunch (key forwarded to agent), got %v", ch, app.modals.Current())
 		}
 		if app.modals.LaunchAgent() == nil || app.modals.LaunchAgent().ID != ag.ID {
 			t.Fatalf("press %q: expected focusLaunchAgent unchanged, got %v", ch, app.modals.LaunchAgent())
@@ -1796,11 +1626,11 @@ func TestFocusMode_MKey_IsCursorAware(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessB},
-	}
+	})
 	app.cursor.SetSection(focusSectionBuilding)
 	app.cursor.SetIndex(focusSectionBuilding, 1) // cursor on sessB, not sessA
 
@@ -1830,11 +1660,11 @@ func makeFocusModeMRApp(t *testing.T) (App, *agent.Session, *agent.Session) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
-	}
+	})
 	return app, sessA, sessR
 }
 
@@ -1923,10 +1753,10 @@ func TestFocusMode_RKey_EmptyQueue_ShowsError(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
-	}
+	})
 	app.cursor.SetSection(focusSectionBuilding)
 	app.cursor.SetIndex(focusSectionBuilding, 0)
 
@@ -1939,7 +1769,7 @@ func TestFocusMode_RKey_EmptyQueue_ShowsError(t *testing.T) {
 	if !strings.Contains(app.err, "review queue is empty") {
 		t.Errorf("expected error to mention empty review queue, got %q", app.err)
 	}
-	if app.dashboard.panelFocus == focusReview {
+	if app.modals.Current() == focusReview {
 		t.Error("expected panelFocus to stay focusList, got focusReview")
 	}
 	if app.modals.Review() != nil {
@@ -1961,8 +1791,8 @@ func TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel(t *testing.T) {
 	if app.err != "" {
 		t.Errorf("expected no error, got %q", app.err)
 	}
-	if app.dashboard.panelFocus != focusReview {
-		t.Errorf("expected panelFocus=focusReview, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusReview {
+		t.Errorf("expected panelFocus=focusReview, got %v", app.modals.Current())
 	}
 	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
 		t.Errorf("expected reviewSession=sessR, got %v", app.modals.Review())
@@ -1983,8 +1813,8 @@ func TestReviewPanel_CKey_MarksComplete(t *testing.T) {
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	app = model.(App)
 
-	if app.dashboard.panelFocus != focusList {
-		t.Errorf("expected panelFocus=focusList after c, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusList {
+		t.Errorf("expected panelFocus=focusList after c, got %v", app.modals.Current())
 	}
 	if app.modals.Review() != nil {
 		t.Errorf("expected reviewSession cleared, got %v", app.modals.Review())
@@ -2011,8 +1841,8 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	got := model.(App)
 
-	if got.dashboard.panelFocus != focusList {
-		t.Errorf("expected panelFocus=focusList after c, got %v", got.dashboard.panelFocus)
+	if got.modals.Current() != focusList {
+		t.Errorf("expected panelFocus=focusList after c, got %v", got.modals.Current())
 	}
 	if got.modals.Review() != nil {
 		t.Errorf("expected reviewSession cleared after c, got %v", got.modals.Review())
@@ -2112,15 +1942,15 @@ func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	app = model.(App)
 
-	if app.dashboard.panelFocus != focusList {
-		t.Errorf("expected panelFocus=focusList after esc, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusList {
+		t.Errorf("expected panelFocus=focusList after esc, got %v", app.modals.Current())
 	}
 	if sessR.LifecyclePhase() != agent.LifecycleInReview {
 		t.Errorf("expected sessR phase=InReview after esc, got %v", sessR.LifecyclePhase())
 	}
 
 	// Regression: the InReview session must still appear in the review queue.
-	queue := app.dashboard.reviewQueueSessions()
+	queue := app.listItems().reviewQueueSessions()
 	found := false
 	for _, item := range queue {
 		if item.session == sessR {
@@ -2172,10 +2002,7 @@ func TestPipeline_DKey_OpensDiffViewer(t *testing.T) {
 	app.dashboard.height = 39
 	app.managers[dir] = mgr
 	app.activeRepo = dir
-	app.dashboard.items = []listItem{
-		{kind: listItemRepo, repoPath: dir, repoName: "repo"},
-		{kind: listItemSession, repoPath: dir, session: sess},
-	}
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir, Alias: "repo"}}}
 	app.cursor.SetSection(focusSectionBuilding)
 	app.cursor.SetIndex(focusSectionBuilding, 0)
 
@@ -2315,7 +2142,7 @@ func TestRepoPicker_ManageMode_EditSettingsOpensConfigFormAndReturns(t *testing.
 	// Send edit-settings msg: should open config form and stay on dashboard.
 	model, _ := app.Update(repoPickerEditSettingsMsg{path: dir1})
 	app = model.(App)
-	if app.dashboard.repoConfigForm == nil {
+	if app.modals.Config() == nil {
 		t.Fatal("expected repoConfigForm to be non-nil after edit-settings")
 	}
 	if !app.repoPickerPendingFromConfig {
@@ -2334,7 +2161,7 @@ func TestRepoPicker_ManageMode_EditSettingsOpensConfigFormAndReturns(t *testing.
 	if app.repoPickerPendingFromConfig {
 		t.Error("expected repoPickerPendingFromConfig to be cleared after cancel")
 	}
-	if app.dashboard.repoConfigForm != nil {
+	if app.modals.Config() != nil {
 		t.Error("expected repoConfigForm to be nil after cancel")
 	}
 }
@@ -2535,10 +2362,10 @@ func TestPipeline_PKey_NoPRStartsDraft(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sess},
-	}
+	})
 	app.cursor.SetSection(focusSectionReview)
 	app.cursor.SetIndex(focusSectionReview, 0)
 	// ghClient must be non-nil to pass the auth guard before startPRDraftCmd.
@@ -2584,10 +2411,10 @@ func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
-	}
+	})
 	// Seed a PR cache entry so the indicator shows up and the early-return path is reachable.
 	sessKey := cacheKey("/r", sessR.ID)
 	app.prCache = map[string]*prCacheEntry{
@@ -2597,7 +2424,6 @@ func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
 	// First click on the right edge of the review row triggers the PR
 	// early-return path. URL is empty so openURL is skipped, but the early
 	// return runs.
-	app.dashboard.prCache = app.prCache
 	prClick := tea.MouseClickMsg{Button: tea.MouseLeft, X: app.width - 2, Y: 8}
 	model, _ := app.Update(prClick)
 	app = model.(App)
@@ -2605,7 +2431,6 @@ func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
 		// Empty URL skipped the early return — set a URL and try again so
 		// the test exercises the path we actually care about.
 		app.prCache[sessKey].pr.URL = "https://example/pr/42"
-		app.dashboard.prCache = app.prCache
 		model, _ = app.Update(prClick)
 		app = model.(App)
 	}
@@ -2618,7 +2443,7 @@ func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
 	model, _ = app.Update(cardClick)
 	app = model.(App)
 
-	if app.dashboard.panelFocus == focusReview {
+	if app.modals.Current() == focusReview {
 		t.Fatalf("expected card click after PR click to single-click only, but it triggered focusReview (phantom double-click)")
 	}
 }
@@ -2881,13 +2706,13 @@ func makeFourPhaseApp(t *testing.T) (App, *agent.Session, *agent.Session, *agent
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessP},
 		{kind: listItemSession, repoPath: "/r", session: sessB},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
 		{kind: listItemSession, repoPath: "/r", session: sessS},
-	}
+	})
 	app.cursor.SetSection(focusSectionPlanning)
 	return app, sessP, sessB, sessR, sessS
 }
@@ -3068,7 +2893,6 @@ func TestTick_BreakDoesNotEnterWhilePanelOpen(t *testing.T) {
 			case focusConfig:
 				app.modals.OpenConfig(&configForm{}, "/repo")
 			}
-			app.syncModalsToDashboard()
 
 			model, _ := app.Update(tickMsg(time.Now()))
 			app = model.(App)
@@ -3149,10 +2973,10 @@ func TestActivateFocusCursor_Shipping_OpensShippingPanel(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessS},
-	}
+	})
 	app.prCache = map[string]*prCacheEntry{
 		sessS.ID: {pr: &github.PRState{Number: 7, URL: "https://example/pr/7"}},
 	}
@@ -3163,8 +2987,8 @@ func TestActivateFocusCursor_Shipping_OpensShippingPanel(t *testing.T) {
 	if !ok {
 		t.Fatal("expected activateFocusCursor on Shipping to return ok=true")
 	}
-	if app.dashboard.panelFocus != focusShipping {
-		t.Fatalf("expected panelFocus=focusShipping, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusShipping {
+		t.Fatalf("expected panelFocus=focusShipping, got %v", app.modals.Current())
 	}
 	if app.modals.Shipping() == nil || app.modals.Shipping().Session() != sessS {
 		t.Fatalf("expected shippingSession to be set to the selected session")
@@ -3183,10 +3007,10 @@ func TestActivateFocusCursor_Shipping_NoPREntry(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	app.dashboard.items = []listItem{
+	seedDashboardItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessS},
-	}
+	})
 	app.cursor.SetSection(focusSectionShipping)
 	app.cursor.SetIndex(focusSectionShipping, 0)
 
@@ -3194,8 +3018,8 @@ func TestActivateFocusCursor_Shipping_NoPREntry(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok=true even without a cached PR")
 	}
-	if app.dashboard.panelFocus != focusShipping {
-		t.Fatalf("expected focusShipping, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusShipping {
+		t.Fatalf("expected focusShipping, got %v", app.modals.Current())
 	}
 }
 
@@ -3218,7 +3042,7 @@ func TestMergePRMsg_ClosesPanel(t *testing.T) {
 	model, cmd := app.Update(mergePRMsg{sessionID: "sess-1", repoPath: dir})
 	got := model.(App)
 
-	if got.dashboard.panelFocus == focusShipping {
+	if got.modals.Current() == focusShipping {
 		t.Error("shipping panel should close after successful merge")
 	}
 	if got.modals.Shipping() != nil {
@@ -3265,7 +3089,7 @@ func TestPRPollMsg_ExternalMergeClosesPanelAndTransitions(t *testing.T) {
 	model, cmd := app.Update(msg)
 	got := model.(App)
 
-	if got.dashboard.panelFocus == focusShipping {
+	if got.modals.Current() == focusShipping {
 		t.Error("shipping panel should close when external merge is detected")
 	}
 	if got.modals.Shipping() != nil {
@@ -3311,7 +3135,7 @@ func TestPRPollMsg_ExternalCloseCleansSession(t *testing.T) {
 	model, cmd := app.Update(msg)
 	got := model.(App)
 
-	if got.dashboard.panelFocus == focusShipping {
+	if got.modals.Current() == focusShipping {
 		t.Error("shipping panel should close when PR is closed")
 	}
 	if got.modals.Shipping() != nil {
@@ -3414,8 +3238,8 @@ func TestPRPollMsg_ExternalOpenPRPromotesInReviewToShipping_ClosesReviewPanel(t 
 	if sess.LifecyclePhase() != agent.LifecycleShipping {
 		t.Errorf("session lifecycle = %v, want LifecycleShipping", sess.LifecyclePhase())
 	}
-	if got.dashboard.panelFocus != focusList {
-		t.Errorf("panelFocus = %v, want focusList", got.dashboard.panelFocus)
+	if got.modals.Current() != focusList {
+		t.Errorf("panelFocus = %v, want focusList", got.modals.Current())
 	}
 	if got.modals.Review() != nil {
 		t.Error("reviewSession should be nil after auto-promotion closes the panel")
@@ -3677,7 +3501,7 @@ func TestMergePRMsg_ErrorSetsError(t *testing.T) {
 	model, _ := app.Update(mergePRMsg{sessionID: "s", err: errors.New("403 forbidden")})
 	got := model.(App)
 
-	if got.dashboard.panelFocus != focusShipping {
+	if got.modals.Current() != focusShipping {
 		t.Error("panel should stay open on merge error")
 	}
 	if got.err == "" {
@@ -3701,8 +3525,8 @@ func TestShippingPanel_MKeyGatedOnReady(t *testing.T) {
 	got := model.(App)
 
 	// Panel stays open, error is shown.
-	if got.dashboard.panelFocus != focusShipping {
-		t.Errorf("panel should stay open; got %v", got.dashboard.panelFocus)
+	if got.modals.Current() != focusShipping {
+		t.Errorf("panel should stay open; got %v", got.modals.Current())
 	}
 	if got.err == "" {
 		t.Error("expected error message for not-ready merge")
@@ -4414,7 +4238,7 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 		app = model.(App)
 	}
 
-	if app.dashboard.panelFocus == focusPlanEditor {
+	if app.modals.Current() == focusPlanEditor {
 		t.Error("planning path should stay on dashboard, not open the plan editor")
 	}
 	sessions := mgr.ListSessions()
@@ -4428,7 +4252,7 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 	if app.cursor.Section() != focusSectionPlanning {
 		t.Errorf("cursor section: got %v, want focusSectionPlanning", app.cursor.Section())
 	}
-	planning := app.dashboard.planningSessions()
+	planning := app.listItems().planningSessions()
 	if len(planning) == 0 {
 		t.Fatal("planning section is empty after submitPromptModal planning path")
 	}
@@ -4507,8 +4331,8 @@ func TestPlannerQuestionMsg_AutoOpensPlanEditor(t *testing.T) {
 	if app.modals.PlanEditor().sess == nil || app.modals.PlanEditor().sess.ID != sess.ID {
 		t.Errorf("editor opened for wrong session: got %v", app.modals.PlanEditor().sess)
 	}
-	if app.dashboard.panelFocus != focusPlanEditor {
-		t.Errorf("expected panelFocus=focusPlanEditor, got %v", app.dashboard.panelFocus)
+	if app.modals.Current() != focusPlanEditor {
+		t.Errorf("expected panelFocus=focusPlanEditor, got %v", app.modals.Current())
 	}
 	if !app.modals.PlanEditor().HasPendingQuestion() {
 		t.Error("expected editor to have a pending question after plannerQuestionMsg")
@@ -4551,8 +4375,8 @@ func TestPlannerQuestionMsg_DoesNotReplaceOpenEditor(t *testing.T) {
 	if app.modals.PlanEditor() == nil || app.modals.PlanEditor().sess != sessA {
 		t.Error("session A's editor should remain open; got replaced or nil")
 	}
-	if app.dashboard.panelFocus != focusPlanEditor {
-		t.Errorf("panelFocus changed: got %v, want focusPlanEditor", app.dashboard.panelFocus)
+	if app.modals.Current() != focusPlanEditor {
+		t.Errorf("panelFocus changed: got %v, want focusPlanEditor", app.modals.Current())
 	}
 	select {
 	case answer := <-answerCh:
@@ -4621,11 +4445,10 @@ func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 	app.resolvedCache[dir1] = resolved
 	app.resolvedCache[dir2] = resolved
 
-	app.refreshAgentList()
-	// refreshAgentList runs clampToRepo, which anchors d.selected to the first
-	// repo header. That's exactly the state that produced the original bug —
-	// dashboard.selectedRepoPath() returns dir1 even after the user picks
-	// dir2 from the picker.
+	app.clampCursor()
+	// The pipeline cursor starts on the first repo's section. That's the state
+	// that produced the original bug — the new session must still land in the
+	// repo the user picks from the picker (dir2), not the active/first repo.
 
 	// Press `n`. With multiple repos this routes to the repo picker overlay
 	// rather than spawning directly.
@@ -5088,8 +4911,8 @@ func TestReviewPanel_SpaceIsNoOp(t *testing.T) {
 	if updated.view != ViewDashboard {
 		t.Errorf("space: expected view=ViewDashboard, got %v", updated.view)
 	}
-	if updated.dashboard.panelFocus != focusReview {
-		t.Errorf("space: expected panelFocus=focusReview, got %v", updated.dashboard.panelFocus)
+	if updated.modals.Current() != focusReview {
+		t.Errorf("space: expected panelFocus=focusReview, got %v", updated.modals.Current())
 	}
 }
 
@@ -5106,12 +4929,13 @@ func TestCreateResult_SkipFocusLaunch_StaysOnDashboard(t *testing.T) {
 	app.height = 40
 	app.dashboard.width = 120
 	app.dashboard.height = 39
-	// Pre-populate items; no manager is set so refreshAgentList returns early
-	// and leaves these items intact.
-	app.dashboard.items = []listItem{
+	// Seed the session into a fake manager so app.listItems() reproduces the
+	// Building row the createResultMsg handler moves the cursor to.
+	seedDashboardItems(&app, []listItem{
+		{kind: listItemRepo, repoPath: "/repo", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/repo", session: sess},
 		{kind: listItemAgent, repoPath: "/repo", session: sess, agent: ag},
-	}
+	})
 
 	model, _ := app.Update(createResultMsg{
 		sessionID:       sess.ID,
@@ -5120,7 +4944,7 @@ func TestCreateResult_SkipFocusLaunch_StaysOnDashboard(t *testing.T) {
 	})
 	app = model.(App)
 
-	if app.dashboard.panelFocus == focusLaunch {
+	if app.modals.Current() == focusLaunch {
 		t.Error("panelFocus: got focusLaunch, want focusList (skipFocusLaunch should suppress terminal open)")
 	}
 	if app.modals.LaunchAgent() != nil {
@@ -5129,7 +4953,7 @@ func TestCreateResult_SkipFocusLaunch_StaysOnDashboard(t *testing.T) {
 	if app.cursor.Section() != focusSectionBuilding {
 		t.Errorf("focusCursorSection: got %v, want focusSectionBuilding", app.cursor.Section())
 	}
-	building := app.dashboard.buildingSessions()
+	building := app.listItems().buildingSessions()
 	if len(building) == 0 {
 		t.Fatal("building section is empty — cursor-move block must run even when skipFocusLaunch is true")
 	}
@@ -5215,7 +5039,7 @@ func TestApprovePlanAndSpawn_StaysOnDashboard(t *testing.T) {
 	} else {
 		app = model2.(App)
 	}
-	if app.dashboard.panelFocus == focusLaunch {
+	if app.modals.Current() == focusLaunch {
 		t.Error("panelFocus: got focusLaunch after plan approval, want focusList")
 	}
 	if app.modals.LaunchAgent() != nil {
@@ -5712,9 +5536,9 @@ func TestManualMarkReady_TriggersValidation(t *testing.T) {
 			{Name: "Lint", Command: "echo lint"},
 		},
 	}
-	// Populate the dashboard so the m-key handler can find the session.
-	app.refreshAgentList()
-	// Move cursor to the Building section.
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+	app.clampCursor()
+	// Move cursor to the Building section so the m-key handler targets the session.
 	app.cursor.SetSection(focusSectionBuilding)
 	app.cursor.SetIndex(focusSectionBuilding, 0)
 
@@ -5742,7 +5566,6 @@ func TestRecordInput_NonDashboardView(t *testing.T) {
 	// We use openRepoChecksEditor directly to bypass the normal init path.
 	editor := newRepoChecksModel("repo", nil)
 	app.openRepoChecksEditor(editor, "/repo")
-	app.syncModalsToDashboard()
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	app = model.(App)

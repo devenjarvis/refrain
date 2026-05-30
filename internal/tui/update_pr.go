@@ -64,7 +64,6 @@ func (a App) handlePRCreated(msg prCreatedMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	a.updateDashboardPRCache()
 	// Re-arm a burst poll so the new PR is discovered quickly.
 	if ps := a.prPollStates[key]; ps != nil {
 		ps.burstUntil = time.Now().Add(PRPollBurstAfterCreate)
@@ -105,7 +104,6 @@ func (a *App) handlePRNotFound(key string, ps *prSessionState) {
 		ps.lastCheckState = ""
 		ps.consecutiveNilPolls = 0
 	}
-	a.updateDashboardPRCache()
 }
 
 func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
@@ -220,7 +218,6 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 		}
 		ps.lastCheckState = newState
 	}
-	a.updateDashboardPRCache()
 	return a, tea.Batch(cmds...)
 }
 
