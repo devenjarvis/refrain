@@ -13,12 +13,12 @@ import (
 
 // View renders the shipping panel. Modal precedence: if the feedback-note
 // modal is active, render it overlaid; otherwise render the panel proper.
-func (m *shippingPanelModel) View(svc PanelServices) string {
+func (m *shippingPanelModel) View() string {
 	if m == nil || m.session == nil {
 		return ""
 	}
-	entry := svc.PRCache(m.repoPath, m.session.ID)
-	triage := svc.FeedbackTriage(m.repoPath, m.session.ID)
+	entry := m.deps.PRCache(m.repoPath, m.session.ID)
+	triage := m.deps.FeedbackTriage(m.repoPath, m.session.ID)
 	return renderShippingPanel(m.session, entry, m.width, m.height, m.feedbackCursor, m.detailScroll, triage)
 }
 

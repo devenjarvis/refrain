@@ -87,3 +87,19 @@ func findMsg[T tea.Msg](msgs []tea.Msg) (T, bool) {
 	}
 	return zero, false
 }
+
+// pumpPanelCmd feeds the messages a panel-triggered cmd emits back through
+// App.Update, applying the async close/error/draft/kill effects that panels now
+// signal via messages (post-§3 fold) rather than mutating App synchronously.
+// Flattens one level of tea.Batch via runCmdAll. Returns the updated App.
+func pumpPanelCmd(t *testing.T, app App, cmd tea.Cmd) App {
+	t.Helper()
+	for _, msg := range runCmdAll(t, cmd) {
+		if msg == nil {
+			continue
+		}
+		m, _ := app.Update(msg)
+		app = m.(App)
+	}
+	return app
+}

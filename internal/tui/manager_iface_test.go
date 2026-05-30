@@ -22,7 +22,7 @@ func TestSessionManager_FakeSatisfies(t *testing.T) {
 }
 
 // TestSessionManager_FakeDrivesKillSession demonstrates the unit-testing seam:
-// a fake manager is injected into App, App.KillSessionCmd via PanelServices is
+// a fake manager is injected into App, the review panel's KillSessionCmd dep is
 // invoked, and the test asserts on the fake's call counters without ever
 // starting a real PTY/git/hook stack.
 func TestSessionManager_FakeDrivesKillSession(t *testing.T) {
@@ -36,13 +36,13 @@ func TestSessionManager_FakeDrivesKillSession(t *testing.T) {
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: repo}}}
 	app.resolvedCache[repo] = config.Resolve(nil, nil)
 
-	// Drive KillSessionCmd through the panel-services seam (the same path
-	// the shipping panel takes when the user confirms session teardown).
-	svc := app.panelServices()
-	if svc.KillSessionCmd == nil {
-		t.Fatal("KillSessionCmd should be wired by panelServices")
+	// Drive KillSessionCmd through the panel-deps seam (the same path the
+	// shipping panel takes when the user confirms session teardown).
+	deps := app.buildReviewDeps()
+	if deps.KillSessionCmd == nil {
+		t.Fatal("KillSessionCmd should be wired by buildReviewDeps")
 	}
-	cmd := svc.KillSessionCmd(sess, repo)
+	cmd := deps.KillSessionCmd(sess, repo)
 	if cmd == nil {
 		t.Fatal("KillSessionCmd returned nil for a known session")
 	}

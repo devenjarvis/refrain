@@ -10,14 +10,11 @@ import (
 	"github.com/devenjarvis/refrain/internal/config"
 )
 
-// closeReviewPanel invokes svc.ClosePanel(), which clears App's reviewPanel
-// pointer and routes focus back to the pipeline. Returns nil so callers can
-// `return m, closeReviewPanel(svc)` inline.
-func closeReviewPanel(svc PanelServices) tea.Cmd {
-	if svc.ClosePanel != nil {
-		svc.ClosePanel()
-	}
-	return nil
+// closeReviewPanel returns a tea.Cmd yielding panelCloseMsg, which App.Update
+// handles by clearing the active panel and routing focus back to the pipeline.
+// Returns the cmd so callers can `return m, closeReviewPanel()` inline.
+func closeReviewPanel() tea.Cmd {
+	return func() tea.Msg { return panelCloseMsg{} }
 }
 
 // reviewReworkRequestMsg is emitted by the panel when the user presses 'b'
@@ -32,25 +29,23 @@ type reviewReworkRequestMsg struct {
 
 // reviewOpenIDECmd opens the configured IDE on the session's worktree.
 // Mirrors the inline 'i' / 'e' key handler shape: silent if the worktree is
-// missing, errors via svc.SetError when the IDE command isn't set. Returns the
-// launch tea.Cmd (or nil) so the caller routes it onto the command path; the
-// launch result surfaces as ideOpenedMsg.
-func reviewOpenIDECmd(sess *agent.Session, repoPath string, svc PanelServices) tea.Cmd {
+// missing, emits a setErrorMsg when the IDE command isn't set. Returns the
+// launch tea.Cmd (or a setErrorMsg cmd, or nil); the launch result surfaces as
+// ideOpenedMsg.
+func reviewOpenIDECmd(sess *agent.Session, repoPath string, resolved func(repoPath string) config.ResolvedSettings) tea.Cmd {
 	if sess == nil || sess.Worktree == nil {
 		return nil
 	}
 	if repoPath == "" {
 		return nil
 	}
-	ideCmd := strings.TrimSpace(svc.Resolved(repoPath).IDECommand)
+	ideCmd := strings.TrimSpace(resolved(repoPath).IDECommand)
 	if ideCmd == "" {
-		svc.SetError("No IDE configured (set 'IDE Command' in settings)")
-		return nil
+		return setErrorCmd("No IDE configured (set 'IDE Command' in settings)")
 	}
 	parts := splitIDECommand(ideCmd)
 	if len(parts) == 0 {
-		svc.SetError("No IDE configured (set 'IDE Command' in settings)")
-		return nil
+		return setErrorCmd("No IDE configured (set 'IDE Command' in settings)")
 	}
 	worktreePath := sess.Worktree.Path
 	exe := parts[0]
@@ -58,11 +53,24 @@ func reviewOpenIDECmd(sess *agent.Session, repoPath string, svc PanelServices) t
 	return openIDECmd(exe, args, worktreePath)
 }
 
+// setErrorCmd returns a tea.Cmd yielding a setErrorMsg, so panels can surface a
+// transient error without reaching App directly.
+func setErrorCmd(text string) tea.Cmd {
+	return func() tea.Msg { return setErrorMsg{text: text} }
+}
+
+// openURLRequestCmd returns a pure tea.Cmd that opens url in the browser and
+// reports the result via openURLResultMsg. Panels return this instead of
+// calling openURL synchronously so the side effect flows through App.Update,
+// where any failure is surfaced transiently.
+func openURLRequestCmd(url string) tea.Cmd {
+	return func() tea.Msg { return openURLResultMsg{err: openURL(url)} }
+}
+
 // Update dispatches the review panel's key handling. Returns the (possibly
-// updated) panel and a tea.Cmd. To close, the panel returns a
-// closeReviewPanel(svc); App's outer Update routes that back to
-// focusList and clears a.reviewPanel.
-func (m *reviewPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel, tea.Cmd) {
+// updated) panel and a tea.Cmd. To close, the panel returns closeReviewPanel();
+// App's outer Update handles the panelCloseMsg.
+func (m *reviewPanelModel) Update(msg tea.Msg) (PanelModel, tea.Cmd) {
 	if m == nil || m.session == nil {
 		return m, nil
 	}
@@ -71,9 +79,9 @@ func (m *reviewPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel, t
 		m.SetSize(msg.Width, msg.Height-1)
 		return m, nil
 	case tea.KeyPressMsg:
-		return m.handleKey(msg, svc)
+		return m.handleKey(msg)
 	case tea.MouseClickMsg:
-		m.handleClick(msg, svc)
+		m.handleClick(msg)
 		return m, nil
 	}
 	return m, nil
@@ -81,7 +89,7 @@ func (m *reviewPanelModel) Update(msg tea.Msg, svc PanelServices) (PanelModel, t
 
 // handleKey is the per-key dispatch extracted from app.go's monolithic
 // Update. Spec overlay intercepts all keys while active.
-func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (PanelModel, tea.Cmd) {
+func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) {
 	// Tab-switching keys work even while spec overlay is open.
 	switch msg.String() {
 	case "1":
@@ -122,60 +130,63 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 
 	switch msg.String() {
 	case "esc":
-		return m, closeReviewPanel(svc)
+		return m, closeReviewPanel()
 	case "d":
 		m.session.SetLifecyclePhase(agent.LifecycleReadyForReview)
-		return m, closeReviewPanel(svc)
+		return m, closeReviewPanel()
 	case "p":
 		sess := m.session
-		entry := svc.PRCache(m.repoPath, sess.ID)
+		entry := m.deps.PRCache(m.repoPath, sess.ID)
 		if entry != nil && entry.pr != nil && entry.pr.URL != "" {
-			if err := svc.OpenURL(entry.pr.URL); err != nil {
-				svc.SetError(err.Error())
-				return m, nil
-			}
 			sess.SetLifecyclePhase(agent.LifecycleShipping)
-			return m, closeReviewPanel(svc)
+			return m, tea.Batch(openURLRequestCmd(entry.pr.URL), closeReviewPanel())
 		}
-		gh := svc.GHClient()
+		gh := m.deps.GHClient()
 		if gh == nil {
-			svc.SetError("GitHub auth not available")
-			return m, nil
+			return m, setErrorCmd("GitHub auth not available")
 		}
-		return m, svc.StartPRDraftCmd(sess, m.repoPath, true)
+		repoPath := m.repoPath
+		return m, func() tea.Msg {
+			return startPRDraftRequestMsg{session: sess, repoPath: repoPath, transitionShipping: true}
+		}
 	case "t":
 		sess := m.session
 		repoPath := m.repoPath
-		// Close first regardless of outcome: pressing 't' is an exit-the-panel
-		// intent. If the open fails, the error surfaces with the panel already
-		// closed, matching the pre-refactor behaviour.
-		closeReviewPanel(svc)
-		if !svc.OpenInLaunch(sess, repoPath) {
-			svc.SetError("session has no agents to open")
-		}
-		return m, nil
+		// Pressing 't' is an exit-the-panel intent: close, then ask App to open
+		// the agent terminal. If no agent is available, App surfaces the error
+		// with the panel already closed, matching the pre-refactor behaviour.
+		return m, tea.Batch(
+			closeReviewPanel(),
+			func() tea.Msg {
+				return openAgentTerminalRequestMsg{
+					session:       sess,
+					repoPath:      repoPath,
+					fallbackError: "session has no agents to open",
+				}
+			},
+		)
 	case "c":
 		sess := m.session
 		sess.SetLifecyclePhase(agent.LifecycleComplete)
-		mgr := svc.Manager(m.repoPath)
+		mgr := m.deps.Manager(m.repoPath)
 		if mgr == nil {
-			return m, closeReviewPanel(svc)
+			return m, closeReviewPanel()
 		}
-		return m, tea.Batch(closeReviewPanel(svc), svc.KillSessionCmd(sess, m.repoPath))
+		return m, tea.Batch(closeReviewPanel(), m.deps.KillSessionCmd(sess, m.repoPath))
 	case "e":
-		return m, reviewOpenIDECmd(m.session, m.repoPath, svc)
+		return m, reviewOpenIDECmd(m.session, m.repoPath, m.deps.Resolved)
 	case "j", "down":
 		switch m.activeTab {
 		case reviewTabTasks:
-			if entry := svc.ReviewCache(m.repoPath, m.session.ID); entry != nil {
+			if entry := m.deps.ReviewCache(m.repoPath, m.session.ID); entry != nil {
 				maxIdx := reviewTaskCount(entry) - 1
 				if m.taskCursor < maxIdx {
 					m.taskCursor++
 				}
 			}
 		case reviewTabChecks:
-			if svc.ValidationRuns != nil {
-				if run := svc.ValidationRuns(m.session.ID); run != nil {
+			if m.deps.ValidationRuns != nil {
+				if run := m.deps.ValidationRuns(m.repoPath, m.session.ID); run != nil {
 					maxIdx := len(run.results) - 1
 					if m.checksCursor < maxIdx {
 						m.checksCursor++
@@ -197,16 +208,16 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		}
 		return m, nil
 	case "r":
-		if m.activeTab == reviewTabChecks && svc.TriggerValidationRerun != nil {
+		if m.activeTab == reviewTabChecks && m.deps.TriggerValidationRerun != nil {
 			var run *validationRunState
-			if svc.ValidationRuns != nil {
-				run = svc.ValidationRuns(m.session.ID)
+			if m.deps.ValidationRuns != nil {
+				run = m.deps.ValidationRuns(m.repoPath, m.session.ID)
 			}
 			var checks []config.ValidationCheck
 			if run != nil {
 				checks = run.checks
-			} else if svc.Resolved != nil {
-				checks = svc.Resolved(m.repoPath).ValidationChecks
+			} else if m.deps.Resolved != nil {
+				checks = m.deps.Resolved(m.repoPath).ValidationChecks
 			}
 			if len(checks) == 0 {
 				return m, nil
@@ -215,7 +226,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 			if m.session.Worktree != nil {
 				worktreePath = m.session.Worktree.Path
 			}
-			return m, svc.TriggerValidationRerun(m.session.ID, m.repoPath, worktreePath, checks)
+			return m, m.deps.TriggerValidationRerun(m.session.ID, m.repoPath, worktreePath, checks)
 		}
 		return m, nil
 	case "pgdown":
@@ -232,7 +243,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		}
 		return m, nil
 	case "f":
-		entry := svc.ReviewCache(m.repoPath, m.session.ID)
+		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
 		if entry == nil {
 			return m, nil
 		}
@@ -251,11 +262,10 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		rec.userFlagged = !rec.userFlagged
 		return m, nil
 	case "b":
-		entry := svc.ReviewCache(m.repoPath, m.session.ID)
+		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
 		prompt := buildReviewReworkPrompt(entry)
 		if prompt == "" {
-			svc.SetError("no tasks flagged or marked concerns/fail")
-			return m, nil
+			return m, setErrorCmd("no tasks flagged or marked concerns/fail")
 		}
 		sessID := m.session.ID
 		repoPath := m.repoPath
@@ -264,7 +274,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		}
 	case "enter":
 		if m.activeTab == reviewTabTasks {
-			entry := svc.ReviewCache(m.repoPath, m.session.ID)
+			entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
 			group := reviewTaskGroupAtCursor(entry, m.taskCursor)
 			if group == nil || group.rawDiff == "" {
 				return m, nil
@@ -301,23 +311,23 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 // handleClick maps a mouse-click on the review task list pane to a cursor
 // move. Mirrors the offset math in renderTaskListPane so the visual row
 // under the click becomes the new cursor.
-func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg, svc PanelServices) {
+func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg) {
 	if m == nil || m.session == nil {
 		return
 	}
-	entry := svc.ReviewCache(m.repoPath, m.session.ID)
+	entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
 	if entry == nil {
 		return
 	}
 	headerH := len(renderReviewHeader(m.session, m.width, m.now))
 	const tabBarH = 2
-	paneTop := svc.DashboardTopY + headerH + tabBarH
+	paneTop := m.dashboardTopY + headerH + tabBarH
 	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, m.width-2)
 	if rowIdx < 0 {
 		return
 	}
 	footerLines := 3
-	bodyH := m.height - svc.DashboardTopY - headerH - tabBarH - footerLines
+	bodyH := m.height - m.dashboardTopY - headerH - tabBarH - footerLines
 	if bodyH < 4 {
 		bodyH = 4
 	}

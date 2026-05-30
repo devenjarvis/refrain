@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/github"
 )
@@ -19,7 +20,22 @@ type shippingPanelModel struct {
 	detailScroll   int
 	feedbackNote   feedbackNoteModal
 
+	// deps carries the App-level reference handles the panel reaches through
+	// for lookups and cmd factories. Bound once at construction (§3 fold).
+	deps shippingDeps
+
 	width, height int
+}
+
+// shippingDeps holds the reference-typed App handles the shipping panel needs.
+// Bound at construction to the App's maps/pointers (never to App itself) so the
+// closures stay live across App value-copies (App.Update is a value receiver).
+type shippingDeps struct {
+	PRCache            func(repoPath, sessionID string) *prCacheEntry
+	FeedbackTriage     func(repoPath, sessionID string) map[string]*feedbackTriageEntry
+	SetFeedbackVerdict func(repoPath, sessionID, itemKey string, v feedbackVerdict)
+	SetFeedbackNote    func(repoPath, sessionID, itemKey, note string)
+	MergePRCmd         func(sessionID, repoPath string, force bool) tea.Cmd
 }
 
 // feedbackVerdict is the user's disposition on a single feedback item.
@@ -92,7 +108,7 @@ func feedbackItemKey(item feedbackItem) string {
 // multi-repo session-ID collisions from routing operations to the wrong repo.
 // The nested feedbackNote modal is initialised but inactive until the user
 // presses 'n'.
-func newShippingPanel(sess *agent.Session, repoPath string, width, height int) *shippingPanelModel {
+func newShippingPanel(sess *agent.Session, repoPath string, width, height int, deps shippingDeps) *shippingPanelModel {
 	note := newFeedbackNoteModal()
 	note.SetSize(width, height+1)
 	return &shippingPanelModel{
@@ -101,6 +117,7 @@ func newShippingPanel(sess *agent.Session, repoPath string, width, height int) *
 		feedbackNote: note,
 		width:        width,
 		height:       height,
+		deps:         deps,
 	}
 }
 
