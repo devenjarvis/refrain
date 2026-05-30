@@ -22,9 +22,6 @@ type wellnessState struct {
 	appStart time.Time
 	// sessionStart is the work-block start time; reset whenever a break ends.
 	sessionStart time.Time
-	// lastReviewAt is the wall-clock time of the most recent review-panel
-	// open. Surfaced as a comfort metric in the wellness log.
-	lastReviewAt time.Time
 
 	// lastInputAt is the wall-clock time (monotonic stripped) of the most
 	// recent keyboard or mouse event from the human. Used by EffectiveElapsed
@@ -97,14 +94,21 @@ func (w *wellnessState) RecordInput() {
 // the display never goes negative. If lastInputAt has not been seeded yet
 // (tests or pre-init paths), falls back to raw time.Since(sessionStart).
 func (w wellnessState) EffectiveElapsed() time.Duration {
+	return w.EffectiveElapsedAt(time.Now())
+}
+
+// EffectiveElapsedAt is EffectiveElapsed against an explicit clock. The render
+// path passes the tick-refreshed clock (dashboardModel.now) so building
+// dashboardProps stays pure — no wall-clock read at render time (§5).
+func (w wellnessState) EffectiveElapsedAt(now time.Time) time.Duration {
 	if w.lastInputAt.IsZero() {
-		return time.Since(w.sessionStart)
+		return now.Sub(w.sessionStart)
 	}
-	currentExtendedIdle := time.Since(w.lastInputAt) - idleGrace
+	currentExtendedIdle := now.Sub(w.lastInputAt) - idleGrace
 	if currentExtendedIdle < 0 {
 		currentExtendedIdle = 0
 	}
-	elapsed := time.Since(w.sessionStart) - w.idleDebt - currentExtendedIdle
+	elapsed := now.Sub(w.sessionStart) - w.idleDebt - currentExtendedIdle
 	if elapsed < 0 {
 		return 0
 	}

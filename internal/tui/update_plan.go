@@ -261,12 +261,9 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	// The `n` handler / repo picker that opened this modal already resolved
-	// the target repo and stored it in a.activeRepo. Re-resolving via
-	// dashboard.selectedRepoPath here would override that with the legacy
-	// d.selected lookup — which clamps to the first repo's header and never
-	// follows the pipeline cursor or the picker's selection — pinning new
-	// sessions to the first registered repo regardless of what the user
-	// picked.
+	// the target repo and stored it in a.activeRepo. Trust that rather than
+	// re-deriving from the pipeline cursor, which may sit on an unrelated
+	// repo's session and would pin the new session to the wrong repo.
 	repoPath := a.activeRepo
 	if repoPath == "" {
 		a.setError("no repo selected")
@@ -341,15 +338,14 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	// createResultMsg with isNewSession=true), so each approved/skipped
 	// session is logged exactly once.
 	a.view = ViewDashboard
-	a.refreshAgentList()
+	a.clampCursor()
 	// Stay on the dashboard while the draft runs in the background — the
 	// planning card shows the "drafting…" badge. The user can press
 	// enter/space on the card to open the editor when ready, or the editor
 	// auto-opens if the planner raises a clarifying question.
-	for idx, item := range a.dashboard.planningSessions() {
+	for idx, item := range a.listItems().planningSessions() {
 		if item.session != nil && item.session.ID == sess.ID {
 			a.cursor.JumpTo(focusSectionPlanning, idx)
-			a.syncFocusCursorToDashboard()
 			break
 		}
 	}

@@ -85,16 +85,6 @@ func filterNotFound(err error) error {
 	return err
 }
 
-// diffStatsMsg carries the result of an async diff stats refresh. repoPath
-// identifies the repo that owns sessionID so the handler keys the cache by
-// (repoPath, sessionID) rather than colliding across repos with the same
-// session counter (session-1, session-2, …).
-type diffStatsMsg struct {
-	sessionID string
-	repoPath  string
-	stats     *diffSummaryData
-}
-
 // initAppMsg triggers the post-wiring TUI init in handleInit. Config, managers,
 // and the GitHub client are already injected by cmd/ (see NewAppFromDeps), so
 // this message carries no payload — it just kicks the Update loop into starting
@@ -135,12 +125,6 @@ type mergePRMsg struct {
 	sessionID string
 	repoPath  string
 	err       error
-}
-
-// diffStatsEntry holds cached diff stats for a single session.
-type diffStatsEntry struct {
-	stats       *diffSummaryData
-	lastRefresh time.Time
 }
 
 // App is the root Bubble Tea model.
@@ -216,8 +200,8 @@ type App struct {
 	// is enforced by the Modals type; see internal/tui/modals.go. App callers
 	// must reach overlay models via modals.Review(), modals.Shipping(), etc.,
 	// and must transition via app.openReview / openShipping / openPlanEditor /
-	// openConfig / openLaunch / closeModal helpers (which keep the dashboard
-	// mirror fields in sync).
+	// openConfig / openLaunch / closeModal helpers. The dashboard reads this
+	// state live each frame via dashboardProps(); there is no mirror to sync.
 	modals          Modals
 	reviewDiffCache map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
 	validationRuns  map[string]*validationRunState             // keyed by sessionID; lifetime exceeds panel
@@ -238,9 +222,6 @@ type App struct {
 	lastPipelineClick    time.Time
 	lastPipelineClickSec focusSection
 	lastPipelineClickIdx int
-
-	diffStatsCache      map[string]*diffStatsEntry // keyed by cacheKey(repoPath, sessionID)
-	diffRefreshInFlight bool
 
 	ghClient        *github.Client
 	prCache         map[string]*prCacheEntry   // keyed by cacheKey(repoPath, sessionID)
@@ -269,45 +250,32 @@ type App struct {
 	prModalTransitionShipping bool
 }
 
-// syncModalsToDashboard mirrors the current Modals state into the dashboard
-// model's render-time fields. The dashboard renderer reads these fields
-// directly; calling this after every Modals mutation keeps the two in sync.
-// Modal callers should prefer the openX / closeModal helpers below, which
-// invoke this automatically.
-func (a *App) syncModalsToDashboard() {
-	a.dashboard.panelFocus = a.modals.Current()
-	a.dashboard.repoConfigForm = a.modals.Config()
-	a.dashboard.configRepoPath = a.modals.ConfigRepoPath()
-	a.dashboard.repoChecksEditor = a.modals.RepoChecks()
-	a.dashboard.repoChecksRepoPath = a.modals.RepoChecksRepoPath()
-	a.dashboard.focusLaunchAgent = a.modals.LaunchAgent()
-	a.dashboard.focusLaunchSession = a.modals.LaunchSession()
-}
+// The modal helpers below are thin forwards to a.modals.*. They survive as
+// wrappers (rather than callers reaching a.modals directly) so the App-level
+// vocabulary stays stable and a future cross-cut (logging, guards) has one
+// seam. The dashboard reads modal state live each frame via dashboardProps(),
+// so there is no mirror to keep in sync here.
 
-// openReview opens the review panel and syncs the dashboard mirror.
+// openReview opens the review panel.
 func (a *App) openReview(rp *reviewPanelModel) {
 	a.modals.OpenReview(rp)
-	a.syncModalsToDashboard()
 }
 
-// openShipping opens the shipping panel and syncs the dashboard mirror.
+// openShipping opens the shipping panel.
 func (a *App) openShipping(sp *shippingPanelModel) {
 	a.modals.OpenShipping(sp)
-	a.syncModalsToDashboard()
 }
 
-// openPlanEditorPanel installs an existing plan editor model and syncs the
-// dashboard mirror. The high-level "open the plan editor for this session"
-// flow lives in openPlanEditor (which builds the model, then calls this).
+// openPlanEditorPanel installs an existing plan editor model. The high-level
+// "open the plan editor for this session" flow lives in openPlanEditor (which
+// builds the model, then calls this).
 func (a *App) openPlanEditorPanel(pe *planEditorModel) {
 	a.modals.OpenPlanEditor(pe)
-	a.syncModalsToDashboard()
 }
 
-// openConfigForm opens the per-repo config form for repoPath and syncs.
+// openConfigForm opens the per-repo config form for repoPath.
 func (a *App) openConfigForm(form *configForm, repoPath string) {
 	a.modals.OpenConfig(form, repoPath)
-	a.syncModalsToDashboard()
 }
 
 // openRepoChecksEditor switches focus from the repo config form to the
@@ -315,29 +283,25 @@ func (a *App) openConfigForm(form *configForm, repoPath string) {
 // preserved in modals so the user returns to it on save/cancel.
 func (a *App) openRepoChecksEditor(editor *repoChecksModel, repoPath string) {
 	a.modals.OpenRepoChecks(editor, repoPath)
-	a.syncModalsToDashboard()
 }
 
 // closeRepoChecksEditor pops the checks sub-editor without disturbing the
 // parent config form.
 func (a *App) closeRepoChecksEditor() {
 	a.modals.CloseRepoChecks()
-	a.syncModalsToDashboard()
 }
 
-// openLaunchPanel sets the fullscreen agent terminal target and syncs.
+// openLaunchPanel sets the fullscreen agent terminal target.
 // repoPath pins which repo owns sess so ctrl+t/ctrl+n/ctrl+w inside the
 // launch view route to the right manager without re-searching by ID.
 func (a *App) openLaunchPanel(sess *agent.Session, ag *agent.Agent, repoPath string) {
 	a.modals.OpenLaunch(sess, ag, repoPath)
-	a.syncModalsToDashboard()
 }
 
 // closeModal returns focus to the pipeline list and nils every overlay model.
 // This is the canonical "close any panel" path.
 func (a *App) closeModal() {
 	a.modals.Close()
-	a.syncModalsToDashboard()
 }
 
 func NewApp() App {
@@ -353,7 +317,6 @@ func NewApp() App {
 		repoSettings:    make(map[string]*config.RepoSettings),
 		resolvedCache:   make(map[string]config.ResolvedSettings),
 		lastKnownStatus: make(map[string]agent.Status),
-		diffStatsCache:  make(map[string]*diffStatsEntry),
 		reviewDiffCache: make(map[string]*reviewDiffEntry),
 		validationRuns:  make(map[string]*validationRunState),
 		prCache:         make(map[string]*prCacheEntry),
@@ -476,8 +439,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handlePRDraftReady(msg)
 	case prCreatedMsg:
 		return a.handlePRCreated(msg)
-	case diffStatsMsg:
-		return a.handleDiffStats(msg)
 	case prPollMsg:
 		return a.handlePRPoll(msg)
 	case mergePRMsg:
@@ -540,10 +501,10 @@ func (a *App) addRepo(path string) tea.Cmd {
 	if a.managers[absPath] == nil {
 		mgr := a.managerFactory(absPath, a.resolvedCache[absPath])
 		a.managers[absPath] = mgr
-		a.refreshAgentList()
+		a.clampCursor()
 		return tea.Batch(listenEvents(mgr), listenPlannerQuestions(mgr))
 	}
-	a.refreshAgentList()
+	a.clampCursor()
 	return nil
 }
 
@@ -573,7 +534,7 @@ func (a *App) resizeAllForDashboard() {
 		return
 	}
 	launchAgent := a.modals.LaunchAgent()
-	for _, ag := range a.dashboard.agentItems() {
+	for _, ag := range a.listItems().agents() {
 		if launchAgent != nil && ag.ID == launchAgent.ID {
 			continue
 		}
@@ -768,68 +729,47 @@ func (a *App) dashboardTopY() int {
 	return y
 }
 
-func (a *App) refreshAgentList() {
-	a.dashboard.closingAgents = a.closingAgents
-	a.dashboard.closingSessions = a.closingSessions
-	a.dashboard.sessionElapsed = a.wellness.EffectiveElapsed()
-	a.dashboard.lastReviewAt = a.wellness.lastReviewAt
-	a.dashboard.focusSessionMinutes = a.wellness.focusSessionMinutes
-	a.dashboard.focusBreakMode = a.wellness.focusBreakMode
-	if a.wellness.focusBreakMode {
-		a.dashboard.focusBreakElapsed = time.Since(a.wellness.focusBreakStart)
-	} else {
-		a.dashboard.focusBreakElapsed = 0
-	}
-	a.dashboard.focusBlockCount = a.wellness.focusBlockCount
-	a.dashboard.focusBreakMinutes = a.wellness.focusBreakMinutes
-	a.dashboard.focusBreakAnimFrame = a.wellness.focusBreakAnimFrame
-	a.dashboard.focusBreakShortWarning = a.wellness.focusBreakShortWarning
-	a.dashboard.focusBreakTimerUp = a.wellness.focusBreakTimerUp
-	a.dashboard.cursor = a.cursor
-	a.dashboard.prDraftSessionID = a.prDraftSessionID
-	a.dashboard.prDraftRepoPath = a.prDraftRepoPath
-	a.dashboard.activeRepoName = a.activeRepoDisplayName()
-	a.dashboard.activeRepoPath = a.activeRepo
-	a.syncModalsToDashboard()
+// listItems builds the hierarchical repo/session/agent row list fresh from the
+// managers. It is called once per frame (cheap: ListSessions takes an RLock and
+// allocates one slice) and is the single source for everything the dashboard
+// renders — there is no mirrored copy on the model (CONVENTIONS.md §5/§6).
+//
+// Two shapes, matching the legacy refreshAgentList: when cfg is nil (tests that
+// wire managers directly) the list is session > agent for the active repo with
+// no repo header; otherwise it is repo > session > agent across every
+// configured repo. Sessions are sorted by CreatedAt ascending in both paths.
+func (a *App) listItems() listItems {
 	if a.cfg == nil {
-		// Fallback used in tests that set up managers directly without cfg.
-		if mgr := a.managers[a.activeRepo]; mgr != nil {
-			var items []listItem
-			sessions := mgr.ListSessions()
-			sort.Slice(sessions, func(i, j int) bool {
-				return sessions[i].CreatedAt.Before(sessions[j].CreatedAt)
-			})
-			repoName := a.activeRepoDisplayName()
-			for _, sess := range sessions {
-				items = append(items, listItem{
-					kind:     listItemSession,
-					repoPath: a.activeRepo,
-					repoName: repoName,
-					session:  sess,
-				})
-				for _, ag := range sess.Agents() {
-					items = append(items, listItem{
-						kind:     listItemAgent,
-						repoPath: a.activeRepo,
-						session:  sess,
-						agent:    ag,
-					})
-				}
-			}
-			a.dashboard.items = items
-			a.dashboard.clampToAgent()
+		var items listItems
+		mgr := a.managers[a.activeRepo]
+		if mgr == nil {
+			return items
 		}
-		return
+		sessions := mgr.ListSessions()
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].CreatedAt.Before(sessions[j].CreatedAt)
+		})
+		repoName := a.activeRepoDisplayName()
+		for _, sess := range sessions {
+			items = append(items, listItem{
+				kind:     listItemSession,
+				repoPath: a.activeRepo,
+				repoName: repoName,
+				session:  sess,
+			})
+			for _, ag := range sess.Agents() {
+				items = append(items, listItem{
+					kind:     listItemAgent,
+					repoPath: a.activeRepo,
+					session:  sess,
+					agent:    ag,
+				})
+			}
+		}
+		return items
 	}
 
-	// Remember which repo the cursor is in before rebuilding.
-	var prevRepo string
-	if a.dashboard.selected >= 0 && a.dashboard.selected < len(a.dashboard.items) {
-		prevRepo = a.dashboard.items[a.dashboard.selected].repoPath
-	}
-
-	// Build hierarchical list: repo > session > agent.
-	items := make([]listItem, 0, len(a.cfg.Repos))
+	items := make(listItems, 0, len(a.cfg.Repos))
 	for _, repo := range a.cfg.Repos {
 		items = append(items, listItem{
 			kind:     listItemRepo,
@@ -837,50 +777,84 @@ func (a *App) refreshAgentList() {
 			repoName: repo.DisplayName(),
 		})
 		mgr := a.managers[repo.Path]
-		if mgr != nil {
-			sessions := mgr.ListSessions()
-			sort.Slice(sessions, func(i, j int) bool {
-				return sessions[i].CreatedAt.Before(sessions[j].CreatedAt)
+		if mgr == nil {
+			continue
+		}
+		sessions := mgr.ListSessions()
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].CreatedAt.Before(sessions[j].CreatedAt)
+		})
+		for _, sess := range sessions {
+			items = append(items, listItem{
+				kind:     listItemSession,
+				repoPath: repo.Path,
+				repoName: repo.DisplayName(),
+				session:  sess,
 			})
-			for _, sess := range sessions {
+			for _, ag := range sess.Agents() {
 				items = append(items, listItem{
-					kind:     listItemSession,
+					kind:     listItemAgent,
 					repoPath: repo.Path,
-					repoName: repo.DisplayName(),
 					session:  sess,
+					agent:    ag,
 				})
-				for _, ag := range sess.Agents() {
-					items = append(items, listItem{
-						kind:     listItemAgent,
-						repoPath: repo.Path,
-						session:  sess,
-						agent:    ag,
-					})
-				}
 			}
 		}
 	}
+	return items
+}
 
-	// Clamp selection to valid range.
-	if len(items) > 0 && a.dashboard.selected >= len(items) {
-		a.dashboard.selected = len(items) - 1
-	}
-	a.dashboard.items = items
-	a.dashboard.clampToRepo()
+// clampCursor keeps the pipeline cursor in range as sessions transition phases
+// or are killed. Replaces the cursor-clamping side effect that the old
+// refreshAgentList performed; call it after any mutation that can change the
+// per-section row counts.
+func (a *App) clampCursor() {
+	a.cursor.Clamp(a.listItems().sectionCounts())
+}
 
-	// If the selection landed in a different repo, search backward for the
-	// nearest repo header in the original repo so the dashboard's items
-	// `selected` row stays anchored to the right repo for things like
-	// activeRepoPath and the cross-repo summary.
-	if prevRepo != "" && len(items) > 0 && items[a.dashboard.selected].repoPath != prevRepo {
-		for i := a.dashboard.selected; i >= 0; i-- {
-			if items[i].repoPath == prevRepo && items[i].kind == listItemRepo {
-				a.dashboard.selected = i
-				break
-			}
-		}
+// dashboardProps assembles the per-frame snapshot the dashboard renders from.
+// Built fresh on every View()/Update so the dashboard never holds a mirror of
+// App state (CONVENTIONS.md §5/§6). All time-derived fields are computed
+// against the tick-refreshed render clock (a.dashboard.now), never time.Now(),
+// so this stays pure when called from View() (§5).
+func (a *App) dashboardProps() dashboardProps {
+	now := a.dashboard.now
+	var focusBreakElapsed time.Duration
+	if a.wellness.focusBreakMode {
+		focusBreakElapsed = now.Sub(a.wellness.focusBreakStart)
 	}
-	a.cursor.Clamp(a.dashboard.sectionCounts())
+	return dashboardProps{
+		panelFocus:         a.modals.Current(),
+		repoConfigForm:     a.modals.Config(),
+		configRepoPath:     a.modals.ConfigRepoPath(),
+		repoChecksEditor:   a.modals.RepoChecks(),
+		repoChecksRepoPath: a.modals.RepoChecksRepoPath(),
+		focusLaunchAgent:   a.modals.LaunchAgent(),
+		focusLaunchSession: a.modals.LaunchSession(),
+
+		cursor: a.cursor,
+
+		sessionElapsed:         a.wellness.EffectiveElapsedAt(now),
+		focusSessionMinutes:    a.wellness.focusSessionMinutes,
+		focusBreakMode:         a.wellness.focusBreakMode,
+		focusBreakElapsed:      focusBreakElapsed,
+		focusBlockCount:        a.wellness.focusBlockCount,
+		focusBreakMinutes:      a.wellness.focusBreakMinutes,
+		focusBreakAnimFrame:    a.wellness.focusBreakAnimFrame,
+		focusBreakShortWarning: a.wellness.focusBreakShortWarning,
+		focusBreakTimerUp:      a.wellness.focusBreakTimerUp,
+
+		prDraftSessionID: a.prDraftSessionID,
+		prDraftRepoPath:  a.prDraftRepoPath,
+
+		activeRepoName: a.activeRepoDisplayName(),
+		activeRepoPath: a.activeRepo,
+
+		prCache:         a.prCache,
+		closingSessions: a.closingSessions,
+
+		items: a.listItems(),
+	}
 }
 
 // pipelineHitTest maps a mouse-click Y coordinate (relative to the dashboard
@@ -918,9 +892,10 @@ func (a *App) pipelineHitTest(dashboardContentY int) (focusSection, int, bool) {
 		}
 	}
 
+	allItems := a.listItems()
 	rowCursor := headerRows + sepRows + pipelineRows + blankRows
 	for _, section := range focusSectionsInOrder() {
-		items := a.dashboard.sectionItems(section)
+		items := allItems.sectionItems(section)
 		if len(items) == 0 {
 			continue
 		}
@@ -944,11 +919,11 @@ func (a *App) pipelineHitTest(dashboardContentY int) (focusSection, int, bool) {
 
 // cursorSelectedSession returns the session under the pipeline cursor, or nil
 // when the cursor's section is empty. Workflow keys (c, x, X, t, e, p, d) use
-// this rather than dashboard.selectedSession() because the pipeline addresses
-// sessions by section + index, not by a `selected` row in the items list.
+// this because the pipeline addresses sessions by section + index, derived
+// fresh from a.listItems().
 func (a *App) cursorSelectedSession() *agent.Session {
 	section := a.cursor.Section()
-	items := a.dashboard.sectionItems(section)
+	items := a.listItems().sectionItems(section)
 	if len(items) == 0 {
 		return nil
 	}
@@ -965,7 +940,7 @@ func (a *App) cursorSelectedRepoPath() string {
 	sess := a.cursorSelectedSession()
 	if sess != nil {
 		// Find the repo that owns this session.
-		for _, item := range a.dashboard.items {
+		for _, item := range a.listItems() {
 			if item.kind == listItemSession && item.session == sess {
 				return item.repoPath
 			}
@@ -977,15 +952,6 @@ func (a *App) cursorSelectedRepoPath() string {
 	return a.activeRepo
 }
 
-// syncFocusCursorToDashboard mirrors the cursor-related App fields onto the
-// dashboard model so the next render reflects navigation immediately, without
-// waiting for the 100ms tick that drives refreshAgentList.
-func (a *App) syncFocusCursorToDashboard() {
-	a.dashboard.cursor = a.cursor
-	a.dashboard.prDraftSessionID = a.prDraftSessionID
-	a.dashboard.prDraftRepoPath = a.prDraftRepoPath
-}
-
 // activateFocusCursor opens the row currently under the fullscreen-focus
 // cursor. Planning + Building rows jump into a focusLaunch terminal so the
 // user can drive the agent. Reviewing rows open the review panel. Shipping
@@ -994,7 +960,7 @@ func (a *App) syncFocusCursorToDashboard() {
 // section has no actionable row.
 func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 	section := a.cursor.Section()
-	items := a.dashboard.sectionItems(section)
+	items := a.listItems().sectionItems(section)
 	if len(items) == 0 {
 		return nil, false
 	}
@@ -1091,9 +1057,10 @@ func (a App) View() tea.View {
 			v.AltScreen = true
 			return v
 		}
-		body := a.dashboard.View()
+		props := a.dashboardProps()
+		body := a.dashboard.View(props)
 		hints := dashboardHints
-		switch a.dashboard.panelFocus {
+		switch props.panelFocus {
 		case focusConfig:
 			hints = repoConfigHints
 		case focusRepoChecks:
@@ -1107,7 +1074,7 @@ func (a App) View() tea.View {
 		// overflowing 120 cols — when the cursor is not on Planning AND the
 		// wellness timer is enabled, swap the desc on the static `b` entry to
 		// "break". Skip in focusLaunch: b routes to the agent terminal there.
-		if a.dashboard.panelFocus != focusLaunch {
+		if props.panelFocus != focusLaunch {
 			if a.wellness.focusBreakMode {
 				if a.wellness.focusBreakTimerUp {
 					hints = []keyHint{{key: "b", desc: "resume focus"}}
@@ -1225,74 +1192,6 @@ func (a App) View() tea.View {
 	return v
 }
 
-// refreshDiffStatsCmd returns a Cmd that fetches diff stats for the currently selected session.
-func (a *App) refreshDiffStatsCmd() tea.Cmd {
-	sess := a.dashboard.selectedSession()
-	if sess == nil {
-		return nil
-	}
-	repoPath := a.dashboard.selectedRepoPath()
-	if repoPath == "" {
-		return nil
-	}
-	a.diffRefreshInFlight = true
-	sessionID := sess.ID
-	wt := sess.Worktree
-	return func() tea.Msg {
-		fileStats, agg, err := git.GetPerFileDiffStats(repoPath, wt)
-		if err != nil {
-			return diffStatsMsg{sessionID: sessionID, repoPath: repoPath, stats: nil}
-		}
-		// Convert git.FileStat to diffFileStat.
-		var files []diffFileStat
-		for _, fs := range fileStats {
-			files = append(files, diffFileStat{
-				Path:       fs.Path,
-				Status:     fs.Status,
-				Insertions: fs.Insertions,
-				Deletions:  fs.Deletions,
-			})
-		}
-		return diffStatsMsg{
-			sessionID: sessionID,
-			repoPath:  repoPath,
-			stats: &diffSummaryData{
-				Files: files,
-				Aggregate: diffAggregateStats{
-					Files:      agg.Files,
-					Insertions: agg.Insertions,
-					Deletions:  agg.Deletions,
-				},
-			},
-		}
-	}
-}
-
-// updateDashboardDiffStats passes cached diff stats to the dashboard for the current selection.
-func (a *App) updateDashboardDiffStats() {
-	sess := a.dashboard.selectedSession()
-	if sess == nil {
-		a.dashboard.diffStats = nil
-		return
-	}
-	repoPath := a.dashboard.selectedRepoPath()
-	if repoPath == "" {
-		a.dashboard.diffStats = nil
-		return
-	}
-	if entry, ok := a.diffStatsCache[cacheKey(repoPath, sess.ID)]; ok {
-		a.dashboard.diffStats = entry.stats
-	} else {
-		a.dashboard.diffStats = nil
-	}
-}
-
-// updateDashboardPRCache passes the PR cache and poll states to the dashboard for rendering.
-func (a *App) updateDashboardPRCache() {
-	a.dashboard.prCache = a.prCache
-	a.dashboard.prPollStates = a.prPollStates
-}
-
 // cacheKey composes a repo-scoped key for App-level per-session caches.
 // Always use this — never key a session cache by sessionID alone. Session
 // IDs are minted by a per-manager counter (session-1, session-2, …), so with
@@ -1374,11 +1273,6 @@ func (a *App) cleanStaleCaches() {
 			for _, ag := range sess.Agents() {
 				activeAgents[agentCacheKey(repoPath, ag.ID)] = true
 			}
-		}
-	}
-	for k := range a.diffStatsCache {
-		if !activeSessions[k] {
-			delete(a.diffStatsCache, k)
 		}
 	}
 	for k := range a.prCache {

@@ -72,10 +72,6 @@ const (
 	// the same pipeline row that still counts as a double-click activation.
 	PipelineDoubleClickWindow = 500 * time.Millisecond
 
-	// DiffStatsCacheTTL is how long App.diffStatsCache entries are
-	// considered fresh before the dashboard triggers a background refresh.
-	DiffStatsCacheTTL = 5 * time.Second
-
 	// ErrorOverlayTicks is the number of dashboard ticks the bottom-row
 	// error message stays visible after setError() (3 seconds at the
 	// 100ms tick interval).

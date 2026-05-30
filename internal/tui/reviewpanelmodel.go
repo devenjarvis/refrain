@@ -80,7 +80,7 @@ func (m *reviewPanelModel) Session() *agent.Session {
 }
 
 // TaskCursor returns the current task-cursor row. Surfaced so App's
-// fetchReviewDiffCmd / refreshAgentList can read it.
+// click-handling and fetchReviewDiffCmd paths can read it.
 func (m *reviewPanelModel) TaskCursor() int {
 	if m == nil {
 		return 0

@@ -114,16 +114,20 @@ func TestClearSelection(t *testing.T) {
 }
 
 // tickerDashboard builds a minimal dashboardModel for ticker tests with
-// sidebarWidth=30 (yielding maxNameLen=20 in the ticker tests below).
-func tickerDashboard(sessions ...*agent.Session) dashboardModel {
+// sidebarWidth=30 (yielding maxNameLen=20 in the ticker tests below). It also
+// returns the dashboardProps carrying the session items (plus empty prCache /
+// closingSessions maps) that advanceTickers now reads from.
+func tickerDashboard(sessions ...*agent.Session) (dashboardModel, dashboardProps) {
 	d := newDashboardModel()
 	d.sidebarWidth = 30
-	d.prCache = make(map[string]*prCacheEntry)
-	d.closingSessions = make(map[string]bool)
-	for _, s := range sessions {
-		d.items = append(d.items, listItem{kind: listItemSession, session: s})
+	props := dashboardProps{
+		prCache:         make(map[string]*prCacheEntry),
+		closingSessions: make(map[string]bool),
 	}
-	return d
+	for _, s := range sessions {
+		props.items = append(props.items, listItem{kind: listItemSession, session: s})
+	}
+	return d, props
 }
 
 // past returns a time in the past so ticker pause/advance checks pass immediately.
@@ -171,8 +175,8 @@ func TestTickerSlice_MultibyteRunes(t *testing.T) {
 func TestAdvanceTickers_NameFits_NoTickerCreated(t *testing.T) {
 	// sidebarW=30 → maxNameLen=20; "short" (5 chars) fits easily.
 	sess := &agent.Session{ID: "s1", Name: "short"}
-	d := tickerDashboard(sess)
-	d.advanceTickers(time.Now())
+	d, props := tickerDashboard(sess)
+	d.advanceTickers(time.Now(), props)
 	if _, exists := d.tickers["s1"]; exists {
 		t.Error("ticker should not be created for a name that fits")
 	}
@@ -181,9 +185,9 @@ func TestAdvanceTickers_NameFits_NoTickerCreated(t *testing.T) {
 func TestAdvanceTickers_NameFits_ClearsStale(t *testing.T) {
 	// Stale ticker entry from a previous long name should be removed.
 	sess := &agent.Session{ID: "s1", Name: "short"}
-	d := tickerDashboard(sess)
+	d, props := tickerDashboard(sess)
 	d.tickers["s1"] = &sessionTicker{offset: 5}
-	d.advanceTickers(time.Now())
+	d.advanceTickers(time.Now(), props)
 	if _, exists := d.tickers["s1"]; exists {
 		t.Error("stale ticker should be removed when name fits")
 	}
@@ -193,9 +197,9 @@ func TestAdvanceTickers_OverflowCreatesTickerWithPause(t *testing.T) {
 	// sidebarW=30 → maxNameLen=20; long name (26 chars) overflows.
 	longName := "abcdefghijklmnopqrstuvwxyz"
 	sess := &agent.Session{ID: "s1", Name: longName}
-	d := tickerDashboard(sess)
+	d, props := tickerDashboard(sess)
 	now := time.Now()
-	d.advanceTickers(now)
+	d.advanceTickers(now, props)
 	tk := d.tickers["s1"]
 	if tk == nil {
 		t.Fatal("expected ticker to be created for overflowing name")
@@ -211,10 +215,10 @@ func TestAdvanceTickers_OverflowCreatesTickerWithPause(t *testing.T) {
 func TestAdvanceTickers_AdvancePastPause_IncrementsOffset(t *testing.T) {
 	longName := "abcdefghijklmnopqrstuvwxyz"
 	sess := &agent.Session{ID: "s1", Name: longName}
-	d := tickerDashboard(sess)
+	d, props := tickerDashboard(sess)
 	// Pre-seed expired ticker so initial pause is already over.
 	d.tickers["s1"] = &sessionTicker{pauseUntil: past(), nextAdvance: past()}
-	d.advanceTickers(time.Now())
+	d.advanceTickers(time.Now(), props)
 	tk := d.tickers["s1"]
 	if tk.offset != 1 {
 		t.Errorf("offset after advance: got %d, want 1", tk.offset)
@@ -227,9 +231,9 @@ func TestAdvanceTickers_WideCharName_ScrollsNotStuck(t *testing.T) {
 	// offset=0 (0+20=20 >= 14), preventing the name from ever scrolling.
 	wideName := strings.Repeat("日", 12)
 	sess := &agent.Session{ID: "s1", Name: wideName}
-	d := tickerDashboard(sess)
+	d, props := tickerDashboard(sess)
 	d.tickers["s1"] = &sessionTicker{pauseUntil: past(), nextAdvance: past()}
-	d.advanceTickers(time.Now())
+	d.advanceTickers(time.Now(), props)
 	tk := d.tickers["s1"]
 	if tk.atEnd {
 		t.Error("wide-char name: atEnd should not fire on first advance")
@@ -245,11 +249,11 @@ func TestAdvanceTickers_EndReached_SnapsBack(t *testing.T) {
 	// end condition: offset+20 >= 28 → offset >= 8
 	longName := "12345678901234567890123456"
 	sess := &agent.Session{ID: "s1", Name: longName}
-	d := tickerDashboard(sess)
+	d, props := tickerDashboard(sess)
 
 	// Set offset to 7 (one step before end); advance once → hits 8 → atEnd=true.
 	d.tickers["s1"] = &sessionTicker{offset: 7, pauseUntil: past(), nextAdvance: past()}
-	d.advanceTickers(time.Now())
+	d.advanceTickers(time.Now(), props)
 	tk := d.tickers["s1"]
 	if !tk.atEnd {
 		t.Fatal("expected atEnd=true after reaching end")
@@ -262,7 +266,7 @@ func TestAdvanceTickers_EndReached_SnapsBack(t *testing.T) {
 	tk.pauseUntil = past()
 	tk.nextAdvance = past()
 	beforeSnap := time.Now()
-	d.advanceTickers(time.Now())
+	d.advanceTickers(time.Now(), props)
 	if tk.offset != 0 {
 		t.Errorf("offset after snap: got %d, want 0", tk.offset)
 	}
@@ -282,14 +286,12 @@ func TestSessionFocusPriority_DefaultIsIdle(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := &agent.Agent{Name: "a1"}
 
-	d := newDashboardModel()
-	d.prCache = make(map[string]*prCacheEntry)
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, session: sess},
 		{kind: listItemAgent, session: sess, agent: ag},
 	}
 
-	if got := d.sessionFocusPriority(sess); got != 3 {
+	if got := items.sessionFocusPriority(sess); got != 3 {
 		t.Errorf("sessionFocusPriority with StatusStarting agent: got %d, want 3", got)
 	}
 }
@@ -308,17 +310,15 @@ func TestSessionFocusPriority_ActiveBeforeIdle(t *testing.T) {
 	sessIdle.SetLifecyclePhase(agent.LifecycleInProgress)
 	agIdle := &agent.Agent{Name: "ag-idle"}
 
-	d := newDashboardModel()
-	d.prCache = make(map[string]*prCacheEntry)
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, session: sessActive},
 		{kind: listItemAgent, session: sessActive, agent: agActive},
 		{kind: listItemSession, session: sessIdle},
 		{kind: listItemAgent, session: sessIdle, agent: agIdle},
 	}
 
-	pa := d.sessionFocusPriority(sessActive)
-	pi := d.sessionFocusPriority(sessIdle)
+	pa := items.sessionFocusPriority(sessActive)
+	pi := items.sessionFocusPriority(sessIdle)
 	if pa != 2 {
 		t.Errorf("active session priority: got %d, want 2", pa)
 	}
@@ -342,17 +342,15 @@ func TestAllInProgressSessions_SortOrder(t *testing.T) {
 	// Drive to StatusActive.
 	agActive.OnHookEvent(hook.Event{Kind: hook.KindSessionStart})
 
-	d := newDashboardModel()
-	d.prCache = make(map[string]*prCacheEntry)
 	// Idle session is listed first in items; active second — sort should invert.
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, session: sessIdle},
 		{kind: listItemAgent, session: sessIdle, agent: agIdle},
 		{kind: listItemSession, session: sessActive},
 		{kind: listItemAgent, session: sessActive, agent: agActive},
 	}
 
-	sessions := d.buildingSessions()
+	sessions := items.buildingSessions()
 	if len(sessions) != 2 {
 		t.Fatalf("expected 2 sessions, got %d", len(sessions))
 	}
@@ -378,17 +376,15 @@ func TestAllInProgressSessions_StableWithinPriority(t *testing.T) {
 	sessNewer := &agent.Session{ID: "sn", Name: "newer", CreatedAt: t0.Add(time.Minute)}
 	sessNewer.SetLifecyclePhase(agent.LifecycleInProgress)
 
-	d := newDashboardModel()
-	d.prCache = make(map[string]*prCacheEntry)
 	// Insert newer first so we can confirm the sort actually runs and the
 	// result is keyed on CreatedAt, not insertion order.
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, session: sessNewer},
 		{kind: listItemSession, session: sessOlder},
 	}
 
 	for i := 0; i < 5; i++ {
-		sessions := d.buildingSessions()
+		sessions := items.buildingSessions()
 		if len(sessions) != 2 {
 			t.Fatalf("iter %d: expected 2 sessions, got %d", i, len(sessions))
 		}
@@ -414,15 +410,13 @@ func TestReviewQueueSessions_IncludesInReview(t *testing.T) {
 	sessProgress := &agent.Session{ID: "sp", Name: "in-progress"}
 	sessProgress.SetLifecyclePhase(agent.LifecycleInProgress)
 
-	d := newDashboardModel()
-	d.prCache = make(map[string]*prCacheEntry)
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, session: sessReady},
 		{kind: listItemSession, session: sessInReview},
 		{kind: listItemSession, session: sessProgress},
 	}
 
-	queue := d.reviewQueueSessions()
+	queue := items.reviewQueueSessions()
 	if len(queue) != 2 {
 		t.Fatalf("expected 2 sessions in queue (Ready+InReview), got %d", len(queue))
 	}
@@ -449,12 +443,11 @@ func TestRenderPipelineWidget_CountsDraftingAsPlanning(t *testing.T) {
 	sessDrafting.SetLifecyclePhase(agent.LifecycleDrafting)
 
 	d := newDashboardModel()
-	d.prCache = make(map[string]*prCacheEntry)
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, session: sessDrafting},
 	}
 
-	out := ansi.Strip(d.renderPipelineWidget(120))
+	out := ansi.Strip(d.renderPipelineWidget(dashboardProps{items: items}, 120))
 	// Cells are joined horizontally so the labels share a row and the counts
 	// share the row below. Find the count row by locating the line that holds
 	// the BUILDING/REVIEWING/SHIPPING zeros, then slice out the leading
@@ -503,16 +496,14 @@ func TestPlanningSessions_OnlyPlanningPhase(t *testing.T) {
 	sessShipping := &agent.Session{ID: "ss", Name: "shipping"}
 	sessShipping.SetLifecyclePhase(agent.LifecycleShipping)
 
-	d := newDashboardModel()
-	d.prCache = make(map[string]*prCacheEntry)
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, session: sessPlanning},
 		{kind: listItemSession, session: sessBuilding},
 		{kind: listItemSession, session: sessReady},
 		{kind: listItemSession, session: sessShipping},
 	}
 
-	planning := d.planningSessions()
+	planning := items.planningSessions()
 	if len(planning) != 1 || planning[0].session != sessPlanning {
 		t.Fatalf("expected exactly the planning session, got %d entries", len(planning))
 	}
@@ -531,15 +522,13 @@ func TestShippingSessions_OnlyShippingPhase(t *testing.T) {
 	sessReady := &agent.Session{ID: "sr", Name: "ready"}
 	sessReady.SetLifecyclePhase(agent.LifecycleReadyForReview)
 
-	d := newDashboardModel()
-	d.prCache = make(map[string]*prCacheEntry)
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, session: sessShipping},
 		{kind: listItemSession, session: sessComplete},
 		{kind: listItemSession, session: sessReady},
 	}
 
-	shipping := d.shippingSessions()
+	shipping := items.shippingSessions()
 	if len(shipping) != 1 || shipping[0].session != sessShipping {
 		t.Fatalf("expected exactly the shipping session, got %d entries", len(shipping))
 	}
@@ -715,9 +704,10 @@ func TestRenderQueueRow_PRDraftBadge(t *testing.T) {
 
 	repo := "/repo/a"
 
+	var d dashboardModel
 	// With prDraftSessionID+prDraftRepoPath matching the session: badge should appear.
-	d := dashboardModel{prDraftSessionID: sess.ID, prDraftRepoPath: repo}
-	rows := d.renderQueueRow(sess, "", repo, false, ColorWarning, 80)
+	props := dashboardProps{prDraftSessionID: sess.ID, prDraftRepoPath: repo}
+	rows := d.renderQueueRow(props, sess, "", repo, false, ColorWarning, 80)
 	if len(rows) < 2 {
 		t.Fatalf("renderQueueRow returned %d lines, want 2", len(rows))
 	}
@@ -726,9 +716,9 @@ func TestRenderQueueRow_PRDraftBadge(t *testing.T) {
 	}
 
 	// With prDraftSessionID cleared: normal prompt should appear.
-	d.prDraftSessionID = ""
-	d.prDraftRepoPath = ""
-	rows = d.renderQueueRow(sess, "", repo, false, ColorWarning, 80)
+	props.prDraftSessionID = ""
+	props.prDraftRepoPath = ""
+	rows = d.renderQueueRow(props, sess, "", repo, false, ColorWarning, 80)
 	if strings.Contains(ansi.Strip(rows[1]), "drafting PR") {
 		t.Error("cleared state must not show badge; got 'drafting PR' on line 2")
 	}
@@ -765,13 +755,14 @@ func TestRenderQueueRow_PRDraftBadge_OnlyTargetSession(t *testing.T) {
 		targetIdx := rapid.IntRange(0, len(all)-1).Draw(t, "target")
 		target := all[targetIdx]
 
-		d := dashboardModel{
+		var d dashboardModel
+		props := dashboardProps{
 			prDraftSessionID: target.sess.ID,
 			prDraftRepoPath:  target.repoPath,
 		}
 
 		for i, rs := range all {
-			rows := d.renderQueueRow(rs.sess, "", rs.repoPath, false, ColorWarning, 80)
+			rows := d.renderQueueRow(props, rs.sess, "", rs.repoPath, false, ColorWarning, 80)
 			if len(rows) < 2 {
 				t.Fatalf("renderQueueRow for item %d returned %d lines, want 2", i, len(rows))
 			}

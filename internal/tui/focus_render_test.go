@@ -16,6 +16,23 @@ import (
 // unselected sessions. The "> " chevron is also present on the selected row
 // (an ANSI-stripped fallback signal for screenshots / terminal recordings),
 // but the cyan stripe is the assertion this test owns.
+// TestRenderFullscreenFocus_ZeroWidthDoesNotPanic guards the first-frame render
+// path: before the initial WindowSizeMsg, the dashboard width is 0. Because the
+// item list is now derived live from cfg (props.items includes repo headers
+// immediately), View() reaches renderFullscreenFocus before a size is known, so
+// the header separator must not feed strings.Repeat a negative count.
+func TestRenderFullscreenFocus_ZeroWidthDoesNotPanic(t *testing.T) {
+	d := newDashboardModel()
+	// Single repo header, no sessions — the realistic pre-WindowSizeMsg state.
+	props := dashboardProps{items: listItems{
+		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
+	}}
+	// width 0, height 0: must not panic.
+	_ = d.renderFullscreenFocus(props, 0, 0)
+	// width 1 still yields width-2 < 0 for the separator.
+	_ = d.renderFullscreenFocus(props, 1, 5)
+}
+
 func TestRenderFocusActiveCursor(t *testing.T) {
 	// Force TrueColor so the rendered ANSI escapes carry the foreground color
 	// we want to assert against. Without this, lipgloss strips colors when
@@ -33,14 +50,15 @@ func TestRenderFocusActiveCursor(t *testing.T) {
 	d := newDashboardModel()
 	d.width = 120
 	d.height = 39
-	d.cursor.JumpTo(focusSectionBuilding, 1)
-	d.items = []listItem{
+	var cur FocusedCursor
+	cur.JumpTo(focusSectionBuilding, 1)
+	items := listItems{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessB},
 	}
 
-	out := d.renderFullscreenFocus(120, 39)
+	out := d.renderFullscreenFocus(dashboardProps{items: items, cursor: cur}, 120, 39)
 
 	selectedStripe := lipgloss.NewStyle().Foreground(ColorSecondary).Render("▎")
 	if !strings.Contains(selectedStripe, "▎") {
@@ -87,13 +105,12 @@ func TestSessionFocusStatus_IdleReviewableShowsCue(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("a-1", false, agent.StatusIdle)
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := d.sessionFocusStatus(sess)
+	badge := items.sessionFocusStatus(sess)
 	if !strings.Contains(badge, "press m to review") {
 		t.Errorf("expected reviewable cue, got %q", badge)
 	}
@@ -107,13 +124,12 @@ func TestSessionFocusStatus_ActiveDoesNotShowCue(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := d.sessionFocusStatus(sess)
+	badge := items.sessionFocusStatus(sess)
 	if strings.Contains(badge, "press m to review") {
 		t.Errorf("did not expect reviewable cue with active agent, got %q", badge)
 	}
@@ -128,13 +144,12 @@ func TestSessionFocusStripeColor_IdleReviewableMatchesBadge(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("a-1", false, agent.StatusIdle)
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	if got := d.sessionFocusStripeColor(sess); got != ColorSuccess {
+	if got := items.sessionFocusStripeColor(sess); got != ColorSuccess {
 		t.Errorf("expected stripe ColorSuccess for idle-reviewable session, got %v", got)
 	}
 }
@@ -148,13 +163,12 @@ func TestSessionFocusStatus_FinishedTakesPrecedence(t *testing.T) {
 	ag := sess.AddTestAgent("a-1", false, agent.StatusDone)
 	sess.MarkDone()
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := d.sessionFocusStatus(sess)
+	badge := items.sessionFocusStatus(sess)
 	if !strings.Contains(badge, "finished") {
 		t.Errorf("expected finished badge to win, got %q", badge)
 	}
@@ -176,12 +190,12 @@ func TestRenderFocusSessionCard_RepoPrefix(t *testing.T) {
 
 	d := newDashboardModel()
 	d.width = 120
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/a", repoName: "repoA", session: sessA},
 		{kind: listItemSession, repoPath: "/b", repoName: "repoB", session: sessB},
 	}
 
-	card := d.renderFocusSessionCard(sessA, "repoA", false, 120)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sessA, "repoA", false, 120)
 	if len(card) == 0 {
 		t.Fatalf("expected at least one rendered line")
 	}
@@ -201,7 +215,7 @@ func TestRenderFocusSessionCard_RepoPrefix(t *testing.T) {
 
 	// Empty repoName must not render the separator (defensive — the prefix is
 	// optional even though every real call passes a non-empty value).
-	bare := d.renderFocusSessionCard(sessA, "", false, 120)
+	bare := d.renderFocusSessionCard(dashboardProps{items: items}, sessA, "", false, 120)
 	if strings.Contains(ansi.Strip(bare[0]), "›") {
 		t.Errorf("empty repoName should not emit › separator, got %q", ansi.Strip(bare[0]))
 	}
@@ -265,13 +279,12 @@ func TestSessionFocusStatus_BuildingWithTodosShowsProgressBadge(t *testing.T) {
 		{Content: "step three", Status: "pending", ActiveForm: ""},
 	})
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	badge := ansi.Strip(items.sessionFocusStatus(sess))
 	if !strings.Contains(badge, "1/3") {
 		t.Errorf("expected progress badge with 1/3, got %q", badge)
 	}
@@ -290,13 +303,12 @@ func TestSessionFocusStatus_BuildingWithTodosErrorPreempts(t *testing.T) {
 		{Content: "step one", Status: "in_progress", ActiveForm: "Doing step one"},
 	})
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	badge := ansi.Strip(items.sessionFocusStatus(sess))
 	if !strings.Contains(badge, "error") {
 		t.Errorf("expected error badge to preempt todos, got %q", badge)
 	}
@@ -371,11 +383,11 @@ func TestRenderQueueRow_RepoPrefix(t *testing.T) {
 
 	d := newDashboardModel()
 	d.width = 120
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/a", repoName: "repoA", session: sess},
 	}
 
-	row := d.renderQueueRow(sess, "repoA", "", false, ColorWarning, 120)
+	row := d.renderQueueRow(dashboardProps{items: items}, sess, "repoA", "", false, ColorWarning, 120)
 	if len(row) == 0 {
 		t.Fatalf("expected at least one rendered line")
 	}
@@ -393,7 +405,7 @@ func TestRenderQueueRow_RepoPrefix(t *testing.T) {
 		}
 	}
 
-	bare := d.renderQueueRow(sess, "", "", false, ColorWarning, 120)
+	bare := d.renderQueueRow(dashboardProps{items: items}, sess, "", "", false, ColorWarning, 120)
 	if strings.Contains(ansi.Strip(bare[0]), "›") {
 		t.Errorf("empty repoName should not emit › separator, got %q", ansi.Strip(bare[0]))
 	}
@@ -414,12 +426,12 @@ func TestRenderFocusSessionCard_PlanBackedBuildingHasTaskProgressLine(t *testing
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 100)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 100)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card for plan-backed building session, got %d lines: %v", len(card), card)
 	}
@@ -460,12 +472,12 @@ func TestRenderFocusSessionCard_BuildingDescriptionFallsBackToOriginalPrompt(t *
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 100)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 100)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card, got %d", len(card))
 	}
@@ -488,12 +500,12 @@ func TestRenderFocusSessionCard_BuildingNoTasksFallsBackToDescriptionOverflow(t 
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 60)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 60)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card, got %d", len(card))
 	}
@@ -520,12 +532,12 @@ func TestRenderFocusSessionCard_BuildingNoTasksShortDescription(t *testing.T) {
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 100)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 100)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card, got %d", len(card))
 	}
@@ -559,12 +571,12 @@ func TestRenderFocusSessionCard_PlanBackedBuilding_TodoOverridesPlan(t *testing.
 	})
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 100)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 100)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card, got %d", len(card))
 	}
@@ -601,12 +613,12 @@ func TestRenderFocusSessionCard_PlanWithSingleOpenTaskDropsNextSuffix(t *testing
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 100)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 100)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card with single open task, got %d lines", len(card))
 	}
@@ -638,12 +650,12 @@ func TestRenderFocusSessionCard_PlanWithNoOpenTasksStaysFourLines(t *testing.T) 
 	ag := sess.AddTestAgent("a-1", false, agent.StatusIdle)
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 100)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 100)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card when all tasks done, got %d lines", len(card))
 	}
@@ -657,12 +669,12 @@ func TestRenderFocusSessionCard_NoPlanStaysFourLines(t *testing.T) {
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 100)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 100)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card with no plan, got %d lines", len(card))
 	}
@@ -692,13 +704,12 @@ func TestSessionFocusStatus_PlanProgressBeatsStaleTodos(t *testing.T) {
 		{Content: "step five", Status: "pending"},
 	})
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	badge := ansi.Strip(items.sessionFocusStatus(sess))
 	if !strings.Contains(badge, "2/5") {
 		t.Errorf("expected plan-driven badge '2/5', got %q", badge)
 	}
@@ -723,13 +734,12 @@ func TestSessionFocusStatus_BuildingWithPlanShowsProgressBadge(t *testing.T) {
 	}
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := d.sessionFocusStatus(sess)
+	badge := items.sessionFocusStatus(sess)
 	stripped := ansi.Strip(badge)
 	// Must contain the "1/3" count.
 	if !strings.Contains(stripped, "1/3") {
@@ -760,13 +770,12 @@ func TestSessionFocusStatus_BuildingWithPlanPreemptedByError(t *testing.T) {
 	}
 	ag := sess.AddTestAgent("a-1", false, agent.StatusError)
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	badge := ansi.Strip(items.sessionFocusStatus(sess))
 	if !strings.Contains(badge, "error") {
 		t.Errorf("expected error badge to preempt plan progress, got %q", badge)
 	}
@@ -786,13 +795,12 @@ func TestSessionFocusStatus_BuildingWithPlanPreemptedByWaiting(t *testing.T) {
 	}
 	ag := sess.AddTestAgent("a-1", false, agent.StatusWaiting)
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	badge := ansi.Strip(items.sessionFocusStatus(sess))
 	if !strings.Contains(badge, "waiting") {
 		t.Errorf("expected waiting badge to preempt plan progress, got %q", badge)
 	}
@@ -815,13 +823,12 @@ func TestSessionFocusStatus_BuildingWithPlanAllDoneReviewablePrefersReviewBadge(
 	// Idle agent → IsReviewable() == true and DoneAt is zero.
 	ag := sess.AddTestAgent("a-1", false, agent.StatusIdle)
 
-	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	badge := ansi.Strip(d.sessionFocusStatus(sess))
+	badge := ansi.Strip(items.sessionFocusStatus(sess))
 	if !strings.Contains(badge, "press m to review") {
 		t.Errorf("expected review badge to win when all tasks done + reviewable, got %q", badge)
 	}
@@ -883,16 +890,16 @@ func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		setup     func() (*agent.Session, []listItem)
+		setup     func() (*agent.Session, listItems)
 		wantGlyph string
 	}{
 		{
 			name: "error → ✗",
-			setup: func() (*agent.Session, []listItem) {
+			setup: func() (*agent.Session, listItems) {
 				sess := agent.NewSessionForTest("s", "my-session")
 				sess.SetLifecyclePhase(agent.LifecycleInProgress)
 				ag := sess.AddTestAgent("a-1", false, agent.StatusError)
-				return sess, []listItem{
+				return sess, listItems{
 					{kind: listItemSession, repoPath: "/r", session: sess},
 					{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 				}
@@ -901,11 +908,11 @@ func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
 		},
 		{
 			name: "waiting → ⏸",
-			setup: func() (*agent.Session, []listItem) {
+			setup: func() (*agent.Session, listItems) {
 				sess := agent.NewSessionForTest("s", "my-session")
 				sess.SetLifecyclePhase(agent.LifecycleInProgress)
 				ag := sess.AddTestAgent("a-1", false, agent.StatusWaiting)
-				return sess, []listItem{
+				return sess, listItems{
 					{kind: listItemSession, repoPath: "/r", session: sess},
 					{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 				}
@@ -914,11 +921,11 @@ func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
 		},
 		{
 			name: "active → ●",
-			setup: func() (*agent.Session, []listItem) {
+			setup: func() (*agent.Session, listItems) {
 				sess := agent.NewSessionForTest("s", "my-session")
 				sess.SetLifecyclePhase(agent.LifecycleInProgress)
 				ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
-				return sess, []listItem{
+				return sess, listItems{
 					{kind: listItemSession, repoPath: "/r", session: sess},
 					{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 				}
@@ -927,11 +934,11 @@ func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
 		},
 		{
 			name: "reviewable → ✓",
-			setup: func() (*agent.Session, []listItem) {
+			setup: func() (*agent.Session, listItems) {
 				sess := agent.NewSessionForTest("s", "my-session")
 				sess.SetLifecyclePhase(agent.LifecycleInProgress)
 				ag := sess.AddTestAgent("a-1", false, agent.StatusIdle)
-				return sess, []listItem{
+				return sess, listItems{
 					{kind: listItemSession, repoPath: "/r", session: sess},
 					{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 				}
@@ -940,10 +947,10 @@ func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
 		},
 		{
 			name: "idle, no agents → ○",
-			setup: func() (*agent.Session, []listItem) {
+			setup: func() (*agent.Session, listItems) {
 				sess := agent.NewSessionForTest("s", "my-session")
 				sess.SetLifecyclePhase(agent.LifecycleInProgress)
-				return sess, []listItem{
+				return sess, listItems{
 					{kind: listItemSession, repoPath: "/r", session: sess},
 				}
 			},
@@ -955,8 +962,7 @@ func TestRenderFocusSessionCard_StatusGlyphMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sess, items := tc.setup()
 			d := newDashboardModel()
-			d.items = items
-			card := d.renderFocusSessionCard(sess, "", false, 100)
+			card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 100)
 			line1 := ansi.Strip(card[0])
 			if !strings.Contains(line1, tc.wantGlyph) {
 				t.Errorf("line 1 should contain glyph %q, got %q", tc.wantGlyph, line1)
@@ -980,12 +986,12 @@ func TestRenderFocusSessionCard_BranchChipAndElapsedGlyph(t *testing.T) {
 	ag := sess.AddTestAgent("a-1", false, agent.StatusActive)
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 120)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 120)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card, got %d", len(card))
 	}
@@ -1016,11 +1022,11 @@ func TestRenderFocusSessionCard_BranchChipAndElapsedGlyph(t *testing.T) {
 	sessNoBranch.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag2 := sessNoBranch.AddTestAgent("a-2", false, agent.StatusActive)
 	d2 := newDashboardModel()
-	d2.items = []listItem{
+	items2 := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sessNoBranch},
 		{kind: listItemAgent, repoPath: "/r", session: sessNoBranch, agent: ag2},
 	}
-	card2 := d2.renderFocusSessionCard(sessNoBranch, "", false, 120)
+	card2 := d2.renderFocusSessionCard(dashboardProps{items: items2}, sessNoBranch, "", false, 120)
 	line4b := ansi.Strip(card2[3])
 	if strings.Contains(line4b, "⎇") {
 		t.Errorf("no-branch session should not render ⎇ label, got %q", line4b)
@@ -1154,12 +1160,12 @@ func TestRenderFocusSessionCard_StaleTodosLineLine3UsesPlan(t *testing.T) {
 	})
 
 	d := newDashboardModel()
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemSession, repoPath: "/r", session: sess},
 		{kind: listItemAgent, repoPath: "/r", session: sess, agent: ag},
 	}
 
-	card := d.renderFocusSessionCard(sess, "", false, 100)
+	card := d.renderFocusSessionCard(dashboardProps{items: items}, sess, "", false, 100)
 	if len(card) != 4 {
 		t.Fatalf("expected 4-line card, got %d lines", len(card))
 	}
@@ -1180,7 +1186,7 @@ func TestRenderFocusSessionCard_StaleTodosLineLine3UsesPlan(t *testing.T) {
 
 // TestHeaderOmitsCrossRepoSummary verifies that renderFullscreenFocus never
 // emits a "repo: " label or a "|" cross-repo separator on the header line,
-// even when multiple repo items are present in d.items.
+// even when multiple repo items are present in the item list.
 func TestHeaderOmitsCrossRepoSummary(t *testing.T) {
 	sessA := agent.NewSessionForTest("s-a", "add-dark-mode")
 	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
@@ -1190,14 +1196,14 @@ func TestHeaderOmitsCrossRepoSummary(t *testing.T) {
 	d := newDashboardModel()
 	d.width = 120
 	d.height = 39
-	d.items = []listItem{
+	items := listItems{
 		{kind: listItemRepo, repoPath: "/a", repoName: "repoA"},
 		{kind: listItemSession, repoPath: "/a", repoName: "repoA", session: sessA},
 		{kind: listItemRepo, repoPath: "/b", repoName: "repoB"},
 		{kind: listItemSession, repoPath: "/b", repoName: "repoB", session: sessB},
 	}
 
-	out := d.renderFullscreenFocus(120, 39)
+	out := d.renderFullscreenFocus(dashboardProps{items: items}, 120, 39)
 
 	lines := strings.Split(out, "\n")
 	if len(lines) == 0 {
@@ -1231,11 +1237,11 @@ func TestSessionFocusStatus_BuildingProgressCombinesPlanAndCommits(t *testing.T)
 		return sess
 	}
 
-	d := newDashboardModel()
+	var items listItems
 
 	t.Run("plan_only_1_of_5", func(t *testing.T) {
 		sess := newBuildingSession(t, plan5) // 1 checked, 5 total
-		badge := ansi.Strip(d.sessionFocusStatus(sess))
+		badge := ansi.Strip(items.sessionFocusStatus(sess))
 		if !strings.Contains(badge, "1/5") {
 			t.Errorf("expected 1/5 badge, got %q", badge)
 		}
@@ -1244,7 +1250,7 @@ func TestSessionFocusStatus_BuildingProgressCombinesPlanAndCommits(t *testing.T)
 	t.Run("commits_ahead_of_checkboxes_3_of_5", func(t *testing.T) {
 		sess := newBuildingSession(t, plan5) // 1 checked, 5 total
 		sess.SetCommitTaskCountForTest(3, 3) // commits: done=3, max=3
-		badge := ansi.Strip(d.sessionFocusStatus(sess))
+		badge := ansi.Strip(items.sessionFocusStatus(sess))
 		if !strings.Contains(badge, "3/5") {
 			t.Errorf("expected 3/5 badge (commits ahead of checkboxes), got %q", badge)
 		}
@@ -1257,7 +1263,7 @@ func TestSessionFocusStatus_BuildingProgressCombinesPlanAndCommits(t *testing.T)
 			t.Fatalf("WritePlan: %v", err)
 		}
 		sess.SetCommitTaskCountForTest(4, 4) // commits: done=4, max=4
-		badge := ansi.Strip(d.sessionFocusStatus(sess))
+		badge := ansi.Strip(items.sessionFocusStatus(sess))
 		if !strings.Contains(badge, "4/5") {
 			t.Errorf("expected 4/5 badge (max(2,4)/max(5,4)), got %q", badge)
 		}
@@ -1266,7 +1272,7 @@ func TestSessionFocusStatus_BuildingProgressCombinesPlanAndCommits(t *testing.T)
 	t.Run("no_plan_commits_drive_bar", func(t *testing.T) {
 		sess := newBuildingSession(t, "") // no plan
 		sess.SetCommitTaskCountForTest(2, 3)
-		badge := ansi.Strip(d.sessionFocusStatus(sess))
+		badge := ansi.Strip(items.sessionFocusStatus(sess))
 		if !strings.Contains(badge, "2/3") {
 			t.Errorf("expected 2/3 badge (commits only, no plan), got %q", badge)
 		}

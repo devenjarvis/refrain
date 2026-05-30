@@ -79,58 +79,35 @@ type listItem struct {
 	agent    *agent.Agent   // set for agent items
 }
 
-// diffSummaryData holds cached diff stats for rendering in the dashboard.
-type diffSummaryData struct {
-	Files     []diffFileStat
-	Aggregate diffAggregateStats
+// listItems is the hierarchical repo/session/agent row list. App.listItems()
+// rebuilds it from the managers each frame; the phase-filter / section
+// accessors and the per-session agent-status helpers hang off it so the
+// dashboard can derive everything it renders from props.items without the
+// model owning a mirrored copy (CONVENTIONS.md §5/§6).
+type listItems []listItem
+
+// agents returns every agent row in the list (for resize operations).
+func (items listItems) agents() []*agent.Agent {
+	var result []*agent.Agent
+	for _, item := range items {
+		if item.kind == listItemAgent {
+			result = append(result, item.agent)
+		}
+	}
+	return result
 }
 
-type diffFileStat struct {
-	Path       string
-	Status     string // "A", "M", or "D"
-	Insertions int
-	Deletions  int
-}
-
-type diffAggregateStats struct {
-	Files      int
-	Insertions int
-	Deletions  int
-}
-
-// dashboardModel shows the hierarchical repo/session/agent list and terminal preview.
+// dashboardModel owns only the transient UI state the dashboard genuinely
+// holds across frames: its viewport size, scroll offset, marquee tickers, the
+// in-flight mouse text selection, and the tick-refreshed render clock.
+// Everything else it renders (modal state, the wellness snapshot, the pipeline
+// cursor, caches, the active repo, and the item list) is read live each frame
+// from a fresh dashboardProps — see CONVENTIONS.md §5/§6.
 type dashboardModel struct {
-	items           []listItem
-	selected        int
-	width           int
-	height          int
-	sidebarWidth    int // resolved global SidebarWidth; 0 means use DefaultSidebarWidth
-	panelFocus      panelFocus
-	scrollOffset    int
-	diffStats       *diffSummaryData           // nil when no session selected or no data
-	prCache         map[string]*prCacheEntry   // keyed by cacheKey(repoPath, sessionID), passed from App
-	prPollStates    map[string]*prSessionState // keyed by cacheKey(repoPath, sessionID), passed from App
-	closingAgents   map[string]bool            // keyed by agentCacheKey(repoPath, agentID), passed from App
-	closingSessions map[string]bool            // keyed by cacheKey(repoPath, sessionID), passed from App
-
-	// Pipeline / wellness state, synced from App on every refresh.
-	sessionElapsed         time.Duration
-	lastReviewAt           time.Time
-	focusSessionMinutes    int
-	focusBreakMode         bool
-	focusBreakElapsed      time.Duration
-	focusBlockCount        int
-	focusBreakMinutes      int
-	focusBreakAnimFrame    int
-	focusBreakShortWarning bool
-	focusBreakTimerUp      bool
-	cursor                 FocusedCursor  // pipeline cursor mirror; synced from App on every refresh
-	prDraftSessionID       string         // session ID whose PR draft is in flight; "" when idle
-	prDraftRepoPath        string         // repo path whose PR draft is in flight; "" when idle
-	activeRepoName         string         // display name of the active repo
-	activeRepoPath         string         // canonical path of the active repo (for pipeline filtering)
-	focusLaunchAgent       *agent.Agent   // agent open in focusLaunch terminal; nil otherwise
-	focusLaunchSession     *agent.Session // session owning focusLaunchAgent; nil otherwise
+	width        int
+	height       int
+	sidebarWidth int // resolved global SidebarWidth; 0 means use DefaultSidebarWidth
+	scrollOffset int
 
 	// tickers tracks marquee scroll state for session names that overflow the sidebar.
 	tickers map[string]*sessionTicker
@@ -139,15 +116,6 @@ type dashboardModel struct {
 	// "idle Nm" / "done Nm ago" / elapsed strings and the review spinner from
 	// it so rendering stays pure (§5: no clock read at render time).
 	now time.Time
-
-	// Repo config form shown in the right panel when focusConfig is active.
-	repoConfigForm *configForm
-	configRepoPath string // path of the repo being configured
-
-	// Validation-checks sub-editor, mirrored from Modals when focusRepoChecks
-	// is active. nil at all other times.
-	repoChecksEditor   *repoChecksModel
-	repoChecksRepoPath string
 
 	// Mouse text selection state in VT-cell coordinates, bound to a specific
 	// agent so a sidebar selection change clears it cleanly.
@@ -171,9 +139,9 @@ func newDashboardModel() dashboardModel {
 
 // advanceTickers steps the marquee scroll state for all sessions whose names
 // overflow the sidebar. Must be called once per tick before rendering.
-func (d *dashboardModel) advanceTickers(now time.Time) {
+func (d *dashboardModel) advanceTickers(now time.Time, props dashboardProps) {
 	width := d.listWidth()
-	for _, item := range d.items {
+	for _, item := range props.items {
 		if item.kind != listItemSession || item.session == nil {
 			continue
 		}
@@ -181,10 +149,10 @@ func (d *dashboardModel) advanceTickers(now time.Time) {
 		displayName := sess.GetDisplayName()
 
 		sessKey := cacheKey(item.repoPath, sess.ID)
-		closing := d.closingSessions != nil && d.closingSessions[sessKey]
+		closing := props.closingSessions != nil && props.closingSessions[sessKey]
 		prSuffixLen := 0
 		if !closing {
-			if entry := d.prCache[sessKey]; entry != nil && entry.pr != nil {
+			if entry := props.prCache[sessKey]; entry != nil && entry.pr != nil {
 				prSuffixLen = 1 + prIndicatorWidth(entry) // 1 for leading space
 			}
 		}
@@ -238,17 +206,17 @@ func (d *dashboardModel) advanceTickers(now time.Time) {
 	}
 }
 
-func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
+func (d dashboardModel) Update(msg tea.Msg, props dashboardProps) (dashboardModel, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		// Config overlay: delegate to the form. Pipeline navigation (j/k/enter)
 		// is handled at the app level via moveFocusCursorUp/Down and
 		// activateFocusCursor; nothing else needs to reach the dashboard here.
-		if d.panelFocus == focusConfig && d.repoConfigForm != nil {
-			cmd := d.repoConfigForm.Update(msg)
+		if props.panelFocus == focusConfig && props.repoConfigForm != nil {
+			cmd := props.repoConfigForm.Update(msg)
 			return d, cmd
 		}
-		if d.panelFocus == focusRepoChecks && d.repoChecksEditor != nil {
-			cmd := d.repoChecksEditor.Update(msg)
+		if props.panelFocus == focusRepoChecks && props.repoChecksEditor != nil {
+			cmd := props.repoChecksEditor.Update(msg)
 			return d, cmd
 		}
 	}
@@ -263,19 +231,19 @@ func (d dashboardModel) listWidth() int {
 	return resolveSidebarWidth(d.sidebarWidth)
 }
 
-func (d dashboardModel) View() string {
+func (d dashboardModel) View(props dashboardProps) string {
 	var out string
 	switch {
-	case len(d.items) == 0:
+	case len(props.items) == 0:
 		out = d.emptyView()
-	case d.panelFocus == focusLaunch:
-		out = d.renderFocusLaunchView(d.width, d.height)
-	case d.panelFocus == focusConfig && d.repoConfigForm != nil:
-		out = d.renderRepoConfigOverlay(d.width, d.height)
-	case d.panelFocus == focusRepoChecks && d.repoChecksEditor != nil:
-		out = d.renderRepoChecksOverlay(d.width, d.height)
+	case props.panelFocus == focusLaunch:
+		out = d.renderFocusLaunchView(props, d.width, d.height)
+	case props.panelFocus == focusConfig && props.repoConfigForm != nil:
+		out = d.renderRepoConfigOverlay(props, d.width, d.height)
+	case props.panelFocus == focusRepoChecks && props.repoChecksEditor != nil:
+		out = d.renderRepoChecksOverlay(props, d.width, d.height)
 	default:
-		out = d.renderFullscreenFocus(d.width, d.height)
+		out = d.renderFullscreenFocus(props, d.width, d.height)
 	}
 	return out
 }
@@ -303,21 +271,21 @@ func (d dashboardModel) fixedTermHeight() int {
 // reached from the pipeline by selecting a repo header (when there are
 // multiple repos) and pressing enter, or from the cross-repo summary header.
 // The form mirrors the global settings overlay's centered-box layout.
-func (d dashboardModel) renderRepoConfigOverlay(width, height int) string {
-	if d.repoConfigForm == nil {
+func (d dashboardModel) renderRepoConfigOverlay(props dashboardProps, width, height int) string {
+	if props.repoConfigForm == nil {
 		return d.emptyView()
 	}
 
 	var repoName, repoPath string
-	for _, item := range d.items {
-		if item.kind == listItemRepo && item.repoPath == d.configRepoPath {
+	for _, item := range props.items {
+		if item.kind == listItemRepo && item.repoPath == props.configRepoPath {
 			repoName = item.repoName
 			repoPath = item.repoPath
 			break
 		}
 	}
 	if repoName == "" {
-		repoName = d.configRepoPath
+		repoName = props.configRepoPath
 	}
 
 	title := StyleTitle.Render(repoName + " Settings")
@@ -328,7 +296,7 @@ func (d dashboardModel) renderRepoConfigOverlay(width, height int) string {
 		lipgloss.Left,
 		title,
 		pathLine, "",
-		d.repoConfigForm.View(), "",
+		props.repoConfigForm.View(), "",
 		hint,
 	)
 
@@ -339,21 +307,21 @@ func (d dashboardModel) renderRepoConfigOverlay(width, height int) string {
 // renderRepoChecksOverlay renders the validation-checks list editor as a
 // centered modal box, styled to match renderRepoConfigOverlay so the user
 // perceives it as a sub-form of the repo settings overlay.
-func (d dashboardModel) renderRepoChecksOverlay(width, height int) string {
-	if d.repoChecksEditor == nil {
+func (d dashboardModel) renderRepoChecksOverlay(props dashboardProps, width, height int) string {
+	if props.repoChecksEditor == nil {
 		return d.emptyView()
 	}
 
-	repoName := d.repoChecksEditor.repoName
+	repoName := props.repoChecksEditor.repoName
 	if repoName == "" {
-		repoName = d.repoChecksRepoPath
+		repoName = props.repoChecksRepoPath
 	}
 
 	title := StyleTitle.Render(repoName + " · Validation Checks")
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title, "",
-		d.repoChecksEditor.View(),
+		props.repoChecksEditor.View(),
 	)
 
 	box := modalBoxStyle(72).Render(content)
@@ -373,9 +341,9 @@ func (d dashboardModel) emptyView() string {
 // any of the given phases. Repo filtering is intentionally NOT applied here
 // because the pipeline shows cross-repo work; callers that want a per-repo
 // view should filter the result themselves.
-func (d dashboardModel) sessionsInPhase(phases ...agent.LifecyclePhase) []listItem {
+func (items listItems) sessionsInPhase(phases ...agent.LifecyclePhase) []listItem {
 	var result []listItem
-	for _, item := range d.items {
+	for _, item := range items {
 		if item.kind != listItemSession || item.session == nil {
 			continue
 		}
@@ -395,8 +363,8 @@ func (d dashboardModel) sessionsInPhase(phases ...agent.LifecyclePhase) []listIt
 // the user presses 'b'. Drafting sessions (LifecycleDrafting) are included
 // here so they're visible from the dashboard while the background draft runs;
 // the card renderer detects the sub-phase and shows a "drafting…" badge.
-func (d dashboardModel) planningSessions() []listItem {
-	return d.sessionsInPhase(agent.LifecyclePlanning, agent.LifecycleDrafting)
+func (items listItems) planningSessions() []listItem {
+	return items.sessionsInPhase(agent.LifecyclePlanning, agent.LifecycleDrafting)
 }
 
 // reviewQueueSessions returns listItems for sessions in ReadyForReview or
@@ -405,15 +373,15 @@ func (d dashboardModel) planningSessions() []listItem {
 // peeked at the review panel and backed out (or hit "open PR" with no PR
 // cached) would disappear from both BUILDING (InProgress only) and the queue,
 // even though the pipeline IN REVIEW count showed it was still there.
-func (d dashboardModel) reviewQueueSessions() []listItem {
-	return d.sessionsInPhase(agent.LifecycleReadyForReview, agent.LifecycleInReview)
+func (items listItems) reviewQueueSessions() []listItem {
+	return items.sessionsInPhase(agent.LifecycleReadyForReview, agent.LifecycleInReview)
 }
 
 // shippingSessions returns sessions whose PR is open and awaiting CI/merge.
 // They leave this list automatically when polling detects a merge (transition
 // to LifecycleComplete) or when the user presses 'c' in the review panel.
-func (d dashboardModel) shippingSessions() []listItem {
-	return d.sessionsInPhase(agent.LifecycleShipping)
+func (items listItems) shippingSessions() []listItem {
+	return items.sessionsInPhase(agent.LifecycleShipping)
 }
 
 // buildingSessions returns listItems for all sessions in InProgress phase,
@@ -421,11 +389,11 @@ func (d dashboardModel) shippingSessions() []listItem {
 // moved to ReadyForReview. This is the "active work" section — agents are
 // running, the user is interacting with them, and the work has moved past the
 // scoping done in Planning.
-func (d dashboardModel) buildingSessions() []listItem {
-	result := d.sessionsInPhase(agent.LifecycleInProgress)
+func (items listItems) buildingSessions() []listItem {
+	result := items.sessionsInPhase(agent.LifecycleInProgress)
 	sort.SliceStable(result, func(i, j int) bool {
-		pi := d.sessionFocusPriority(result[i].session)
-		pj := d.sessionFocusPriority(result[j].session)
+		pi := items.sessionFocusPriority(result[i].session)
+		pj := items.sessionFocusPriority(result[j].session)
 		if pi != pj {
 			return pi < pj
 		}
@@ -442,28 +410,28 @@ func (d dashboardModel) buildingSessions() []listItem {
 // section. The panic case enforces the focusSection enum invariant: a new
 // section added without updating this switch fails loudly at the first call
 // rather than silently rendering empty.
-func (d dashboardModel) sectionItems(s focusSection) []listItem {
+func (items listItems) sectionItems(s focusSection) []listItem {
 	switch s {
 	case focusSectionPlanning:
-		return d.planningSessions()
+		return items.planningSessions()
 	case focusSectionBuilding:
-		return d.buildingSessions()
+		return items.buildingSessions()
 	case focusSectionReview:
-		return d.reviewQueueSessions()
+		return items.reviewQueueSessions()
 	case focusSectionShipping:
-		return d.shippingSessions()
+		return items.shippingSessions()
 	}
-	panic(fmt.Sprintf("dashboardModel.sectionItems: unknown focusSection %d", s))
+	panic(fmt.Sprintf("listItems.sectionItems: unknown focusSection %d", s))
 }
 
 // sectionCounts returns the number of rows in each fullscreen-focus section,
 // indexed by focusSection. Used by FocusedCursor navigation methods.
-func (d dashboardModel) sectionCounts() [4]int {
+func (items listItems) sectionCounts() [4]int {
 	return [4]int{
-		focusSectionPlanning: len(d.planningSessions()),
-		focusSectionBuilding: len(d.buildingSessions()),
-		focusSectionReview:   len(d.reviewQueueSessions()),
-		focusSectionShipping: len(d.shippingSessions()),
+		focusSectionPlanning: len(items.planningSessions()),
+		focusSectionBuilding: len(items.buildingSessions()),
+		focusSectionReview:   len(items.reviewQueueSessions()),
+		focusSectionShipping: len(items.shippingSessions()),
 	}
 }
 
@@ -504,11 +472,11 @@ func renderCardProgressBar(done, total, width int, primary lipgloss.Color) strin
 // sessionFocusStatus returns a styled inline status badge for a session row in
 // the unified SESSIONS list. Priority: Error > Waiting > May Need Input >
 // idle-but-reviewable (only when no active agents) > finished (DoneAt set) > normal (N active, M idle).
-func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
+func (items listItems) sessionFocusStatus(sess *agent.Session) string {
 	var waitingCount, activeCount, idleCount, idleAskingCount int
 	var firstWaitingReason string
 	var hasError bool
-	for _, item := range d.items {
+	for _, item := range items {
 		if item.kind != listItemAgent || item.agent == nil || item.agent.IsShell || item.session != sess {
 			continue
 		}
@@ -590,9 +558,9 @@ func (d dashboardModel) sessionFocusStatus(sess *agent.Session) string {
 // sessionFocusPriority returns an integer priority for sorting sessions in the
 // focus mode SESSIONS list. Lower values surface first (needs attention first).
 // 0=error, 1=waiting, 2=active, 3=idle/other.
-func (d dashboardModel) sessionFocusPriority(sess *agent.Session) int {
+func (items listItems) sessionFocusPriority(sess *agent.Session) int {
 	var hasError, hasWaiting, hasActive bool
-	for _, item := range d.items {
+	for _, item := range items {
 		if item.kind != listItemAgent || item.agent == nil || item.agent.IsShell || item.session != sess {
 			continue
 		}
@@ -621,9 +589,9 @@ func (d dashboardModel) sessionFocusPriority(sess *agent.Session) int {
 // in the focus mode SESSIONS list. Mirrors the priority order in
 // sessionFocusStatus so the stripe and the badge agree on the dominant
 // condition. Selection highlight is applied by the caller.
-func (d dashboardModel) sessionFocusStripeColor(sess *agent.Session) lipgloss.Color {
+func (items listItems) sessionFocusStripeColor(sess *agent.Session) lipgloss.Color {
 	var hasError, hasWaiting, hasIdleAsking bool
-	for _, item := range d.items {
+	for _, item := range items {
 		if item.kind != listItemAgent || item.agent == nil || item.agent.IsShell || item.session != sess {
 			continue
 		}
@@ -659,9 +627,9 @@ func (d dashboardModel) sessionFocusStripeColor(sess *agent.Session) lipgloss.Co
 // the session name, so the reader can identify state at a glance even when ANSI
 // colors are unavailable. planningPhase callers pass true to suppress the glyph
 // when the right-side badge already begins with one.
-func (d dashboardModel) sessionStatusGlyph(sess *agent.Session) (glyph string, col lipgloss.Color) {
+func (items listItems) sessionStatusGlyph(sess *agent.Session) (glyph string, col lipgloss.Color) {
 	var hasError, hasWaiting, hasIdleAsking, hasActive bool
-	for _, item := range d.items {
+	for _, item := range items {
 		if item.kind != listItemAgent || item.agent == nil || item.agent.IsShell || item.session != sess {
 			continue
 		}
@@ -703,8 +671,8 @@ func (d dashboardModel) sessionStatusGlyph(sess *agent.Session) (glyph string, c
 // Line 2: <stripe>   <active task (bold)>   (building) | <description (muted/italic)> (planning/other)
 // Line 3: <stripe>   next: <next task (muted-italic)>   (building) | <description line 2 or empty>
 // Line 4: <stripe>   [⎇ branch] [· detail]      ... right-aligned ⏱ <elapsed>
-func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName string, selected bool, width int) []string {
-	stripeColor := d.sessionFocusStripeColor(sess)
+func (d dashboardModel) renderFocusSessionCard(props dashboardProps, sess *agent.Session, repoName string, selected bool, width int) []string {
+	stripeColor := props.items.sessionFocusStripeColor(sess)
 	if selected {
 		stripeColor = ColorSecondary
 	}
@@ -733,12 +701,12 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	if planningPhase {
 		badge = planningStatusBadge(sess)
 	} else {
-		badge = d.sessionFocusStatus(sess)
+		badge = props.items.sessionFocusStatus(sess)
 	}
 	// Status glyph: prepend between stripe and name for non-planning cards.
 	// Planning cards suppress the glyph because the badge already leads with ✎/✗/○.
 	if !planningPhase {
-		glyph, glyphColor := d.sessionStatusGlyph(sess)
+		glyph, glyphColor := props.items.sessionStatusGlyph(sess)
 		glyphStyled := lipgloss.NewStyle().Foreground(glyphColor).Render(glyph)
 		nameStyled = glyphStyled + " " + nameStyled
 	}
@@ -807,7 +775,7 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	var waitingReason string
 	allIdle := true
 	anyAgent := false
-	for _, item := range d.items {
+	for _, item := range props.items {
 		if item.kind != listItemAgent || item.agent == nil || item.agent.IsShell || item.session != sess {
 			continue
 		}
@@ -1127,13 +1095,13 @@ func rightAlign(left, right string, width int) string {
 
 // renderPipelineWidget renders the 4-cell pipeline row, one cell per phase:
 // PLANNING → BUILDING → REVIEWING → SHIPPING. Counts mirror the section lists.
-func (d dashboardModel) renderPipelineWidget(width int) string {
+func (d dashboardModel) renderPipelineWidget(props dashboardProps, width int) string {
 	var planning, building, reviewing, shipping int
-	for _, item := range d.items {
+	for _, item := range props.items {
 		if item.kind != listItemSession || item.session == nil {
 			continue
 		}
-		if d.activeRepoPath != "" && item.repoPath != d.activeRepoPath {
+		if props.activeRepoPath != "" && item.repoPath != props.activeRepoPath {
 			continue
 		}
 		switch item.session.LifecyclePhase() {
@@ -1195,11 +1163,11 @@ func focusLaunchTabText(ag *agent.Agent) string {
 // renderFocusLaunchTabBar renders the tab strip row for focusLaunch. Returns
 // the styled tab bar string and, as side-data for click handling, the starting
 // column of each tab (returned to avoid duplicating layout math in App).
-func (d dashboardModel) renderFocusLaunchTabBar(width int) string {
-	if d.focusLaunchSession == nil || d.focusLaunchAgent == nil {
+func (d dashboardModel) renderFocusLaunchTabBar(props dashboardProps, width int) string {
+	if props.focusLaunchSession == nil || props.focusLaunchAgent == nil {
 		return ""
 	}
-	agents := d.focusLaunchSession.Agents()
+	agents := props.focusLaunchSession.Agents()
 	if len(agents) == 0 {
 		return ""
 	}
@@ -1207,7 +1175,7 @@ func (d dashboardModel) renderFocusLaunchTabBar(width int) string {
 	var parts []string
 	for _, ag := range agents {
 		text := focusLaunchTabText(ag)
-		if ag.ID == d.focusLaunchAgent.ID {
+		if ag.ID == props.focusLaunchAgent.ID {
 			parts = append(parts, StyleTitle.Render(text))
 		} else {
 			parts = append(parts, StyleSubtle.Render(text))
@@ -1222,22 +1190,22 @@ func (d dashboardModel) renderFocusLaunchTabBar(width int) string {
 }
 
 // renderFocusLaunchView renders the "focus mode paused" view with a single agent terminal.
-func (d dashboardModel) renderFocusLaunchView(width, height int) string {
-	ag := d.focusLaunchAgent
+func (d dashboardModel) renderFocusLaunchView(props dashboardProps, width, height int) string {
+	ag := props.focusLaunchAgent
 	if ag == nil {
-		return d.renderFullscreenFocus(width, height)
+		return d.renderFullscreenFocus(props, width, height)
 	}
 
 	agentName := ag.GetDisplayName()
 	headerParts := []string{fmt.Sprintf("agent: %s", agentName)}
-	if d.focusLaunchSession != nil {
-		if branch := d.focusLaunchSession.Branch(); branch != "" {
+	if props.focusLaunchSession != nil {
+		if branch := props.focusLaunchSession.Branch(); branch != "" {
 			headerParts = append(headerParts, fmt.Sprintf("branch: %s", branch))
 		}
 	}
 	header := StyleSubtle.Render(strings.Join(headerParts, "  "))
 
-	tabBar := d.renderFocusLaunchTabBar(width)
+	tabBar := d.renderFocusLaunchTabBar(props, width)
 
 	vpWidth := width
 	vpHeight := height - 2
@@ -1384,21 +1352,21 @@ func generateBreatheFrames() [breathFrameCount][breathHeight]string {
 // renderBreatheBlock returns the current breath frame as a colored block.
 // Falls back to the compact frames when the terminal can't fit the bigger
 // canvas.
-func (d dashboardModel) renderBreatheBlock(width, height int) string {
+func (d dashboardModel) renderBreatheBlock(props dashboardProps, width, height int) string {
 	if width < breathWidth+4 || height < breathHeight+8 {
-		cycle := d.focusBreakAnimFrame % breathFrameCount
+		cycle := props.focusBreakAnimFrame % breathFrameCount
 		frame := cycle * len(breatheFramesCompact) / breathFrameCount
-		animColor := breatheColors[(d.focusBreakAnimFrame/breathFrameCount)%len(breatheColors)]
+		animColor := breatheColors[(props.focusBreakAnimFrame/breathFrameCount)%len(breatheColors)]
 		animStyle := lipgloss.NewStyle().Foreground(animColor)
 		rows := breatheFramesCompact[frame]
 		return animStyle.Render(rows[0]) + "\n" +
 			animStyle.Render(rows[1]) + "\n" +
 			animStyle.Render(rows[2])
 	}
-	frame := d.focusBreakAnimFrame % breathFrameCount
+	frame := props.focusBreakAnimFrame % breathFrameCount
 	// Color rotates per breath cycle, not per frame, so the eye gets a
 	// stable hue to settle on for the duration of one breath.
-	cycle := d.focusBreakAnimFrame / breathFrameCount
+	cycle := props.focusBreakAnimFrame / breathFrameCount
 	animColor := breatheColors[cycle%len(breatheColors)]
 	animStyle := lipgloss.NewStyle().Foreground(animColor)
 
@@ -1413,8 +1381,8 @@ func (d dashboardModel) renderBreatheBlock(width, height int) string {
 // breathPhaseLabel returns a one-word cue ("inhale" / "exhale") matching
 // the current breath phase. No hold phase — the sparkle ring in
 // generateBreatheFrames provides the held feeling visually at the peak.
-func (d dashboardModel) breathPhaseLabel() string {
-	frame := d.focusBreakAnimFrame % breathFrameCount
+func (d dashboardModel) breathPhaseLabel(props dashboardProps) string {
+	frame := props.focusBreakAnimFrame % breathFrameCount
 	half := breathFrameCount / 2
 	if frame < half {
 		return "inhale"
@@ -1427,27 +1395,27 @@ func (d dashboardModel) breathPhaseLabel() string {
 //   - Active break: large breath animation, countdown, exit-early hint.
 //   - Timer up: warm "BREAK COMPLETE" panel that waits for the user to
 //     explicitly opt back in (no auto-resume).
-func (d dashboardModel) renderBreakOverlay(width, height int) string {
-	if d.focusBreakTimerUp {
-		return d.renderBreakCompleteOverlay(width, height)
+func (d dashboardModel) renderBreakOverlay(props dashboardProps, width, height int) string {
+	if props.focusBreakTimerUp {
+		return d.renderBreakCompleteOverlay(props, width, height)
 	}
 
-	animBlock := d.renderBreatheBlock(width, height)
+	animBlock := d.renderBreatheBlock(props, width, height)
 
 	titleStyle := StyleHeading.Foreground(ColorBreakTitle)
 	title := titleStyle.Render("BREAK")
 
 	var blockLine string
-	if d.focusBlockCount > 0 {
-		blockLine = StyleSubtle.Render(fmt.Sprintf("Block %d", d.focusBlockCount))
+	if props.focusBlockCount > 0 {
+		blockLine = StyleSubtle.Render(fmt.Sprintf("Block %d", props.focusBlockCount))
 	}
 
-	phaseLine := StyleSubtle.Render(d.breathPhaseLabel())
+	phaseLine := StyleSubtle.Render(d.breathPhaseLabel(props))
 
 	var countdownLine string
-	if d.focusBreakMinutes > 0 {
-		totalSecs := d.focusBreakMinutes * 60
-		remainSecs := totalSecs - int(d.focusBreakElapsed.Seconds())
+	if props.focusBreakMinutes > 0 {
+		totalSecs := props.focusBreakMinutes * 60
+		remainSecs := totalSecs - int(props.focusBreakElapsed.Seconds())
 		if remainSecs < 0 {
 			remainSecs = 0
 		}
@@ -1457,7 +1425,7 @@ func (d dashboardModel) renderBreakOverlay(width, height int) string {
 	}
 
 	var actionLine string
-	if d.focusBreakShortWarning {
+	if props.focusBreakShortWarning {
 		actionLine = StyleWarning.Render("break too short — press b again to override")
 	} else {
 		actionLine = StyleSubtle.Render("[b] return early")
@@ -1486,8 +1454,8 @@ func (d dashboardModel) renderBreakOverlay(width, height int) string {
 // The visual is intentionally loud: warm bordered banner, pulsing colour,
 // over-time counter. The user must press b to leave — we never advance on
 // their behalf.
-func (d dashboardModel) renderBreakCompleteOverlay(width, height int) string {
-	pulse := completeColors[(d.focusBreakAnimFrame/3)%len(completeColors)]
+func (d dashboardModel) renderBreakCompleteOverlay(props dashboardProps, width, height int) string {
+	pulse := completeColors[(props.focusBreakAnimFrame/3)%len(completeColors)]
 	bannerStyle := lipgloss.NewStyle().
 		Foreground(pulse).
 		Bold(true).
@@ -1500,10 +1468,10 @@ func (d dashboardModel) renderBreakCompleteOverlay(width, height int) string {
 	subhead := subStyle.Render("ready when you are")
 
 	var stats string
-	if d.focusBreakMinutes > 0 {
-		breakSecs := int(d.focusBreakElapsed.Seconds())
+	if props.focusBreakMinutes > 0 {
+		breakSecs := int(props.focusBreakElapsed.Seconds())
 		bm, bs := breakSecs/60, breakSecs%60
-		over := breakSecs - d.focusBreakMinutes*60
+		over := breakSecs - props.focusBreakMinutes*60
 		if over < 0 {
 			over = 0
 		}
@@ -1516,8 +1484,8 @@ func (d dashboardModel) renderBreakCompleteOverlay(width, height int) string {
 	}
 
 	var blockLine string
-	if d.focusBlockCount > 0 {
-		blockLine = StyleSubtle.Render(fmt.Sprintf("Block %d so far", d.focusBlockCount))
+	if props.focusBlockCount > 0 {
+		blockLine = StyleSubtle.Render(fmt.Sprintf("Block %d so far", props.focusBlockCount))
 	}
 
 	prompt := StyleBold.
@@ -1540,22 +1508,22 @@ func (d dashboardModel) renderBreakCompleteOverlay(width, height int) string {
 
 // renderFullscreenFocus renders the pipeline dashboard: header, pipeline
 // widget, SESSIONS section, and REVIEW QUEUE section.
-func (d dashboardModel) renderFullscreenFocus(width, height int) string {
-	if d.focusBreakMode {
-		return d.renderBreakOverlay(width, height)
+func (d dashboardModel) renderFullscreenFocus(props dashboardProps, width, height int) string {
+	if props.focusBreakMode {
+		return d.renderBreakOverlay(props, width, height)
 	}
 
 	var lines []string
 
 	// Header: title + timer
 	title := StyleTitle.Render("FOCUS")
-	if d.focusBlockCount > 0 {
-		title += "  " + StyleSubtle.Render(fmt.Sprintf("Block %d", d.focusBlockCount))
+	if props.focusBlockCount > 0 {
+		title += "  " + StyleSubtle.Render(fmt.Sprintf("Block %d", props.focusBlockCount))
 	}
 	timerStr := ""
-	if d.focusSessionMinutes > 0 {
-		threshold := time.Duration(d.focusSessionMinutes) * time.Minute
-		elapsed := d.sessionElapsed
+	if props.focusSessionMinutes > 0 {
+		threshold := time.Duration(props.focusSessionMinutes) * time.Minute
+		elapsed := props.sessionElapsed
 		if elapsed > threshold {
 			elapsed = threshold
 		}
@@ -1582,29 +1550,33 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		)
 		barModel.SetWidth(barWidth)
 
-		elapsedMin := int(d.sessionElapsed.Minutes())
-		timerStr = barModel.ViewAs(pct) + " " + fmt.Sprintf("%dm/%dm", elapsedMin, d.focusSessionMinutes)
+		elapsedMin := int(props.sessionElapsed.Minutes())
+		timerStr = barModel.ViewAs(pct) + " " + fmt.Sprintf("%dm/%dm", elapsedMin, props.focusSessionMinutes)
 	}
 	headerLine := title
-	if d.activeRepoName != "" {
-		headerLine += "  " + StyleSubtle.Render(d.activeRepoName)
+	if props.activeRepoName != "" {
+		headerLine += "  " + StyleSubtle.Render(props.activeRepoName)
 	}
 	headerLine += "  " + timerStr
 	lines = append(lines, headerLine)
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	// width can be 0 on the very first frame, before the initial
+	// WindowSizeMsg arrives: props.items is non-empty immediately (cfg repo
+	// headers), so View() reaches this path before a size is known. Clamp so
+	// strings.Repeat never gets a negative count.
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(0, width-2))))
 
 	// Pipeline widget
-	lines = append(lines, d.renderPipelineWidget(width))
+	lines = append(lines, d.renderPipelineWidget(props, width))
 	lines = append(lines, "")
 
 	// Section render order matches focusSectionsInOrder() so navigation walks
 	// the same sequence the user reads top-to-bottom.
-	planningItems := d.planningSessions()
+	planningItems := props.items.planningSessions()
 	if len(planningItems) > 0 {
 		lines = append(lines, StyleSubtle.Render("PLANNING"))
 		for i, item := range planningItems {
-			selected := d.cursor.Section() == focusSectionPlanning && i == d.cursor.Index(focusSectionPlanning)
-			card := d.renderFocusSessionCard(item.session, item.repoName, selected, width)
+			selected := props.cursor.Section() == focusSectionPlanning && i == props.cursor.Index(focusSectionPlanning)
+			card := d.renderFocusSessionCard(props, item.session, item.repoName, selected, width)
 			lines = append(lines, card...)
 			if i < len(planningItems)-1 {
 				lines = append(lines, "")
@@ -1613,12 +1585,12 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		lines = append(lines, "")
 	}
 
-	buildingItems := d.buildingSessions()
+	buildingItems := props.items.buildingSessions()
 	if len(buildingItems) > 0 {
 		lines = append(lines, StyleSubtle.Render("BUILDING"))
 		for i, item := range buildingItems {
-			selected := d.cursor.Section() == focusSectionBuilding && i == d.cursor.Index(focusSectionBuilding)
-			card := d.renderFocusSessionCard(item.session, item.repoName, selected, width)
+			selected := props.cursor.Section() == focusSectionBuilding && i == props.cursor.Index(focusSectionBuilding)
+			card := d.renderFocusSessionCard(props, item.session, item.repoName, selected, width)
 			lines = append(lines, card...)
 			if i < len(buildingItems)-1 {
 				lines = append(lines, "")
@@ -1627,12 +1599,12 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		lines = append(lines, "")
 	}
 
-	reviewSessions := d.reviewQueueSessions()
+	reviewSessions := props.items.reviewQueueSessions()
 	if len(reviewSessions) > 0 {
 		lines = append(lines, StyleSubtle.Render("REVIEWING"))
 		for i, item := range reviewSessions {
-			selected := d.cursor.Section() == focusSectionReview && i == d.cursor.Index(focusSectionReview)
-			row := d.renderQueueRow(item.session, item.repoName, item.repoPath, selected, ColorWarning, width)
+			selected := props.cursor.Section() == focusSectionReview && i == props.cursor.Index(focusSectionReview)
+			row := d.renderQueueRow(props, item.session, item.repoName, item.repoPath, selected, ColorWarning, width)
 			lines = append(lines, row...)
 			if i < len(reviewSessions)-1 {
 				lines = append(lines, "")
@@ -1641,12 +1613,12 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 		lines = append(lines, "")
 	}
 
-	shippingItems := d.shippingSessions()
+	shippingItems := props.items.shippingSessions()
 	if len(shippingItems) > 0 {
 		lines = append(lines, StyleSubtle.Render("SHIPPING"))
 		for i, item := range shippingItems {
-			selected := d.cursor.Section() == focusSectionShipping && i == d.cursor.Index(focusSectionShipping)
-			row := d.renderQueueRow(item.session, item.repoName, item.repoPath, selected, ColorShipping, width)
+			selected := props.cursor.Section() == focusSectionShipping && i == props.cursor.Index(focusSectionShipping)
+			row := d.renderQueueRow(props, item.session, item.repoName, item.repoPath, selected, ColorShipping, width)
 			lines = append(lines, row...)
 			if i < len(shippingItems)-1 {
 				lines = append(lines, "")
@@ -1662,7 +1634,7 @@ func (d dashboardModel) renderFullscreenFocus(width, height int) string {
 // accent for the cursor stripe and prefix when selected (warning for review,
 // success for shipping). Used by both the REVIEWING and SHIPPING sections so
 // they share layout/age/prIndicator handling.
-func (d dashboardModel) renderQueueRow(sess *agent.Session, repoName, repoPath string, selected bool, selectedColor lipgloss.Color, width int) []string {
+func (d dashboardModel) renderQueueRow(props dashboardProps, sess *agent.Session, repoName, repoPath string, selected bool, selectedColor lipgloss.Color, width int) []string {
 	name := sess.GetDisplayName()
 	age := ""
 	if !sess.DoneAt().IsZero() {
@@ -1692,19 +1664,19 @@ func (d dashboardModel) renderQueueRow(sess *agent.Session, repoName, repoPath s
 	}
 	line1 := prefix + nameRendered
 	prIndSet := false
-	if prEntry := d.prCache[cacheKey(repoPath, sess.ID)]; prEntry != nil {
+	if prEntry := props.prCache[cacheKey(repoPath, sess.ID)]; prEntry != nil {
 		if prInd := prIndicator(prEntry); prInd != "" {
 			line1 = rightAlign(prefix+nameRendered, prInd, width)
 			prIndSet = true
 		}
 	}
 	if !prIndSet && !sess.IsReviewable() {
-		badge := d.sessionFocusStatus(sess)
+		badge := props.items.sessionFocusStatus(sess)
 		line1 = rightAlign(prefix+nameRendered, badge, width)
 	}
 
 	var taskDisplay string
-	if d.prDraftSessionID != "" && sess.ID == d.prDraftSessionID && repoPath == d.prDraftRepoPath {
+	if props.prDraftSessionID != "" && sess.ID == props.prDraftSessionID && repoPath == props.prDraftRepoPath {
 		taskDisplay = StyleWarning.Render(reviewSpinnerFrame(d.now) + " drafting PR…")
 	} else {
 		origPrompt := sess.OriginalPrompt()
@@ -1786,104 +1758,6 @@ func applySelectionHighlight(lines []string, rect vt.SelectionRect) string {
 	return strings.Join(result, "\n")
 }
 
-// selectedItem returns the currently selected list item, or nil if the list is empty.
-func (d dashboardModel) selectedItem() *listItem {
-	if d.selected < 0 || d.selected >= len(d.items) {
-		return nil
-	}
-	return &d.items[d.selected]
-}
-
-// selectedAgent returns the currently selected agent, or nil if a repo/session header is selected.
-func (d dashboardModel) selectedAgent() *agent.Agent {
-	item := d.selectedItem()
-	if item == nil || item.kind != listItemAgent {
-		return nil
-	}
-	return item.agent
-}
-
-// selectedSession returns the session for the currently selected item.
-// Works for both session and agent items.
-func (d dashboardModel) selectedSession() *agent.Session {
-	item := d.selectedItem()
-	if item == nil {
-		return nil
-	}
-	return item.session
-}
-
-// selectedRepoPath returns the repo path of the currently selected item.
-func (d dashboardModel) selectedRepoPath() string {
-	item := d.selectedItem()
-	if item == nil {
-		return ""
-	}
-	return item.repoPath
-}
-
-// clampToRepo adjusts selected to the nearest listItemRepo row.
-// Searches backward first (repo headers appear above their agents), then forward.
-func (d *dashboardModel) clampToRepo() {
-	if len(d.items) == 0 {
-		return
-	}
-	if d.selected >= len(d.items) {
-		d.selected = len(d.items) - 1
-	}
-	if d.selected < 0 {
-		d.selected = 0
-	}
-	if d.items[d.selected].kind == listItemRepo {
-		return
-	}
-	// Search backward first: repo headers appear above their agents.
-	for i := d.selected - 1; i >= 0; i-- {
-		if d.items[i].kind == listItemRepo {
-			d.selected = i
-			return
-		}
-	}
-	// Fall forward if no repo header above (shouldn't happen in a valid list).
-	for i := d.selected + 1; i < len(d.items); i++ {
-		if d.items[i].kind == listItemRepo {
-			d.selected = i
-			return
-		}
-	}
-}
-
-// clampToAgent adjusts selected to the nearest non-session row.
-// Searches forward first, then backward. Falls through to repo rows if no agents exist.
-func (d *dashboardModel) clampToAgent() {
-	if len(d.items) == 0 {
-		return
-	}
-	if d.selected >= len(d.items) {
-		d.selected = len(d.items) - 1
-	}
-	if d.selected < 0 {
-		d.selected = 0
-	}
-	if d.items[d.selected].kind != listItemSession {
-		return
-	}
-	// Search forward for an agent or repo.
-	for i := d.selected + 1; i < len(d.items); i++ {
-		if d.items[i].kind != listItemSession {
-			d.selected = i
-			return
-		}
-	}
-	// Search backward.
-	for i := d.selected - 1; i >= 0; i-- {
-		if d.items[i].kind != listItemSession {
-			d.selected = i
-			return
-		}
-	}
-}
-
 // clearSelection resets the mouse text-selection state. Safe to call when no
 // selection is active.
 func (d *dashboardModel) clearSelection() {
@@ -1909,15 +1783,4 @@ func (d dashboardModel) selectionRect() (startX, startY, endX, endY int, ok bool
 		startY, endY = endY, startY
 	}
 	return startX, startY, endX, endY, true
-}
-
-// agentItems returns all agent items from the list (for resize operations).
-func (d dashboardModel) agentItems() []*agent.Agent {
-	var result []*agent.Agent
-	for _, item := range d.items {
-		if item.kind == listItemAgent {
-			result = append(result, item.agent)
-		}
-	}
-	return result
 }

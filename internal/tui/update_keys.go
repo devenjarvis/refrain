@@ -103,15 +103,6 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return newA, cmd
 		}
 
-		// Enter/right on a repo header: open repo config in right panel.
-		if (msg.String() == "enter" || msg.String() == "right") && a.modals.IsList() {
-			item := a.dashboard.selectedItem()
-			if item != nil && item.kind == listItemRepo {
-				a.initRepoConfigForm(item.repoPath)
-				return a, nil
-			}
-		}
-
 		newA, cmd, handled := a.handleQuitKey(msg)
 		if handled {
 			return newA, cmd
@@ -144,24 +135,8 @@ func (a App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleMouseWheel(msg)
 	}
 
-	prevSelected := a.dashboard.selected
 	var cmd tea.Cmd
-	a.dashboard, cmd = a.dashboard.Update(msg)
-	// On selection change, update diff stats from cache (or trigger refresh).
-	if a.dashboard.selected != prevSelected {
-		a.updateDashboardDiffStats()
-		if sess := a.dashboard.selectedSession(); sess != nil {
-			repoPath := a.dashboard.selectedRepoPath()
-			var entry *diffStatsEntry
-			if repoPath != "" {
-				entry = a.diffStatsCache[cacheKey(repoPath, sess.ID)]
-			}
-			if (entry == nil || time.Since(entry.lastRefresh) > DiffStatsCacheTTL) && !a.diffRefreshInFlight {
-				diffCmd := a.refreshDiffStatsCmd()
-				return a, tea.Batch(cmd, diffCmd)
-			}
-		}
-	}
+	a.dashboard, cmd = a.dashboard.Update(msg, a.dashboardProps())
 	// Maintain the invariant: a text selection only persists while the user
 	// remains in focusLaunch viewing the same agent. Any focus or agent
 	// change (esc back to pipeline, tab switch, etc.) drops it.
@@ -226,7 +201,6 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				idx = (idx - 1 + len(agents)) % len(agents)
 			}
 			a.modals.SetLaunchAgent(agents[idx])
-			a.syncModalsToDashboard()
 			a.dashboard.scrollOffset = 0
 			agents[idx].Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 		}
@@ -243,7 +217,6 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				if newAg, err := mgr.AddShell(sess.ID, cfg); err == nil {
 					a.modals.SetLaunchAgent(newAg)
-					a.syncModalsToDashboard()
 					a.dashboard.scrollOffset = 0
 				} else {
 					a.setError(err.Error())
@@ -266,7 +239,6 @@ func (a App) updateFocusLaunchKeys(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 				if newAg, err := mgr.AddAgent(sess.ID, cfg); err == nil {
 					a.modals.SetLaunchAgent(newAg)
-					a.syncModalsToDashboard()
 					a.dashboard.scrollOffset = 0
 				} else {
 					a.setError(err.Error())
@@ -321,7 +293,6 @@ func (a App) closeFocusLaunchAgent() (tea.Model, tea.Cmd) {
 			nextIdx = currentIdx - 1
 		}
 		a.modals.SetLaunchAgent(agents[nextIdx])
-		a.syncModalsToDashboard()
 		agents[nextIdx].Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 		a.dashboard.scrollOffset = 0
 	}
@@ -372,7 +343,6 @@ func (a App) handleKeysReviewPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 	updated, cmd := snapshot.Update(msg, a.panelServices())
 	if rp, ok := updated.(*reviewPanelModel); ok {
 		a.modals.CompareAndSetReview(snapshot, rp)
-		a.syncModalsToDashboard()
 	}
 	return a, cmd, true
 }
@@ -387,7 +357,6 @@ func (a App) handleKeysShippingPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 	updated, cmd := snapshot.Update(msg, a.panelServices())
 	if sp, ok := updated.(*shippingPanelModel); ok {
 		a.modals.CompareAndSetShipping(snapshot, sp)
-		a.syncModalsToDashboard()
 	}
 	return a, cmd, true
 }
@@ -438,8 +407,8 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		return a, nil, true
 
 	case "n":
-		// Create a new session in the repo of the currently selected item.
-		repoPath := a.dashboard.selectedRepoPath()
+		// Create a new session in the repo of the cursor-selected session.
+		repoPath := a.cursorSelectedRepoPath()
 		if repoPath == "" {
 			repoPath = a.activeRepo
 		}
@@ -758,7 +727,6 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			return a, nil, true
 		}
 		a.closingAgents[agentKey] = true
-		a.refreshAgentList()
 		return a, func() tea.Msg {
 			err := mgr.KillAgent(sessionID, agentID)
 			return killResultMsg{
@@ -793,7 +761,6 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			a.closingAgents[agentCacheKey(repoPath, ag.ID)] = true
 		}
 		a.closingSessions[sessKey] = true
-		a.refreshAgentList()
 		return a, func() tea.Msg {
 			err := mgr.KillSession(sessID)
 			return killResultMsg{
@@ -836,7 +803,6 @@ func (a App) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 			if idx := a.focusLaunchTabIndexAt(msg.X); idx >= 0 {
 				agents := sess.Agents()
 				a.modals.SetLaunchAgent(agents[idx])
-				a.syncModalsToDashboard()
 				a.dashboard.scrollOffset = 0
 				agents[idx].Resize(a.focusLaunchTermHeight(), a.dashboard.width)
 			}
@@ -879,7 +845,7 @@ func (a App) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	// is right-aligned on the card; the X-column check below narrows the
 	// hit region without needing per-row Y granularity from pipelineHitTest.
 	if section == focusSectionReview || section == focusSectionShipping {
-		items := a.dashboard.sectionItems(section)
+		items := a.listItems().sectionItems(section)
 		if idx < len(items) {
 			sess := items[idx].session
 			if entry := a.prCache[cacheKey(items[idx].repoPath, sess.ID)]; entry != nil && entry.pr != nil && entry.pr.URL != "" {
@@ -910,7 +876,6 @@ func (a App) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	a.lastPipelineClickIdx = idx
 
 	a.cursor.JumpTo(section, idx)
-	a.syncFocusCursorToDashboard()
 
 	if isDoubleClick {
 		if cmd, ok := a.activateFocusCursor(); ok {
@@ -1033,12 +998,10 @@ func (a App) handlePipelineKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 	}
 	switch msg.String() {
 	case "up", "k":
-		a.cursor.MoveUp(a.dashboard.sectionCounts())
-		a.syncFocusCursorToDashboard()
+		a.cursor.MoveUp(a.listItems().sectionCounts())
 		return a, nil, true
 	case "down", "j":
-		a.cursor.MoveDown(a.dashboard.sectionCounts())
-		a.syncFocusCursorToDashboard()
+		a.cursor.MoveDown(a.listItems().sectionCounts())
 		return a, nil, true
 	case "space", "enter":
 		if cmd, ok := a.activateFocusCursor(); ok {
@@ -1056,7 +1019,7 @@ func (a App) handlePipelineKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			}
 			nextIdx := (currentIdx + 1) % len(a.cfg.Repos)
 			a.activeRepo = a.cfg.Repos[nextIdx].Path
-			a.refreshAgentList()
+			a.clampCursor()
 		}
 		return a, nil, true
 	case "b":
@@ -1068,7 +1031,7 @@ func (a App) handlePipelineKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		// the catch-all everywhere else — so the cursor location is
 		// the disambiguator the user already has at hand.
 		if !a.wellness.focusBreakMode && a.cursor.Section() == focusSectionPlanning {
-			planning := a.dashboard.planningSessions()
+			planning := a.listItems().planningSessions()
 			if len(planning) > 0 {
 				idx := a.cursor.Index(focusSectionPlanning)
 				if idx >= len(planning) {
@@ -1076,8 +1039,7 @@ func (a App) handlePipelineKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 				}
 				if sess := planning[idx].session; sess != nil {
 					sess.SetLifecyclePhase(agent.LifecycleInProgress)
-					a.cursor.Clamp(a.dashboard.sectionCounts())
-					a.syncFocusCursorToDashboard()
+					a.clampCursor()
 				}
 			}
 			// Cursor is on Planning — even if the section was empty in
@@ -1132,13 +1094,13 @@ func (a App) handlePipelineMarkReady() (App, tea.Cmd, bool) {
 	var repoPath string
 	switch a.cursor.Section() {
 	case focusSectionPlanning:
-		planning := a.dashboard.planningSessions()
+		planning := a.listItems().planningSessions()
 		if pi := a.cursor.Index(focusSectionPlanning); pi < len(planning) {
 			sess = planning[pi].session
 			repoPath = planning[pi].repoPath
 		}
 	case focusSectionBuilding:
-		building := a.dashboard.buildingSessions()
+		building := a.listItems().buildingSessions()
 		if bi := a.cursor.Index(focusSectionBuilding); bi < len(building) {
 			sess = building[bi].session
 			repoPath = building[bi].repoPath
@@ -1173,7 +1135,7 @@ func (a App) handlePipelineMarkReady() (App, tea.Cmd, bool) {
 // handlePipelineOpenReview opens the review panel on the cursor-selected
 // review-queue session (r key).
 func (a App) handlePipelineOpenReview() (App, tea.Cmd, bool) {
-	reviewItems := a.dashboard.reviewQueueSessions()
+	reviewItems := a.listItems().reviewQueueSessions()
 	if len(reviewItems) == 0 {
 		a.setError("review queue is empty — press m on a finished session first")
 		return a, nil, true
@@ -1236,7 +1198,6 @@ func (a App) handleConfigFormSave() (tea.Model, tea.Cmd) {
 				if err := config.Save(a.cfg); err != nil {
 					a.setError(err.Error())
 				}
-				a.refreshAgentList()
 				break
 			}
 		}

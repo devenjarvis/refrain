@@ -117,7 +117,7 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.activeRepo = repoPath
-		a.refreshAgentList()
+		a.clampCursor()
 		fixedW := a.dashboard.fixedTermWidth()
 		fixedH := a.dashboard.fixedTermHeight()
 		if fixedW <= 0 || fixedH <= 0 {
@@ -159,7 +159,7 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.activeRepo = msg.path
-		a.refreshAgentList()
+		a.clampCursor()
 		a.view = ViewDashboard
 		return a, nil
 
@@ -199,7 +199,7 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.activeRepo = a.cfg.Repos[0].Path
 			}
 		}
-		a.refreshAgentList()
+		a.clampCursor()
 		counts := make(map[string]int, len(a.cfg.Repos))
 		for _, repo := range a.cfg.Repos {
 			if m := a.managers[repo.Path]; m != nil {
