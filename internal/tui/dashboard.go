@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image/color"
 	"math"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -142,6 +141,11 @@ type dashboardModel struct {
 	// tickers tracks marquee scroll state for session names that overflow the sidebar.
 	tickers map[string]*sessionTicker
 
+	// now is the render clock, refreshed from the app tick. View derives the
+	// "idle Nm" / "done Nm ago" / elapsed strings and the review spinner from
+	// it so rendering stays pure (§5: no clock read at render time).
+	now time.Time
+
 	// Repo config form shown in the right panel when focusConfig is active.
 	repoConfigForm *configForm
 	configRepoPath string // path of the repo being configured
@@ -168,7 +172,7 @@ type selection struct {
 }
 
 func newDashboardModel() dashboardModel {
-	return dashboardModel{tickers: make(map[string]*sessionTicker)}
+	return dashboardModel{tickers: make(map[string]*sessionTicker), now: time.Now()}
 }
 
 // advanceTickers steps the marquee scroll state for all sessions whose names
@@ -281,9 +285,6 @@ func (d dashboardModel) View() string {
 		out = d.renderRepoChecksOverlay(d.width, d.height)
 	default:
 		out = d.renderFullscreenFocus(d.width, d.height)
-	}
-	if path := os.Getenv("REFRAIN_E2E_DEBUG_DUMP"); path != "" {
-		_ = os.WriteFile(path, []byte(out), 0o644)
 	}
 	return out
 }
@@ -834,10 +835,10 @@ func (d dashboardModel) renderFocusSessionCard(sess *agent.Session, repoName str
 	case waitingReason != "":
 		detailStr = waitingReason
 	case anyAgent && allIdle && !sess.LastOutputTime().IsZero():
-		detailStr = fmt.Sprintf("idle %dm", int(time.Since(sess.LastOutputTime()).Minutes()))
+		detailStr = fmt.Sprintf("idle %dm", int(d.now.Sub(sess.LastOutputTime()).Minutes()))
 	}
 
-	totalMins := int(sess.Elapsed().Minutes())
+	totalMins := int(d.now.Sub(sess.CreatedAt).Minutes())
 	var elapsedStr string
 	if totalMins >= 60 {
 		elapsedStr = fmt.Sprintf("%dh %dm", totalMins/60, totalMins%60)
@@ -1675,7 +1676,7 @@ func (d dashboardModel) renderQueueRow(sess *agent.Session, repoName, repoPath s
 	name := sess.GetDisplayName()
 	age := ""
 	if !sess.DoneAt().IsZero() {
-		mins := int(time.Since(sess.DoneAt()).Minutes())
+		mins := int(d.now.Sub(sess.DoneAt()).Minutes())
 		age = fmt.Sprintf("done %dm ago", mins)
 	}
 	var cardStyle lipgloss.Style
@@ -1714,7 +1715,7 @@ func (d dashboardModel) renderQueueRow(sess *agent.Session, repoName, repoPath s
 
 	var taskDisplay string
 	if d.prDraftSessionID != "" && sess.ID == d.prDraftSessionID && repoPath == d.prDraftRepoPath {
-		taskDisplay = lipgloss.NewStyle().Foreground(ColorWarning).Render(reviewSpinnerFrame() + " drafting PR…")
+		taskDisplay = lipgloss.NewStyle().Foreground(ColorWarning).Render(reviewSpinnerFrame(d.now) + " drafting PR…")
 	} else {
 		origPrompt := sess.OriginalPrompt()
 		switch {

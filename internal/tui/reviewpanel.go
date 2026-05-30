@@ -31,16 +31,17 @@ func detailContentMeasure(paneWidth, maxMeasure int) (measure, leftPad int) {
 // spinnerFrames is the braille spinner sequence used while a verdict is running.
 var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
 
-// reviewSpinnerFrame returns the current spinner character based on wall time.
-// Using time.Now() keeps all running rows in sync without needing a tick counter.
-func reviewSpinnerFrame() string {
-	frame := int(time.Now().UnixMilli()/100) % len(spinnerFrames)
+// reviewSpinnerFrame returns the spinner character for the given render clock.
+// now is the model's tick-refreshed timestamp (§5: no clock read at render
+// time); deriving the frame from it keeps all running rows in sync.
+func reviewSpinnerFrame(now time.Time) string {
+	frame := int(now.UnixMilli()/100) % len(spinnerFrames)
 	return spinnerFrames[frame]
 }
 
 // verdictBadge returns the icon, label, and lipgloss style for a task verdict record.
-// rec may be nil (treated as verdictPending).
-func verdictBadge(rec *taskVerdictRecord) (icon, label string, style lipgloss.Style) {
+// rec may be nil (treated as verdictPending). now drives the running-state spinner.
+func verdictBadge(rec *taskVerdictRecord, now time.Time) (icon, label string, style lipgloss.Style) {
 	if rec == nil {
 		return "⋯", "Pending", StyleSubtle
 	}
@@ -53,7 +54,7 @@ func verdictBadge(rec *taskVerdictRecord) (icon, label string, style lipgloss.St
 	case verdictPending:
 		return "⋯", "Pending", StyleSubtle
 	case verdictRunning:
-		return reviewSpinnerFrame(), "Reviewing…", lipgloss.NewStyle().Foreground(ColorPrimary)
+		return reviewSpinnerFrame(now), "Reviewing…", lipgloss.NewStyle().Foreground(ColorPrimary)
 	case verdictDone:
 		switch rec.verdict.Kind {
 		case agent.VerdictPass:
@@ -72,13 +73,14 @@ func verdictBadge(rec *taskVerdictRecord) (icon, label string, style lipgloss.St
 }
 
 // checkBadge returns the icon and lipgloss style for a validation check result.
-// Modeled on verdictBadge to keep icon/style language consistent.
-func checkBadge(result validationCheckResult) (icon string, style lipgloss.Style) {
+// Modeled on verdictBadge to keep icon/style language consistent. now drives
+// the running-state spinner.
+func checkBadge(result validationCheckResult, now time.Time) (icon string, style lipgloss.Style) {
 	switch result.state {
 	case checkPending:
 		return "⋯", StyleSubtle
 	case checkRunning:
-		return reviewSpinnerFrame(), lipgloss.NewStyle().Foreground(ColorPrimary)
+		return reviewSpinnerFrame(now), lipgloss.NewStyle().Foreground(ColorPrimary)
 	case checkPassed:
 		return "✓", StyleSuccess
 	case checkFailed:
@@ -91,7 +93,7 @@ func checkBadge(result validationCheckResult) (icon string, style lipgloss.Style
 
 // renderChecksTab renders the Checks tab body: a compact check list on top and
 // the selected check's combined output below. cs must not be nil.
-func renderChecksTab(cs *checksTabState, width, height int) []string {
+func renderChecksTab(cs *checksTabState, width, height int, now time.Time) []string {
 	if height < 4 {
 		height = 4
 	}
@@ -114,7 +116,7 @@ func renderChecksTab(cs *checksTabState, width, height int) []string {
 		if i < len(cs.results) {
 			result = cs.results[i]
 		}
-		icon, iconStyle := checkBadge(result)
+		icon, iconStyle := checkBadge(result, now)
 		iconStr := iconStyle.Render(icon)
 
 		duration := ""
@@ -177,10 +179,10 @@ func renderChecksTab(cs *checksTabState, width, height int) []string {
 // renderReviewHeader returns the 4-line collapsed header:
 // [0] REVIEW › <name> [age], [1] prompt line 1, [2] prompt line 2 (with …), [3] divider.
 // For short prompts that fit in one line, returns 3 lines: [0] title, [1] prompt, [2] divider.
-func renderReviewHeader(sess *agent.Session, width int) []string {
+func renderReviewHeader(sess *agent.Session, width int, now time.Time) []string {
 	age := ""
 	if !sess.DoneAt().IsZero() {
-		mins := int(time.Since(sess.DoneAt()).Minutes())
+		mins := int(now.Sub(sess.DoneAt()).Minutes())
 		age = fmt.Sprintf("done %dm ago", mins)
 	}
 	headerLeft := lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render("REVIEW") +
@@ -294,9 +296,9 @@ type checksTabState struct {
 // activeTab selects which tab body to render (0=Tasks, 1=Diff, 2=Checks).
 // checkState is non-nil when validation checks are configured and their results
 // are available; nil when no checks are configured or the run state is absent.
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, activeTab int, checkState *checksTabState) string {
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, activeTab int, checkState *checksTabState, now time.Time) string {
 	// Header (3–4 lines depending on prompt length).
-	headerLines := renderReviewHeader(sess, width)
+	headerLines := renderReviewHeader(sess, width, now)
 
 	// Tab bar: 2 lines (labels + divider).
 	const tabBarH = 2
@@ -319,7 +321,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 		bodyLines = renderReviewPlaceholderTab("full diff browser coming soon", width, bodyH)
 	case activeTab == reviewTabChecks:
 		if checkState != nil {
-			bodyLines = renderChecksTab(checkState, width, bodyH)
+			bodyLines = renderChecksTab(checkState, width, bodyH, now)
 		} else {
 			bodyLines = renderReviewPlaceholderTab("No validation checks configured — add them in .refrain/config.json", width, bodyH)
 		}
@@ -336,9 +338,9 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 			detailH = 2
 		}
 		paneW := width - 2
-		bodyLines = append(bodyLines, renderTaskListPane(entry, paneW, listH, cursor)...)
+		bodyLines = append(bodyLines, renderTaskListPane(entry, paneW, listH, cursor, now)...)
 		bodyLines = append(bodyLines, StyleSubtle.Render(strings.Repeat("─", width-2)))
-		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, paneW, detailH)...)
+		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, paneW, detailH, now)...)
 	}
 
 	// Assemble full panel.
@@ -349,7 +351,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 
 	// In-flight PR draft status line.
 	if prDraftInFlight {
-		draftStatus := lipgloss.NewStyle().Foreground(ColorWarning).Render(reviewSpinnerFrame() + " Pushing branch and drafting PR…")
+		draftStatus := lipgloss.NewStyle().Foreground(ColorWarning).Render(reviewSpinnerFrame(now) + " Pushing branch and drafting PR…")
 		lines = append(lines, draftStatus)
 	}
 
@@ -412,7 +414,7 @@ func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLe
 
 // renderTaskListPane renders the left-pane compact task list with icon, index, text, stat.
 // Row format: <icon> [N] <truncated text>  +X -Y
-func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int) []string {
+func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now time.Time) []string {
 	const headerLines = 2
 	planTasksStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true)
 	header := []string{
@@ -485,7 +487,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int) []str
 		if entry.verdicts != nil {
 			rec = entry.verdicts[r.taskIndex]
 		}
-		icon, _, style := verdictBadge(rec)
+		icon, _, style := verdictBadge(rec, now)
 		// For the synthetic overview row, use a dot.
 		if r.taskIndex == -1 {
 			icon = "·"
@@ -505,7 +507,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int) []str
 		// Stat string — for verdictNoDiff, show the label as the stat.
 		statStr := ""
 		if rec != nil && rec.state == verdictNoDiff {
-			_, lbl, sty := verdictBadge(rec)
+			_, lbl, sty := verdictBadge(rec, now)
 			statStr = sty.Render(lbl)
 		} else if r.group != nil && r.group.stats != nil {
 			st := r.group.stats
@@ -556,7 +558,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int) []str
 
 // renderTaskDetailPane renders the right-pane detail for the cursor-selected task.
 // Sections: task heading, verdict badge, rationale, changed files, commits.
-func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []string {
+func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int, now time.Time) []string {
 	if entry == nil {
 		return []string{StyleSubtle.Render("loading…")}
 	}
@@ -661,7 +663,7 @@ func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int) []s
 	} else if entry.verdicts != nil && group != nil {
 		rec = entry.verdicts[group.taskIndex]
 	}
-	icon, label, style := verdictBadge(rec)
+	icon, label, style := verdictBadge(rec, now)
 	lines = append(lines, style.Render(icon+" "+label))
 
 	// (3) Rationale rendered through mdrender for inline bold/italic/code styling.

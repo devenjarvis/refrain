@@ -148,12 +148,18 @@ type App struct {
 	// managers is keyed by repo path. The value satisfies the narrow
 	// SessionManager interface (see manager_iface.go); production uses
 	// *agent.Manager but tests can inject a deterministic fake.
-	managers     map[string]SessionManager
-	activeRepo   string
-	cfg          *config.Config
-	repoBrowser  fileBrowserModel
-	branchPicker branchPickerModel
-	repoPicker   repoPickerModel
+	managers   map[string]SessionManager
+	activeRepo string
+	cfg        *config.Config
+
+	// debugDumpPath, when non-empty, names a file that the latest composed
+	// dashboard frame is written to on every tick. Set once at startup from
+	// REFRAIN_E2E_DEBUG_DUMP so the env read stays out of the render loop;
+	// the e2e harness (TestArtifactsOnPlanReview) reads the frame from here.
+	debugDumpPath string
+	repoBrowser   fileBrowserModel
+	branchPicker  branchPickerModel
+	repoPicker    repoPickerModel
 
 	// repoPickerPending is set when the file browser was opened from the repo
 	// picker. After the browser emits a select or cancel, control returns to
@@ -328,6 +334,7 @@ func (a *App) closeModal() {
 func NewApp() App {
 	return App{
 		view:            ViewDashboard,
+		debugDumpPath:   os.Getenv("REFRAIN_E2E_DEBUG_DUMP"),
 		dashboard:       newDashboardModel(),
 		cursor:          NewFocusedCursor(),
 		keys:            DefaultKeyMap(),
@@ -438,6 +445,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// File-saved confirmation lives inside the editor itself; nothing to
 		// do at the App level beyond not propagating the message further.
 		_ = msg
+		return a, nil
+	case ideOpenedMsg:
+		// IDE launch is the only side effect; surface a failure transiently
+		// (§8) and stop. Success is silent — the editor window appears.
+		if msg.err != nil {
+			a.setError("open IDE: " + msg.err.Error())
+		}
 		return a, nil
 	case planEditorAbandonMsg:
 		return a.handlePlanEditorAbandon(msg)

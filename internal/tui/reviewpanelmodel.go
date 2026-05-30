@@ -2,8 +2,8 @@ package tui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -31,6 +31,11 @@ type reviewPanelModel struct {
 	checksCursor      int // cursor position in the Checks tab list
 	checksScroll      int // scroll offset for the Checks tab output pane
 
+	// now is the render clock, refreshed from the app tick via SetNow. View
+	// derives elapsed/age strings and the verdict spinner from it so rendering
+	// stays pure (§5: no clock read at render time).
+	now time.Time
+
 	width, height int
 }
 
@@ -43,7 +48,17 @@ func newReviewPanel(sess *agent.Session, repoPath string, width, height int) *re
 		repoPath: repoPath,
 		width:    width,
 		height:   height,
+		now:      time.Now(),
 	}
+}
+
+// SetNow updates the render clock. Called from the app tick so View can derive
+// time-based display values without reading the clock itself (§5).
+func (m *reviewPanelModel) SetNow(now time.Time) {
+	if m == nil {
+		return
+	}
+	m.now = now
 }
 
 // SessionID returns the ID of the session this panel is open for, or "" when
@@ -104,32 +119,30 @@ type reviewReworkRequestMsg struct {
 
 // reviewOpenIDECmd opens the configured IDE on the session's worktree.
 // Mirrors the inline 'i' / 'e' key handler shape: silent if the worktree is
-// missing, errors via svc.SetError when the IDE command isn't set.
-func reviewOpenIDECmd(sess *agent.Session, repoPath string, svc PanelServices) {
+// missing, errors via svc.SetError when the IDE command isn't set. Returns the
+// launch tea.Cmd (or nil) so the caller routes it onto the command path; the
+// launch result surfaces as ideOpenedMsg.
+func reviewOpenIDECmd(sess *agent.Session, repoPath string, svc PanelServices) tea.Cmd {
 	if sess == nil || sess.Worktree == nil {
-		return
+		return nil
 	}
 	if repoPath == "" {
-		return
+		return nil
 	}
 	ideCmd := strings.TrimSpace(svc.Resolved(repoPath).IDECommand)
 	if ideCmd == "" {
 		svc.SetError("No IDE configured (set 'IDE Command' in settings)")
-		return
+		return nil
 	}
 	parts := splitIDECommand(ideCmd)
 	if len(parts) == 0 {
 		svc.SetError("No IDE configured (set 'IDE Command' in settings)")
-		return
+		return nil
 	}
 	worktreePath := sess.Worktree.Path
 	exe := parts[0]
 	args := append(parts[1:], worktreePath)
-	go func() {
-		cmd := exec.Command(exe, args...)
-		cmd.Dir = worktreePath
-		_ = cmd.Start()
-	}()
+	return openIDECmd(exe, args, worktreePath)
 }
 
 // Update dispatches the review panel's key handling. Returns the (possibly
@@ -237,8 +250,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg, svc PanelServices) (Pa
 		}
 		return m, tea.Batch(closeReviewPanel(svc), svc.KillSessionCmd(sess, m.repoPath))
 	case "e":
-		reviewOpenIDECmd(m.session, m.repoPath, svc)
-		return m, nil
+		return m, reviewOpenIDECmd(m.session, m.repoPath, svc)
 	case "j", "down":
 		switch m.activeTab {
 		case reviewTabTasks:
@@ -384,7 +396,7 @@ func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg, svc PanelServices)
 	if entry == nil {
 		return
 	}
-	headerH := len(renderReviewHeader(m.session, m.width))
+	headerH := len(renderReviewHeader(m.session, m.width, m.now))
 	const tabBarH = 2
 	paneTop := svc.DashboardTopY + headerH + tabBarH
 	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, m.width-2)
@@ -437,5 +449,5 @@ func (m *reviewPanelModel) View(svc PanelServices) string {
 			}
 		}
 	}
-	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.activeTab, checkState)
+	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.activeTab, checkState, m.now)
 }

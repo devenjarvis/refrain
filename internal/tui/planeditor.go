@@ -88,18 +88,20 @@ type planEditorModel struct {
 
 	doc docEditor // shared textarea, renderer, dimensions, scrollOff
 
-	mode     planEditorMode
-	plan     string // last-loaded plan content; used in scroll mode
-	dirty    bool   // textarea has unsaved edits relative to file
-	saveNote string // transient confirmation ("saved") or error
-	saveAt   time.Time
+	mode            planEditorMode
+	plan            string // last-loaded plan content; used in scroll mode
+	dirty           bool   // textarea has unsaved edits relative to file
+	saveNote        string // transient confirmation ("saved") or error
+	saveAt          time.Time
+	saveNoteVisible bool // saveNote still within its 3s display window; refreshed on tick
 
-	reviseInput textinput.Model
-	drafting    bool // session is currently in LifecycleDrafting; show placeholder
-	revising    bool // a revise call is in flight; lock i/a/ctrl+s
-	revisingFor time.Time
-	statusMsg   string // generic status line under the header (e.g. "Drafting…")
-	errMsg      string // inline error message; cleared on next interaction
+	reviseInput     textinput.Model
+	drafting        bool // session is currently in LifecycleDrafting; show placeholder
+	revising        bool // a revise call is in flight; lock i/a/ctrl+s
+	revisingFor     time.Time
+	revisingElapsed int    // whole seconds since revisingFor; refreshed on tick
+	statusMsg       string // generic status line under the header (e.g. "Drafting…")
+	errMsg          string // inline error message; cleared on next interaction
 
 	// sections is the ordered list of H1/H2 sections parsed from the current
 	// plan. folds maps section heading name to its current fold state (true =
@@ -260,10 +262,22 @@ func (m *planEditorModel) SetRevising(v bool) {
 	m.revising = v
 	if v {
 		m.revisingFor = time.Now()
+		m.revisingElapsed = 0
 		m.statusMsg = "Revising…"
 	} else if m.statusMsg == "Revising…" {
 		m.statusMsg = ""
 	}
+}
+
+// refreshDerived recomputes time-based display values (the revising-elapsed
+// counter and the save-note visibility window) from the editor's timestamps.
+// Driven by the app tick so View()/renderHeader stay pure (§5): they read the
+// stored fields instead of calling time.Since at render time.
+func (m *planEditorModel) refreshDerived(now time.Time) {
+	if m.revising {
+		m.revisingElapsed = int(now.Sub(m.revisingFor).Seconds())
+	}
+	m.saveNoteVisible = m.saveNote != "" && now.Sub(m.saveAt) < 3*time.Second
 }
 
 // SetError sets a one-shot error message rendered below the header until
@@ -613,6 +627,7 @@ func (m *planEditorModel) updateEdit(msg tea.KeyPressMsg) tea.Cmd {
 		m.dirty = false
 		m.saveNote = "saved"
 		m.saveAt = time.Now()
+		m.saveNoteVisible = true
 		m.rebuildSectionsPreservingFolds()
 		sessID := m.sess.ID
 		return func() tea.Msg { return planEditorSavedMsg{sessionID: sessID} }
@@ -926,11 +941,10 @@ func (m *planEditorModel) renderHeader() string {
 	case m.drafting:
 		rightLabel = StyleActive.Render("drafting…")
 	case m.revising:
-		secs := int(time.Since(m.revisingFor).Seconds())
-		rightLabel = StyleActive.Render("revising… (" + fmtSeconds(secs) + ")")
+		rightLabel = StyleActive.Render("revising… (" + fmtSeconds(m.revisingElapsed) + ")")
 	case m.dirty:
 		rightLabel = StyleWarning.Render("● unsaved")
-	case m.saveNote != "" && time.Since(m.saveAt) < 3*time.Second:
+	case m.saveNoteVisible:
 		rightLabel = StyleSuccess.Render(m.saveNote)
 	}
 	gap := m.doc.width - ansi.StringWidth(left) - ansi.StringWidth(rightLabel) - 4
