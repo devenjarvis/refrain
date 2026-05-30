@@ -30,12 +30,12 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 		gap = 1
 	}
 	lines = append(lines, headerLeft+strings.Repeat(" ", gap)+headerRight)
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 
 	if entry == nil || entry.pr == nil {
 		lines = append(lines, StyleSubtle.Render("  fetching PR status…"))
 		lines = append(lines, "")
-		lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+		lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 		lines = append(lines, shippingHints(false))
 		return strings.Join(lines, "\n")
 	}
@@ -65,7 +65,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	}
 	lines = append(lines, baseLine)
 	lines = append(lines, "")
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 
 	// ── CI checks ─────────────────────────────────────────────────────────────
 	lines = append(lines, StyleSubtle.Render("CI CHECKS"))
@@ -77,7 +77,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 
 	// ── Review feedback (two-pane) ────────────────────────────────────────────
 	lines = append(lines, StyleSubtle.Render("REVIEW FEEDBACK"))
@@ -103,17 +103,13 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 			if detailH < 2 {
 				detailH = 2
 			}
-			w := width - 2
+			w := innerWidth(width)
 			lines = append(lines, renderFeedbackList(items, cursor, triage, w, listH)...)
-			lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+			lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 			lines = append(lines, renderFeedbackDetail(items, cursor, triage, scroll, w, detailH)...)
 		} else {
 			// Wide: side-by-side panes.
-			leftW := width * 4 / 10
-			if leftW < 30 {
-				leftW = 30
-			}
-			rightW := width - leftW - 5
+			leftW, rightW := splitColumns(width, columnStrategy{num: 4, den: 10, min: 30}, 5)
 			if rightW < 20 {
 				rightW = 20
 			}
@@ -146,7 +142,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	if remaining := height - used; remaining > 0 {
 		lines = append(lines, strings.Repeat("\n", remaining-1))
 	}
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 	lines = append(lines, shippingHints(isMergeReady(entry)))
 
 	return strings.Join(lines, "\n")
@@ -237,7 +233,7 @@ func renderFeedbackList(items []feedbackItem, cursor int, triage map[string]*fee
 		rowText := glyph + " " + labelStr + noteGlyph
 
 		if selected {
-			contentW := w - 4
+			contentW := modalContentWidth(w)
 			if rw := ansi.StringWidth(rowText); rw < contentW {
 				rowText += strings.Repeat(" ", contentW-rw)
 			}
@@ -357,7 +353,7 @@ func renderCheckRow(run github.CheckRun, width int) string {
 	name := truncateVisible(run.Name, width-20)
 	row := "  " + iconStyle.Render(icon) + "  " + name
 	if dur != "" {
-		padW := width - 4 - ansi.StringWidth(name) - ansi.StringWidth(dur) - 6
+		padW := modalContentWidth(width) - ansi.StringWidth(name) - ansi.StringWidth(dur) - 6
 		if padW < 1 {
 			padW = 1
 		}

@@ -152,14 +152,7 @@ func (m fileBrowserModel) Update(msg tea.Msg) (fileBrowserModel, tea.Cmd) {
 
 // View renders the two-panel file browser.
 func (m fileBrowserModel) View() string {
-	leftWidth := m.width / 3
-	if leftWidth < 20 {
-		leftWidth = 20
-	}
-	rightWidth := m.width - leftWidth - 1 // 1 for border
-	if rightWidth < 0 {
-		rightWidth = 0
-	}
+	leftWidth, rightWidth := splitColumns(m.width, columnStrategy{num: 1, den: 3, min: 20}, separatorWidth)
 
 	left := m.renderDirList(leftWidth)
 	right := m.renderDetails(rightWidth)
@@ -281,7 +274,7 @@ func (m fileBrowserModel) renderBreadcrumb(maxWidth int) string {
 // renderDirList renders the left panel with the directory listing.
 func (m fileBrowserModel) renderDirList(width int) string {
 	title := StyleTitle.Render("DIRECTORIES")
-	sepWidth := width - 2
+	sepWidth := innerWidth(width)
 	if sepWidth < 0 {
 		sepWidth = 0
 	}
@@ -289,7 +282,7 @@ func (m fileBrowserModel) renderDirList(width int) string {
 
 	lines := make([]string, 0, 6+len(m.filtered))
 	lines = append(lines, title, separator)
-	lines = append(lines, m.renderBreadcrumb(width-2))
+	lines = append(lines, m.renderBreadcrumb(innerWidth(width)))
 	if m.showHidden {
 		lines = append(lines, StyleSubtle.Render("(showing hidden)"))
 	}
@@ -332,7 +325,7 @@ func (m fileBrowserModel) renderDirList(width int) string {
 		}
 
 		name := m.entries[idx].Name()
-		maxLen := width - 4
+		maxLen := modalContentWidth(width)
 		if len(name) > maxLen {
 			name = name[:maxLen-1] + "…"
 		}

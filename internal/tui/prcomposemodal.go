@@ -78,7 +78,7 @@ func (m *prComposeModal) Active() bool { return m.active }
 // SetSize updates the viewport dimensions.
 func (m *prComposeModal) SetSize(w, h int) {
 	m.doc.SetSize(w, h)
-	m.titleInput.SetWidth(w - 4)
+	m.titleInput.SetWidth(modalContentWidth(w))
 	m.doc.textarea.SetHeight(m.doc.BodyHeight(8))
 	rendered := m.doc.RenderLines()
 	m.doc.ClampScroll(len(rendered))
@@ -211,7 +211,7 @@ func (m *prComposeModal) updateEdit(msg tea.Msg) tea.Cmd {
 func (m *prComposeModal) View() string {
 	var lines []string
 	lines = append(lines, m.renderHeader())
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, m.doc.width-2))))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, innerWidth(m.doc.width)))))
 	switch m.mode {
 	case prComposeModeEdit:
 		lines = append(lines, m.renderEditBody())
@@ -273,7 +273,7 @@ func (m *prComposeModal) renderScrollBody() string {
 }
 
 func (m *prComposeModal) renderFooter() string {
-	divider := StyleSubtle.Render(strings.Repeat("─", max(1, m.doc.width-2)))
+	divider := StyleSubtle.Render(strings.Repeat("─", max(1, innerWidth(m.doc.width))))
 	var hints string
 	switch m.mode {
 	case prComposeModeEdit:

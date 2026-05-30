@@ -589,7 +589,7 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		// Open file browser to add a new repo.
 		a.repoBrowser = newFileBrowserModel()
 		a.repoBrowser.width = a.width
-		a.repoBrowser.height = a.height - 1
+		a.repoBrowser.height = a.height - statusBarHeight
 		a.view = ViewFileBrowser
 		return a, nil, true
 
@@ -611,7 +611,7 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		}
 		a.branchPicker = newBranchPickerModel()
 		a.branchPicker.width = a.width
-		a.branchPicker.height = a.height - 1
+		a.branchPicker.height = a.height - statusBarHeight
 		a.activeRepo = repoPath
 		a.view = ViewBranchPicker
 		return a, loadBranchPickerData(repoPath, a.ghClient, activeBranches), true
@@ -700,7 +700,7 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		}
 		a.repoPicker = newRepoPickerModel()
 		a.repoPicker.width = a.width
-		a.repoPicker.height = a.height - 1
+		a.repoPicker.height = a.height - statusBarHeight
 		a.repoPicker.SetMode(repoPickerModeManage)
 		a.repoPicker.setRepos(a.cfg.Repos, counts, a.activeRepo)
 		a.view = ViewRepoPicker
@@ -730,7 +730,7 @@ func (a App) handleKeysWorkflow(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			return a, nil, true
 		}
 		a.view = ViewDiff
-		a.diff = newDiffModel(sess.GetDisplayName(), m, a.width, a.height-1)
+		a.diff = newDiffModel(sess.GetDisplayName(), m, a.width, a.height-statusBarHeight)
 		return a, nil, true
 
 	case "x":
@@ -1110,7 +1110,7 @@ func (a App) handlePipelineKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			}
 			a.repoPicker = newRepoPickerModel()
 			a.repoPicker.width = a.width
-			a.repoPicker.height = a.height - 1
+			a.repoPicker.height = a.height - statusBarHeight
 			a.repoPicker.SetMode(repoPickerModeSession)
 			a.repoPicker.setRepos(a.cfg.Repos, counts, a.activeRepo)
 			a.view = ViewRepoPicker

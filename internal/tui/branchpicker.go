@@ -226,14 +226,7 @@ func (m *branchPickerModel) applyFilter() {
 
 // View renders the branch picker as a two-panel overlay.
 func (m branchPickerModel) View() string {
-	leftWidth := m.width / 3
-	if leftWidth < 25 {
-		leftWidth = 25
-	}
-	rightWidth := m.width - leftWidth - 1
-	if rightWidth < 0 {
-		rightWidth = 0
-	}
+	leftWidth, rightWidth := splitColumns(m.width, columnStrategy{num: 1, den: 3, min: 25}, separatorWidth)
 
 	left := m.renderList(leftWidth)
 	right := m.renderDetails(rightWidth)
@@ -258,7 +251,7 @@ func (m branchPickerModel) View() string {
 // renderList renders the left panel with the grouped branch list.
 func (m branchPickerModel) renderList(width int) string {
 	title := StyleTitle.Render("OPEN BRANCH")
-	sepWidth := width - 2
+	sepWidth := innerWidth(width)
 	if sepWidth < 0 {
 		sepWidth = 0
 	}
@@ -322,7 +315,7 @@ func (m branchPickerModel) renderList(width int) string {
 		if item.kind == "pr" {
 			label = fmt.Sprintf("#%d %s", item.prNumber, item.branch)
 		}
-		maxLen := width - 4
+		maxLen := modalContentWidth(width)
 		if len(label) > maxLen && maxLen > 3 {
 			label = label[:maxLen-1] + "…"
 		}

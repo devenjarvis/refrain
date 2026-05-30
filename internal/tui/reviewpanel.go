@@ -147,7 +147,7 @@ func renderChecksTab(cs *checksTabState, width, height int, now time.Time) []str
 
 	// Build output pane.
 	var outputLines []string
-	outputLines = append(outputLines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	outputLines = append(outputLines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 	if cs.cursor < len(cs.results) {
 		result := cs.results[cs.cursor]
 		out := result.output
@@ -242,7 +242,7 @@ func renderReviewHeader(sess *agent.Session, width int, now time.Time) []string 
 	for _, l := range intentLines {
 		lines = append(lines, "  "+l)
 	}
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 	return lines
 }
 
@@ -275,7 +275,7 @@ func renderReviewTabBar(activeTab, width int) []string {
 		}
 	}
 	labelLine := "  " + strings.Join(parts, "  ")
-	divider := StyleSubtle.Render(strings.Repeat("─", width-2))
+	divider := StyleSubtle.Render(strings.Repeat("─", innerWidth(width)))
 	return []string{labelLine, divider}
 }
 
@@ -337,9 +337,9 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 		if detailH < 2 {
 			detailH = 2
 		}
-		paneW := width - 2
+		paneW := innerWidth(width)
 		bodyLines = append(bodyLines, renderTaskListPane(entry, paneW, listH, cursor, now)...)
-		bodyLines = append(bodyLines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+		bodyLines = append(bodyLines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, paneW, detailH, now)...)
 	}
 
@@ -357,7 +357,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 
 	// Action footer.
 	lines = append(lines, "")
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", width-2)))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 	var pHint string
 	if prDraftInFlight {
 		pHint = StyleSubtle.Render("p — (in progress…)")
@@ -535,7 +535,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 		rowText := iconStr + " " + StyleSubtle.Render(label) + " " + textStr
 		if statStr != "" {
 			usedW := iconW + 1 + labelW + 1 + ansi.StringWidth(textStr)
-			padW := width - 4 - usedW - 2 - statW
+			padW := modalContentWidth(width) - usedW - 2 - statW
 			if padW < 1 {
 				padW = 1
 			}
@@ -543,7 +543,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 		}
 
 		if selected {
-			contentW := width - 4
+			contentW := modalContentWidth(width)
 			if w := ansi.StringWidth(rowText); w < contentW {
 				rowText += strings.Repeat(" ", contentW-w)
 			}
@@ -745,7 +745,7 @@ func sortFileStatsByChurn(files []git.FileStat) {
 func renderReviewSpecOverlay(sess *agent.Session, plan string, scrollOffset, width, height int) string {
 	titleStyle := StyleHeading
 	title := titleStyle.Render("SPEC") + "  " + StyleSubtle.Render("›") + "  " + sess.GetDisplayName()
-	header := title + "\n" + StyleSubtle.Render(strings.Repeat("─", width-2))
+	header := title + "\n" + StyleSubtle.Render(strings.Repeat("─", innerWidth(width)))
 	bodyH := height - 2 // title + divider
 	if bodyH < 1 {
 		bodyH = 1
@@ -758,7 +758,7 @@ func renderReviewSpecOverlay(sess *agent.Session, plan string, scrollOffset, wid
 
 	sections := agent.ParsePlanSections(plan)
 	r := mdrender.New(docEditorChromaStyle)
-	contentW := width - 4
+	contentW := modalContentWidth(width)
 
 	type namedSection struct {
 		heading string
@@ -804,7 +804,7 @@ func renderReviewSpecOverlay(sess *agent.Session, plan string, scrollOffset, wid
 	body := strings.Join(window, "\n")
 
 	// Footer hint.
-	footer := "\n" + StyleSubtle.Render(strings.Repeat("─", width-2)) + "\n" +
+	footer := "\n" + StyleSubtle.Render(strings.Repeat("─", innerWidth(width))) + "\n" +
 		"  " + StyleActive.Render("pgdn") + StyleSubtle.Render("/") + StyleActive.Render("pgup") + StyleSubtle.Render(" — scroll") +
 		"  " + StyleActive.Render("g") + StyleSubtle.Render("/") + StyleActive.Render("G") + StyleSubtle.Render(" — top/bottom") +
 		"  " + StyleActive.Render("esc") + StyleSubtle.Render(" — back to review")

@@ -213,13 +213,13 @@ func newPlanEditor(sess *agent.Session, repoPath string, width, height int) plan
 	ti := textinput.New()
 	ti.Placeholder = "What should change?"
 	ti.CharLimit = 512
-	ti.SetWidth(width - 4)
+	ti.SetWidth(modalContentWidth(width))
 	m.reviseInput = ti
 
 	qi := textinput.New()
 	qi.Placeholder = "Type an answer (enter to submit, esc to skip)"
 	qi.CharLimit = 1024
-	qi.SetWidth(width - 4)
+	qi.SetWidth(modalContentWidth(width))
 	m.questionInput = qi
 
 	m.reload()
@@ -233,8 +233,8 @@ func newPlanEditor(sess *agent.Session, repoPath string, width, height int) plan
 // what lets renderBody stay pure.
 func (m *planEditorModel) SetSize(w, h int) {
 	m.doc.SetSize(w, h)
-	m.reviseInput.SetWidth(w - 4)
-	m.questionInput.SetWidth(w - 4)
+	m.reviseInput.SetWidth(modalContentWidth(w))
+	m.questionInput.SetWidth(modalContentWidth(w))
 	m.clampScroll()
 }
 
@@ -906,7 +906,7 @@ func (m *planEditorModel) clampCursor() {
 func (m *planEditorModel) View() string {
 	var lines []string
 	lines = append(lines, m.renderHeader())
-	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, m.doc.width-2))))
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, innerWidth(m.doc.width)))))
 
 	if status := m.renderStatusLine(); status != "" {
 		lines = append(lines, status)
@@ -1049,7 +1049,7 @@ func (m *planEditorModel) renderFooter() string {
 			StyleActive.Render("q") + StyleSubtle.Render(" abandon  ") +
 			StyleActive.Render("esc") + StyleSubtle.Render(" back")
 	}
-	divider := StyleSubtle.Render(strings.Repeat("─", max(1, m.doc.width-2)))
+	divider := StyleSubtle.Render(strings.Repeat("─", max(1, innerWidth(m.doc.width))))
 	return divider + "\n" + hints
 }
 
@@ -1062,7 +1062,7 @@ func (m *planEditorModel) renderQuestionBody() string {
 	var b strings.Builder
 	b.WriteString(StyleActive.Render("planner is asking:"))
 	b.WriteString("\n\n")
-	b.WriteString(ansi.Wrap(m.questionText, max(20, m.doc.width-4), ""))
+	b.WriteString(ansi.Wrap(m.questionText, max(20, modalContentWidth(m.doc.width)), ""))
 	b.WriteString("\n\n")
 	b.WriteString(StyleActive.Render("answer:") + " " + m.questionInput.View())
 	return b.String()

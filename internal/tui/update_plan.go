@@ -363,7 +363,7 @@ func (a *App) openPlanEditor(sess *agent.Session, repoPath string) {
 	if sess == nil {
 		return
 	}
-	editorH := a.height - 1 // status row reserved
+	editorH := a.height - statusBarHeight // status row reserved
 	editor := newPlanEditor(sess, repoPath, a.width, editorH)
 	if sess.IsDrafting() {
 		editor.SetDrafting(true)

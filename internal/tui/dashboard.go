@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
-	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/vt"
 )
 
@@ -261,10 +260,7 @@ func (d dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 // fixedTermWidth() must return the same value on any given frame, otherwise
 // the sidebar and the agent VT will disagree about column counts.
 func (d dashboardModel) listWidth() int {
-	if d.sidebarWidth > 0 {
-		return d.sidebarWidth
-	}
-	return config.DefaultSidebarWidth
+	return resolveSidebarWidth(d.sidebarWidth)
 }
 
 func (d dashboardModel) View() string {
@@ -285,14 +281,14 @@ func (d dashboardModel) View() string {
 }
 
 func (d dashboardModel) contentHeight() int {
-	return d.height - 2 // statusbar + title
+	return d.height - statusBarHeight - titleHeight
 }
 
 // fixedTermWidth returns the terminal column count that all agents should use.
 // Held constant across panel focus changes so transitions never trigger a
 // resize.
 func (d dashboardModel) fixedTermWidth() int {
-	return d.width - d.listWidth() - 1 - 2 // list border + preview border
+	return previewTermWidth(d.width, d.listWidth())
 }
 
 // fixedTermHeight returns the terminal row count that all agents should use.
@@ -300,7 +296,7 @@ func (d dashboardModel) fixedTermWidth() int {
 // the PR line — accepting 1 row of clipping when PR is visible is better than
 // per-session resize churn.
 func (d dashboardModel) fixedTermHeight() int {
-	return d.contentHeight() - 2 - 2 // 2 metadata rows (sessionInfo + blank) + 2 border rows
+	return d.contentHeight() - 2 - 2*borderWidth // 2 metadata rows (sessionInfo + blank) + 2 border rows
 }
 
 // renderRepoConfigOverlay renders the per-repo settings form full-screen. It's

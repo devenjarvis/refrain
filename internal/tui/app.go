@@ -612,7 +612,7 @@ func (a *App) openNewSession(returnTo ViewMode) tea.Cmd {
 	a.view = ViewNewSession
 	a.newSession.repoName = a.activeRepoDisplayName()
 	a.newSession.baseBranch, _ = git.BaseBranch(a.activeRepo)
-	a.newSession.SetSize(a.width, a.height-1)
+	a.newSession.SetSize(a.width, a.height-statusBarHeight)
 	return a.newSession.Open(returnTo)
 }
 
@@ -1026,7 +1026,7 @@ func (a *App) activateFocusCursor() (tea.Cmd, bool) {
 		}
 		return nil, true
 	case focusSectionShipping:
-		a.openShipping(newShippingPanel(sess, items[idx].repoPath, a.width, a.height-1))
+		a.openShipping(newShippingPanel(sess, items[idx].repoPath, a.width, a.height-statusBarHeight))
 		return nil, true
 	}
 	return nil, false
@@ -1161,7 +1161,7 @@ func (a App) View() tea.View {
 				Padding(0, 1).
 				Width(modalW).
 				Render(overlayContent)
-			body = placeCentered(a.width, a.height-1, overlay)
+			body = placeCentered(a.width, a.height-statusBarHeight, overlay)
 		}
 		statusbar := renderStatusBar(hints, a.width)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, statusbar)
