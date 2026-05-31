@@ -16,7 +16,6 @@ import (
 	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
-
 // reviewSpinnerFrame returns the spinner character for the given render clock.
 // now is the model's tick-refreshed timestamp (§5: no clock read at render
 // time); deriving the frame from it keeps all running rows in sync. The frame

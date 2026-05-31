@@ -1007,8 +1007,9 @@ func TestReviewPanel_View_FooterOnLastRow(t *testing.T) {
 		}
 		lines := strings.Split(view, "\n")
 		last := ansi.Strip(lines[len(lines)-1])
-		if !strings.Contains(last, "ESC") {
-			t.Errorf("last line %q does not contain 'ESC' hint", last)
+		// "esc back" in our unified footer; accept any case.
+		if !strings.Contains(strings.ToUpper(last), "ESC") {
+			t.Errorf("last line %q does not contain 'esc' hint", last)
 		}
 	}
 
@@ -1029,12 +1030,11 @@ func TestReviewPanel_View_FooterOnLastRow(t *testing.T) {
 		assertFooter(t, panel.View())
 	})
 
-	t.Run("checks tab with nil checkState", func(t *testing.T) {
+	t.Run("no checks configured (nil checkState)", func(t *testing.T) {
 		sess := agent.NewSessionForTest("s3", "fix-auth")
 		app := reviewTestApp()
 		panel := newReviewPanel(sess, "", w, h, app.buildReviewDeps())
-		panel.activeTab = reviewTabChecks
-		// validationRuns is nil → checkState is nil → placeholder tab
+		// validationRuns is nil → checkState is nil → no checks strip
 		assertFooter(t, panel.View())
 	})
 
