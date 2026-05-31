@@ -1,0 +1,155 @@
+version: 3
+
+allow:
+  depOnAnyVendor: true
+
+excludeFiles:
+  - .*_test\.go$
+
+exclude:
+  - internal/e2e
+  - scripts
+
+components:
+  root:
+    in: .
+  cmd:
+    in: cmd
+  tui:
+    in: internal/tui
+  tui_diff:
+    in: internal/tui/diff
+  tui_mdrender:
+    in: internal/tui/mdrender
+  tui_mdtestutil:
+    in: internal/tui/mdrender/testutil
+  tui_mdtextarea:
+    in: internal/tui/mdtextarea
+  agent:
+    in: internal/agent
+  audio:
+    in: internal/audio
+  config:
+    in: internal/config
+  diffmodel:
+    in: internal/diffmodel
+  editor:
+    in: internal/editor
+  git:
+    in: internal/git
+  github:
+    in: internal/github
+  hook:
+    in: internal/hook
+  migrate:
+    in: internal/migrate
+  planner:
+    in: internal/planner
+  proptest:
+    in: internal/proptest
+  pty:
+    in: internal/pty
+  setlist:
+    in: internal/setlist
+  songs:
+    in: internal/songs
+  state:
+    in: internal/state
+  vt:
+    in: internal/vt
+
+commonComponents:
+  - proptest
+
+deps:
+  root:
+    mayDependOn:
+      - cmd
+  cmd:
+    mayDependOn:
+      - tui
+      - config
+      - github
+      - hook
+      - migrate
+      - planner
+  tui:
+    mayDependOn:
+      - agent
+      - audio
+      - config
+      - diffmodel
+      - editor
+      - git
+      - github
+      - state
+      - vt
+      - tui_diff
+      - tui_mdrender
+      - tui_mdtextarea
+  tui_diff:
+    mayDependOn:
+      - diffmodel
+  tui_mdrender:
+    anyVendorDeps: true
+    mayDependOn: []
+  tui_mdtestutil:
+    anyVendorDeps: true
+    mayDependOn: []
+  tui_mdtextarea:
+    mayDependOn:
+      - tui_mdrender
+  agent:
+    mayDependOn:
+      - config
+      - git
+      - hook
+      - migrate
+      - planner
+      - setlist
+      - songs
+      - state
+      - pty
+      - vt
+  config:
+    mayDependOn:
+      - git
+  setlist:
+    mayDependOn:
+      - config
+  audio:
+    anyVendorDeps: true
+    mayDependOn: []
+  diffmodel:
+    anyVendorDeps: true
+    mayDependOn: []
+  editor:
+    anyVendorDeps: true
+    mayDependOn: []
+  git:
+    anyVendorDeps: true
+    mayDependOn: []
+  github:
+    anyVendorDeps: true
+    mayDependOn: []
+  hook:
+    anyVendorDeps: true
+    mayDependOn: []
+  migrate:
+    anyVendorDeps: true
+    mayDependOn: []
+  planner:
+    anyVendorDeps: true
+    mayDependOn: []
+  pty:
+    anyVendorDeps: true
+    mayDependOn: []
+  songs:
+    anyVendorDeps: true
+    mayDependOn: []
+  state:
+    anyVendorDeps: true
+    mayDependOn: []
+  vt:
+    anyVendorDeps: true
+    mayDependOn: []
