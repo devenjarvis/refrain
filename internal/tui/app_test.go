@@ -33,6 +33,27 @@ func (b *blockingDrafter) Revise(_ context.Context, _ agent.ReviseRequest) (stri
 	return "", errors.New("test: blocking drafter released")
 }
 
+// recordingReviser is a PlanDrafter that sends the ReviseRequest.Model it
+// receives to a channel so tests can assert the model override was threaded
+// through. Draft is a no-op stub; only Revise recording matters here.
+type recordingReviser struct {
+	ch   chan string // receives req.Model
+	plan string     // plan text returned to the caller
+}
+
+func (r *recordingReviser) Draft(_ context.Context, _ agent.DraftRequest) (string, error) {
+	return "# Goal\n\nstub plan\n", nil
+}
+
+func (r *recordingReviser) Revise(_ context.Context, req agent.ReviseRequest) (string, error) {
+	r.ch <- req.Model
+	p := r.plan
+	if p == "" {
+		p = "# Goal\n\nrevised plan\n"
+	}
+	return p, nil
+}
+
 func requireClaude(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("claude"); err != nil {
@@ -5025,6 +5046,60 @@ func TestHandlePlanEditorAbandon_ClearsPendingOverrides(t *testing.T) {
 	}
 	if _, present := appAfter.pendingOverrides["sess-id"]; present {
 		t.Error("pendingOverrides entry should be deleted on abandon")
+	}
+}
+
+// TestHandlePlanEditorRevise_PassesPlanModelOverride verifies that
+// handlePlanEditorRevise forwards the PlanModel stored in pendingOverrides to
+// mgr.RevisePlan via WithPlanModel, so the correct model is used for revision.
+func TestHandlePlanEditorRevise_PassesPlanModelOverride(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "t@t.com"},
+		{"git", "config", "user.name", "T"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup %v: %v\n%s", args, err, out)
+		}
+	}
+
+	ch := make(chan string, 1)
+	recorder := &recordingReviser{ch: ch}
+
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+	mgr.SetPlanDrafter(recorder)
+
+	sess, err := mgr.CreateSessionForPlanning(agent.Config{AgentProgram: "bash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Write a non-empty plan so RevisePlan's ReadPlan check passes.
+	if err := sess.WritePlan("# Goal\n\noriginal plan\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.pendingOverrides[sess.ID] = sessionOverrides{PlanModel: "claude-opus-4-8"}
+
+	app.Update(planEditorReviseMsg{sessionID: sess.ID, repoPath: dir, critique: "add more tests"})
+
+	select {
+	case gotModel := <-ch:
+		if gotModel != "claude-opus-4-8" {
+			t.Errorf("ReviseRequest.Model = %q, want \"claude-opus-4-8\"", gotModel)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: recordingReviser.Revise was not called within 5s")
 	}
 }
 
