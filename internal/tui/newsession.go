@@ -8,6 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	xlipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 // sessionOverrides holds per-session model and permission overrides set in the
@@ -30,6 +32,23 @@ type promptModalSubmitMsg struct {
 
 // promptModalCancelMsg fires on `esc`.
 type promptModalCancelMsg struct{}
+
+// overrideFieldKind distinguishes select (cycle through options) from toggle (bool).
+type overrideFieldKind int
+
+const (
+	overrideFieldSelect overrideFieldKind = iota
+	overrideFieldToggle
+)
+
+// overrideField represents a single row in the OVERRIDES sidebar panel.
+type overrideField struct {
+	label       string
+	kind        overrideFieldKind
+	options     []string // for overrideFieldSelect
+	selected    int      // index into options (select) or ignored (toggle)
+	toggleValue bool     // for overrideFieldToggle
+}
 
 const promptModalCharLimit = 4000
 
@@ -81,6 +100,12 @@ type newSessionModel struct {
 	placeholderIdx int
 	repoName       string
 	baseBranch     string
+
+	// Override form state. overrideFocus == -1 means the textarea has focus;
+	// >= 0 means that index of overrideFields has focus.
+	overrideFields  []overrideField
+	overrideFocus   int // -1 = textarea focused
+	overrideDefaults sessionOverrides
 }
 
 func newNewSessionModel() newSessionModel {
@@ -101,7 +126,7 @@ func newNewSessionModel() newSessionModel {
 	// listing "enter" here is safe — ctrl+j / shift+enter never reach the
 	// submit branch.
 	ta.KeyMap.InsertNewline.SetKeys("enter", "ctrl+m", "ctrl+j", "shift+enter", "alt+enter")
-	return newSessionModel{textarea: ta}
+	return newSessionModel{textarea: ta, overrideFocus: -1}
 }
 
 // SetSize updates the model's understanding of the terminal dimensions.
@@ -112,11 +137,42 @@ func (m *newSessionModel) SetSize(w, h int) {
 	m.textarea.SetHeight(m.textareaHeight())
 }
 
+// SetDefaults seeds the override form's default values from resolved repo
+// settings. Called by openNewSession before Open so the form reflects what
+// would be used absent any override. Stores both the displayed state and the
+// baseline for equality detection on submit (override == default ⇒ no-override).
+func (m *newSessionModel) SetDefaults(resolved config.ResolvedSettings) {
+	m.overrideDefaults = sessionOverrides{
+		PlanModel:         resolved.PlanModel,
+		AgentModel:        resolved.AgentModel,
+		BypassPermissions: &resolved.BypassPermissions,
+	}
+	m.buildOverrideFields()
+}
+
+// buildOverrideFields reconstructs the overrideFields slice from overrideDefaults.
+// Called by SetDefaults and Open so the form always reflects the latest defaults.
+func (m *newSessionModel) buildOverrideFields() {
+	planModelSel := optionIndex(config.KnownModels, m.overrideDefaults.PlanModel)
+	agentModelSel := optionIndex(config.KnownAgentModels, m.overrideDefaults.AgentModel)
+	bypassVal := false
+	if m.overrideDefaults.BypassPermissions != nil {
+		bypassVal = *m.overrideDefaults.BypassPermissions
+	}
+	m.overrideFields = []overrideField{
+		{label: "Plan Model", kind: overrideFieldSelect, options: config.KnownModels, selected: planModelSel},
+		{label: "Agent Model", kind: overrideFieldSelect, options: config.KnownAgentModels, selected: agentModelSel},
+		{label: "Bypass Permissions", kind: overrideFieldToggle, toggleValue: bypassVal},
+	}
+}
+
 // Open activates the screen, resets textarea content, and picks a fresh
 // title/placeholder pair. returnTo is the ViewMode to restore on cancel.
 func (m *newSessionModel) Open(returnTo ViewMode) tea.Cmd {
 	m.active = true
 	m.returnTo = returnTo
+	m.overrideFocus = -1
+	m.buildOverrideFields()
 	m.textarea.SetValue("")
 	m.titleIdx = pickPrompt(len(promptModalTitles))
 	m.placeholderIdx = pickPrompt(len(promptModalPlaceholders))
@@ -222,25 +278,51 @@ func (m *newSessionModel) textareaHeight() int {
 }
 
 func (m *newSessionModel) renderSidebar() string {
-	w := newSessionSidebarWidth
-
 	flowLabel := StyleSubtle.Render("FLOW")
 	flow := StyleAccent.Render("Plan → Build → Review → Ship")
 	flowBlock := lipgloss.JoinVertical(lipgloss.Left, flowLabel, flow)
 
-	exLabel := StyleSubtle.Render("EXAMPLES")
-	// Pick three example prompts starting at placeholderIdx.
-	examples := make([]string, 0, 3)
-	for i := 0; i < 3; i++ {
-		idx := (m.placeholderIdx + i) % len(promptModalPlaceholders)
-		ex := promptModalPlaceholders[idx]
-		// Strip leading "e.g. " for brevity in sidebar.
-		ex = strings.TrimPrefix(ex, "e.g. ")
-		ex = lipgloss.NewStyle().Width(w).Render(StyleSubtle.Render("• " + ex))
-		examples = append(examples, ex)
-	}
-	exLines := append([]string{exLabel}, examples...)
-	exBlock := lipgloss.JoinVertical(lipgloss.Left, exLines...)
+	overLabel := StyleSubtle.Render("OVERRIDES")
+	labelW := 20 // fixed label width keeps value column aligned
+	labelStyle := lipgloss.NewStyle().Width(labelW).Foreground(ColorText)
+	focusedLabelStyle := StyleActive.Bold(true).Width(labelW)
+	toggleOn := StyleSuccess.Render("[x]")
+	toggleOff := StyleSubtle.Render("[ ]")
 
-	return lipgloss.JoinVertical(lipgloss.Left, flowBlock, "", exBlock)
+	rows := make([]string, 0, len(m.overrideFields))
+	for i, f := range m.overrideFields {
+		cursor := "  "
+		ls := labelStyle
+		if i == m.overrideFocus {
+			cursor = StyleActive.Render("> ")
+			ls = focusedLabelStyle
+		}
+		label := ls.Render(f.label)
+		var value string
+		switch f.kind {
+		case overrideFieldSelect:
+			chevronStyle := StyleSubtle
+			if i == m.overrideFocus {
+				chevronStyle = StyleActive
+			}
+			opt := ""
+			if len(f.options) > 0 {
+				opt = f.options[f.selected]
+			}
+			if opt == "" {
+				opt = "(default)"
+			}
+			value = chevronStyle.Render("< ") + opt + chevronStyle.Render(" >")
+		case overrideFieldToggle:
+			if f.toggleValue {
+				value = toggleOn
+			} else {
+				value = toggleOff
+			}
+		}
+		rows = append(rows, cursor+label+" "+value)
+	}
+	overBlock := lipgloss.JoinVertical(lipgloss.Left, append([]string{overLabel}, rows...)...)
+
+	return lipgloss.JoinVertical(lipgloss.Left, flowBlock, "", overBlock)
 }

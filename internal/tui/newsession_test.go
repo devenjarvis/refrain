@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 func TestNewSession_OpenSetsActiveAndFocusesTextarea(t *testing.T) {
@@ -60,8 +62,20 @@ func TestNewSession_View_WideTerminal_RendersSidebar(t *testing.T) {
 	if !strings.Contains(view, "main") {
 		t.Error("wide view should contain base branch")
 	}
-	if !strings.Contains(view, "EXAMPLES") {
-		t.Error("wide view (>=110) should contain sidebar with EXAMPLES")
+	if !strings.Contains(view, "OVERRIDES") {
+		t.Error("wide view (>=110) should contain sidebar with OVERRIDES")
+	}
+	if strings.Contains(view, "EXAMPLES") {
+		t.Error("wide view should NOT contain EXAMPLES (replaced by OVERRIDES)")
+	}
+	if !strings.Contains(view, "Plan Model") {
+		t.Error("wide view OVERRIDES block should contain 'Plan Model'")
+	}
+	if !strings.Contains(view, "Agent Model") {
+		t.Error("wide view OVERRIDES block should contain 'Agent Model'")
+	}
+	if !strings.Contains(view, "Bypass Permissions") {
+		t.Error("wide view OVERRIDES block should contain 'Bypass Permissions'")
 	}
 	if !strings.Contains(view, "Plan") || !strings.Contains(view, "Build") ||
 		!strings.Contains(view, "Review") || !strings.Contains(view, "Ship") {
@@ -78,8 +92,34 @@ func TestNewSession_View_NarrowTerminal_OmitsSidebar(t *testing.T) {
 
 	view := m.View()
 
+	if strings.Contains(view, "OVERRIDES") {
+		t.Error("narrow view (<110) should NOT contain OVERRIDES sidebar")
+	}
 	if strings.Contains(view, "EXAMPLES") {
 		t.Error("narrow view (<110) should NOT contain EXAMPLES sidebar")
+	}
+}
+
+func TestNewSession_View_WideTerminal_SeedsOverridesFromDefaults(t *testing.T) {
+	m := newNewSessionModel()
+	m.SetSize(140, 40)
+	m.SetDefaults(config.ResolvedSettings{
+		PlanModel:         "claude-opus-4-8",
+		AgentModel:        "claude-sonnet-4-6",
+		BypassPermissions: true,
+	})
+	m.Open(ViewDashboard)
+
+	view := m.View()
+
+	if !strings.Contains(view, "claude-opus-4-8") {
+		t.Error("view should contain seeded PlanModel value")
+	}
+	if !strings.Contains(view, "claude-sonnet-4-6") {
+		t.Error("view should contain seeded AgentModel value")
+	}
+	if !strings.Contains(view, "[x]") {
+		t.Error("view should show bypass permissions as enabled [x]")
 	}
 }
 
