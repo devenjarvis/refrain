@@ -4843,6 +4843,16 @@ func TestNewApp_InitsFeedbackTriage(t *testing.T) {
 	}
 }
 
+func TestNewApp_PendingOverridesInitialized(t *testing.T) {
+	app := NewApp()
+	if app.pendingOverrides == nil {
+		t.Error("pendingOverrides should be initialized, got nil")
+	}
+	if len(app.pendingOverrides) != 0 {
+		t.Errorf("pendingOverrides should be empty on init, got len=%d", len(app.pendingOverrides))
+	}
+}
+
 // TestReviewPanel_EnterOpensDiffViewer verifies that pressing enter on a task
 // with a non-empty rawDiff transitions to ViewDiff with the review modal preserved.
 func TestReviewPanel_EnterOpensDiffViewer(t *testing.T) {

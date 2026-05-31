@@ -10,12 +10,22 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// sessionOverrides holds per-session model and permission overrides set in the
+// new-session form. Fields are zero/nil when no override was specified — a nil
+// BypassPermissions means "use the resolved default".
+type sessionOverrides struct {
+	PlanModel         string
+	AgentModel        string
+	BypassPermissions *bool
+}
+
 // promptModalSubmitMsg fires when the user accepts the prompt. SkipPlanning
 // is true for the ctrl+enter "do today's flow" path, false for the default
 // enter path that runs through the plan-first drafting/editor flow.
 type promptModalSubmitMsg struct {
 	prompt       string
 	skipPlanning bool
+	overrides    sessionOverrides
 }
 
 // promptModalCancelMsg fires on `esc`.

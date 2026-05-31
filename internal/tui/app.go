@@ -218,6 +218,12 @@ type App struct {
 	closingAgents   map[string]bool
 	closingSessions map[string]bool
 
+	// pendingOverrides stores per-session overrides set in the new-session form
+	// for planning-path sessions. Keyed by session ID; entries are added in
+	// submitPromptModal (planning path only) and deleted in approvePlanAndSpawn,
+	// handlePlanEditorAbandon, and revise/retry cleanup paths.
+	pendingOverrides map[string]sessionOverrides
+
 	// Pipeline mouse click tracking for double-click detection.
 	lastPipelineClick    time.Time
 	lastPipelineClickSec focusSection
@@ -338,9 +344,10 @@ func NewApp() App {
 		validationRuns:  make(map[string]*validationRunState),
 		prCache:         make(map[string]*prCacheEntry),
 		prPollStates:    make(map[string]*prSessionState),
-		closingAgents:   make(map[string]bool),
-		closingSessions: make(map[string]bool),
-		feedbackTriage:  make(map[string]map[string]*feedbackTriageEntry),
+		closingAgents:    make(map[string]bool),
+		closingSessions:  make(map[string]bool),
+		feedbackTriage:   make(map[string]map[string]*feedbackTriageEntry),
+		pendingOverrides: make(map[string]sessionOverrides),
 		newSession:      newNewSessionModel(),
 		prComposeModal:  newPRComposeModal(),
 	}
