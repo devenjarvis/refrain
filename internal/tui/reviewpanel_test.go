@@ -333,8 +333,8 @@ func TestRenderReviewPanel_TwoPaneLayout(t *testing.T) {
 	if !strings.Contains(output, "pass") {
 		t.Error("must contain 'pass' verdict label from card line 2")
 	}
-	if !strings.Contains(output, "create or open PR") {
-		t.Error("footer must still advertise 'create or open PR'")
+	if !strings.Contains(output, "ship") {
+		t.Error("footer must still advertise 'ship' (p ship)")
 	}
 }
 
@@ -552,12 +552,7 @@ func TestRenderReviewPanel_FooterAdvertisesAllActions(t *testing.T) {
 	output := renderReviewPanel(sess, nil, 120, 40, 0, false, nil, time.Now())
 
 	for _, want := range []string{
-		"open PR",
-		"open agent terminal",
-		"mark complete",
-		"open in editor",
-		"defer",
-		"back to focus",
+		"ship", "rework", "approve", "flag", "defer", "editor", "terminal", "expand", "spec", "back",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("footer must advertise %q; got:\n%s", want, output)
@@ -992,11 +987,10 @@ func TestRenderReviewHeader_NoGoalWhenNoPlan(t *testing.T) {
 	}
 }
 
-// TestRenderReviewPanel_HintsIncludeSpecAndEnter verifies that the footer hints
-// include ? (spec) and enter (open task diff), and no longer show "view task diff"
-// or "pgdn/pgup" (the inline diff viewport was removed).
-func TestRenderReviewPanel_HintsIncludeSpecAndEnter(t *testing.T) {
-	sess := agent.NewSessionForTest("sess-hints", "fix-auth")
+// TestRenderReviewPanel_UnifiedFooter verifies the unified single-line footer
+// contains all the expected action keywords and is a single hint line.
+func TestRenderReviewPanel_UnifiedFooter(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-footer-unified", "fix-auth")
 	sess.SetOriginalPrompt("Fix auth")
 	sess.MarkDone()
 
@@ -1005,25 +999,30 @@ func TestRenderReviewPanel_HintsIncludeSpecAndEnter(t *testing.T) {
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
 			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix"}},
-			rawDiff:   "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,3 @@\n package main\n+// marker\n func A() {}\n",
 		}},
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 
+	// Without checks — should not contain "rerun checks".
 	output := renderReviewPanel(sess, entry, 140, 40, 0, false, nil, time.Now())
 	stripped := ansi.Strip(output)
 
-	if !strings.Contains(stripped, "?") {
-		t.Error("footer must include '?' hint for spec overlay")
+	for _, want := range []string{"ship", "rework", "approve", "flag", "defer", "editor", "terminal", "expand", "spec", "back"} {
+		if !strings.Contains(stripped, want) {
+			t.Errorf("unified footer must contain %q; got:\n%s", want, stripped)
+		}
 	}
-	if !strings.Contains(stripped, "enter") {
-		t.Error("footer must include 'enter' hint for opening task diff")
+	// "rerun checks" should only appear when checks are configured (tested below).
+
+	// With checks configured — should contain "rerun checks".
+	cs := &checksTabState{
+		checks:  []config.ValidationCheck{{Name: "Tests", Command: "go test ./..."}},
+		results: []validationCheckResult{{state: checkPassed}},
 	}
-	if strings.Contains(stripped, "pgdn") {
-		t.Error("footer must not include 'pgdn' hint (inline viewport removed)")
-	}
-	if strings.Contains(output, "view task diff") {
-		t.Error("footer must not include 'view task diff' hint (removed in favor of full-screen diff viewer)")
+	outputChecks := renderReviewPanel(sess, entry, 140, 40, 0, false, cs, time.Now())
+	strippedChecks := ansi.Strip(outputChecks)
+	if !strings.Contains(strippedChecks, "rerun checks") {
+		t.Errorf("unified footer must contain 'rerun checks' when checks are configured; got:\n%s", strippedChecks)
 	}
 }
 
@@ -1092,8 +1091,8 @@ func TestRenderReviewPanel_PRDraftInFlight(t *testing.T) {
 	if !strings.Contains(output, "in progress") {
 		t.Error("in-flight state must show disabled p hint")
 	}
-	if strings.Contains(output, "create or open PR") {
-		t.Error("in-flight state must not show normal p hint")
+	if strings.Contains(output, " ship") {
+		t.Error("in-flight state must not show normal p-ship hint")
 	}
 }
 

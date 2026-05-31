@@ -825,6 +825,38 @@ func writePlanForTest(planDir string, sess *agent.Session, content string) error
 	return os.WriteFile(filepath.Join(planDir, "plan.md"), []byte(content), 0o644)
 }
 
+// TestReviewPanel_RKeyRerunsChecksUnconditionally verifies that pressing 'r'
+// triggers a validation rerun from the task-ledger view without requiring any
+// tab switch (there are no tabs anymore).
+func TestReviewPanel_RKeyRerunsChecksUnconditionally(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+
+	app := reviewTestApp()
+	app.resolvedCache["/repo"] = config.ResolvedSettings{
+		ValidationChecks: []config.ValidationCheck{
+			{Name: "Tests", Command: "echo test"},
+		},
+	}
+	app.validationRuns[cacheKey("/repo", sess.ID)] = &validationRunState{
+		runID:   1,
+		checks:  []config.ValidationCheck{{Name: "Tests", Command: "echo test"}},
+		results: []validationCheckResult{{state: checkPassed}},
+	}
+	panel := newReviewPanel(sess, "/repo", 120, 40, app.buildReviewDeps())
+	// No tab switch needed — r triggers unconditionally.
+	priorRunID := app.validationRuns[cacheKey("/repo", sess.ID)].runID
+
+	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if cmd == nil {
+		t.Fatal("r must return a non-nil cmd (panelModel has no active tab — rerun is always triggered)")
+	}
+	if app.validationRuns[cacheKey("/repo", sess.ID)].runID <= priorRunID {
+		t.Errorf("runID should have incremented; got %d, prior %d",
+			app.validationRuns[cacheKey("/repo", sess.ID)].runID, priorRunID)
+	}
+}
+
 // TestReviewPanel_DiffCacheReusesParse verifies that focusedDiffModel returns
 // the same *diffmodel.Model pointer for the same cursor position (cache hit)
 // and a new pointer after moving to a different task (cache miss).

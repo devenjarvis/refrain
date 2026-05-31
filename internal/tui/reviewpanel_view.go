@@ -367,26 +367,34 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	// Action footer.
 	lines = append(lines, "")
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
+	lines = append(lines, reviewFooterHints(prDraftInFlight, checkState != nil))
+
+	return strings.Join(lines, "\n")
+}
+
+// reviewFooterHints returns the unified single-line footer hint string.
+// When checksConfigured is true, a "r rerun checks" hint is appended.
+func reviewFooterHints(prDraftInFlight, checksConfigured bool) string {
 	var pHint string
 	if prDraftInFlight {
 		pHint = StyleSubtle.Render("p — (in progress…)")
 	} else {
-		pHint = StyleActive.Render("p") + StyleSubtle.Render(" — create or open PR")
+		pHint = StyleActive.Render("p") + StyleSubtle.Render(" ship")
 	}
-	hints := "  " +
-		pHint +
-		"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
-		"  " + StyleWarning.Render("b") + StyleSubtle.Render(" — back to build") +
-		"  " + StyleActive.Render("f") + StyleSubtle.Render(" — flag task") +
-		"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
-		"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
-		"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
-		"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
-		"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
-		"  " + StyleSubtle.Render("ESC — back to focus")
-	lines = append(lines, hints)
-
-	return strings.Join(lines, "\n")
+	h := "  " + pHint +
+		"  " + StyleWarning.Render("b") + StyleSubtle.Render(" rework") +
+		"  " + StyleActive.Render("m") + StyleSubtle.Render(" approve") +
+		"  " + StyleActive.Render("f") + StyleSubtle.Render(" flag") +
+		"  " + StyleActive.Render("d") + StyleSubtle.Render(" defer") +
+		"  " + StyleActive.Render("e") + StyleSubtle.Render(" editor") +
+		"  " + StyleActive.Render("t") + StyleSubtle.Render(" terminal") +
+		"  " + StyleActive.Render("enter") + StyleSubtle.Render(" expand") +
+		"  " + StyleActive.Render("?") + StyleSubtle.Render(" spec") +
+		"  " + StyleSubtle.Render("esc back")
+	if checksConfigured {
+		h += "  " + StyleActive.Render("r") + StyleSubtle.Render(" rerun checks")
+	}
+	return h
 }
 
 // reviewListPaneRowAt returns the 0-based task row index at (mouseX, mouseY) within the
@@ -795,23 +803,7 @@ func (m *reviewPanelModel) View() string {
 	}
 
 	// Build footer.
-	var pHint string
-	if prDraftInFlight {
-		pHint = StyleSubtle.Render("p — (in progress…)")
-	} else {
-		pHint = StyleActive.Render("p") + StyleSubtle.Render(" — create or open PR")
-	}
-	hints := "  " +
-		pHint +
-		"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
-		"  " + StyleWarning.Render("b") + StyleSubtle.Render(" — back to build") +
-		"  " + StyleActive.Render("f") + StyleSubtle.Render(" — flag task") +
-		"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
-		"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
-		"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
-		"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
-		"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
-		"  " + StyleSubtle.Render("ESC — back to focus")
+	hints := reviewFooterHints(prDraftInFlight, checkState != nil)
 
 	var lines []string
 	lines = append(lines, headerLines...)

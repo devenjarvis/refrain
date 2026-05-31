@@ -147,7 +147,8 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 				}
 			},
 		)
-	case "c":
+	case "m", "c":
+		// m is the advertised key ("m approve"); c kept for backwards compatibility.
 		sess := m.session
 		sess.SetLifecyclePhase(agent.LifecycleComplete)
 		mgr := m.deps.Manager(m.repoPath)
