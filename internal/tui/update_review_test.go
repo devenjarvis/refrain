@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/devenjarvis/refrain/internal/agent"
 )
 
 func TestRunValidationCheckCmd_PassingCommand(t *testing.T) {
@@ -53,5 +55,28 @@ func TestRunValidationCheckCmd_FailingCommand(t *testing.T) {
 	}
 	if msg.exitCode != 42 {
 		t.Errorf("exitCode = %d, want 42", msg.exitCode)
+	}
+}
+
+// TestBuildReviewReworkPrompt_InstructsTrailer verifies the rework prompt uses
+// Plan-Task trailers and not the legacy [task N] subject prefix.
+func TestBuildReviewReworkPrompt_InstructsTrailer(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 2, Text: "Add widget"}},
+		verdicts: map[int]*taskVerdictRecord{
+			2: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail, Rationale: "missing validation"}},
+		},
+	}
+	prompt := buildReviewReworkPrompt(entry)
+
+	if !strings.Contains(prompt, "Plan-Task: 2") {
+		t.Errorf("rework prompt must instruct Plan-Task: 2 trailer, got: %q", prompt)
+	}
+	if strings.Contains(prompt, "[task 2]") {
+		t.Errorf("rework prompt must NOT contain legacy [task 2] subject prefix, got: %q", prompt)
+	}
+	// The "Other changes" branch must still be explained.
+	if !strings.Contains(prompt, "Other changes") {
+		t.Errorf("rework prompt must still mention 'Other changes', got: %q", prompt)
 	}
 }

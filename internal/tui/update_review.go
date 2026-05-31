@@ -500,7 +500,7 @@ func (a App) handleReviewReworkRequest(req reviewReworkRequestMsg) (tea.Model, t
 // verdicts and user flags in entry. Returns "" when no task qualifies (no flag
 // set and no AI verdict of concerns/fail), so the caller can surface an error.
 //
-// The prompt instructs the agent to use `[task N]` commit prefixes so a
+// The prompt instructs the agent to use Plan-Task: N commit-body trailers so a
 // subsequent review groups round-2 commits under the same task index — this is
 // what keeps the build↔review round-trip coherent.
 func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
@@ -582,10 +582,13 @@ func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 		if r.flagged {
 			b.WriteString("Flagged by you: yes\n")
 		}
+		if r.idx > 0 {
+			fmt.Fprintf(&b, "Commit trailer: Plan-Task: %d\n", r.idx)
+		}
 		b.WriteByte('\n')
 	}
 	b.WriteString("Please address each task above. Re-read `.claude/plan.md` for full context.\n")
-	b.WriteString("When you commit fixes, prefix each commit subject with `[task N]` matching the task numbers above so the next review groups commits correctly. For \"Other changes\", commit without a `[task N]` prefix.\n")
+	b.WriteString("When you commit fixes, write a Conventional-Commits subject and add `Plan-Task: N` as a trailer in the commit body, where N matches the task numbers above; commits for \"Other changes\" omit the trailer entirely.\n")
 	return b.String()
 }
 
