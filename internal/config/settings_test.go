@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/devenjarvis/refrain/internal/config"
@@ -691,5 +692,17 @@ func TestResolve_ValidationChecks_DefaultEmpty(t *testing.T) {
 	r := config.Resolve(nil, nil)
 	if len(r.ValidationChecks) != 0 {
 		t.Errorf("ValidationChecks: got %d entries, want 0", len(r.ValidationChecks))
+	}
+}
+
+func TestKnownModels_Contents(t *testing.T) {
+	if !slices.Contains(config.KnownModels, "claude-opus-4-8") {
+		t.Error("KnownModels does not contain claude-opus-4-8")
+	}
+	if slices.Contains(config.KnownModels, "claude-opus-4-7") {
+		t.Error("KnownModels still contains stale claude-opus-4-7")
+	}
+	if config.KnownModels[0] != "claude-opus-4-8" {
+		t.Errorf("KnownModels[0] = %q, want claude-opus-4-8 (Opus must be first)", config.KnownModels[0])
 	}
 }
