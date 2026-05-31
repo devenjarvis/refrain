@@ -1509,6 +1509,65 @@ func TestRenderReviewPanel_NoDiffTask(t *testing.T) {
 	}
 }
 
+// TestReviewRedesign_LegacyStringsRemoved is a scaffold test that pins the
+// desired end state for the tab-removal refactor. All assertions are expected
+// to FAIL before the refactor lands and PASS once it is complete.
+// Rendering in Diff-tab mode (activeTab=1) ensures the "full diff browser"
+// placeholder fires, making every "must NOT contain" assertion red up front.
+func TestReviewRedesign_LegacyStringsRemoved(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-redesign", "redesign-review")
+	sess.SetOriginalPrompt("Redesign the review panel")
+	sess.MarkDone()
+
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Refactor handler"}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] refactor"}},
+			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
+		}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	// Seed validation runs so the checks strip shows after refactor.
+	app.validationRuns[cacheKey("", sess.ID)] = &validationRunState{
+		runID:   1,
+		checks:  []config.ValidationCheck{{Name: "Tests", Command: "go test ./..."}},
+		results: []validationCheckResult{{state: checkPassed}},
+	}
+	panel := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
+	// Force Diff tab so the "full diff browser coming soon" placeholder fires
+	// before the refactor, making all NOT-contains assertions red.
+	panel.activeTab = reviewTabDiff
+
+	output := panel.View()
+	stripped := ansi.Strip(output)
+
+	// Should NOT contain legacy tab-bar labels after the refactor.
+	if strings.Contains(stripped, "Tasks") {
+		t.Error("panel must NOT contain 'Tasks' as a tab label (tab bar removed)")
+	}
+	if strings.Contains(stripped, "Diff") {
+		t.Error("panel must NOT contain 'Diff' as a tab label (tab bar removed)")
+	}
+	if strings.Contains(stripped, "(full diff browser coming soon)") {
+		t.Error("panel must NOT contain the old Diff-tab placeholder")
+	}
+
+	// Should contain new layout markers after the refactor.
+	if !strings.Contains(stripped, "PLAN TASKS") {
+		t.Error("panel must contain 'PLAN TASKS' header in the task ledger")
+	}
+	if !strings.Contains(stripped, "CHECKS") {
+		t.Error("panel must contain 'CHECKS' as the inline checks strip header")
+	}
+	if !strings.Contains(stripped, "enter expand") {
+		t.Error("footer must contain 'enter expand' hint")
+	}
+}
+
 // capturingReviewer captures the ReviewRequest passed to Review for assertion.
 type capturingReviewer struct {
 	captured agent.ReviewRequest
