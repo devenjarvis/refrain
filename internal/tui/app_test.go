@@ -37,8 +37,8 @@ func (b *blockingDrafter) Revise(_ context.Context, _ agent.ReviseRequest) (stri
 // receives to a channel so tests can assert the model override was threaded
 // through. Draft is a no-op stub; only Revise recording matters here.
 type recordingReviser struct {
-	ch   chan string // receives req.Model
-	plan string     // plan text returned to the caller
+	ch   chan string
+	plan string
 }
 
 func (r *recordingReviser) Draft(_ context.Context, _ agent.DraftRequest) (string, error) {
