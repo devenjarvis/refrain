@@ -7,6 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	xlipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // feedbackNoteModal is a centered textarea overlay for attaching a guidance
@@ -116,9 +118,7 @@ func (m feedbackNoteModal) View() string {
 		"",
 		footer,
 	)
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorPrimary).
+	return theme.BorderModal().
 		Padding(0, 1).
 		Width(w).
 		Render(body)

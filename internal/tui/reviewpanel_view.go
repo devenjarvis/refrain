@@ -13,6 +13,7 @@ import (
 	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/git"
 	"github.com/devenjarvis/refrain/internal/tui/mdrender"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // reviewDetailMaxMeasure is the maximum content column width for the right detail
@@ -28,48 +29,45 @@ func detailContentMeasure(paneWidth, maxMeasure int) (measure, leftPad int) {
 	return mdrender.ContentMeasure(paneWidth, maxMeasure)
 }
 
-// spinnerFrames is the braille spinner sequence used while a verdict is running.
-var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
-
 // reviewSpinnerFrame returns the spinner character for the given render clock.
 // now is the model's tick-refreshed timestamp (§5: no clock read at render
-// time); deriving the frame from it keeps all running rows in sync.
+// time); deriving the frame from it keeps all running rows in sync. The frame
+// set and derivation live in the design-system registry (theme.SpinnerFrame).
 func reviewSpinnerFrame(now time.Time) string {
-	frame := int(now.UnixMilli()/100) % len(spinnerFrames)
-	return spinnerFrames[frame]
+	return theme.SpinnerFrame(now)
 }
 
 // verdictBadge returns the icon, label, and lipgloss style for a task verdict record.
 // rec may be nil (treated as verdictPending). now drives the running-state spinner.
 func verdictBadge(rec *taskVerdictRecord, now time.Time) (icon, label string, style lipgloss.Style) {
 	if rec == nil {
-		return "⋯", "Pending", StyleSubtle
+		return theme.GlyphPending, "Pending", StyleSubtle
 	}
 	// User flag wins over the AI verdict: the human reviewer is explicitly
 	// asking for rework on this task.
 	if rec.userFlagged {
-		return "⚑", "flagged", StyleWarning
+		return theme.GlyphFlagged, "flagged", StyleWarning
 	}
 	switch rec.state {
 	case verdictPending:
-		return "⋯", "Pending", StyleSubtle
+		return theme.GlyphPending, "Pending", StyleSubtle
 	case verdictRunning:
 		return reviewSpinnerFrame(now), "Reviewing…", StyleAccent
 	case verdictDone:
 		switch rec.verdict.Kind {
 		case agent.VerdictPass:
-			return "✓", "pass", StyleSuccess
+			return theme.GlyphSuccess, "pass", StyleSuccess
 		case agent.VerdictConcerns:
-			return "!", "concerns", StyleWarning
+			return theme.GlyphConcerns, "concerns", StyleWarning
 		case agent.VerdictFail:
-			return "✗", "fail", StyleError
+			return theme.GlyphError, "fail", StyleError
 		}
 	case verdictErr:
-		return "✗", "error", StyleError
+		return theme.GlyphError, "error", StyleError
 	case verdictNoDiff:
-		return "⊘", "no diff found", StyleSubtle
+		return theme.GlyphNoDiff, "no diff found", StyleSubtle
 	}
-	return "⋯", "Pending", StyleSubtle
+	return theme.GlyphPending, "Pending", StyleSubtle
 }
 
 // checkBadge returns the icon and lipgloss style for a validation check result.
@@ -78,17 +76,17 @@ func verdictBadge(rec *taskVerdictRecord, now time.Time) (icon, label string, st
 func checkBadge(result validationCheckResult, now time.Time) (icon string, style lipgloss.Style) {
 	switch result.state {
 	case checkPending:
-		return "⋯", StyleSubtle
+		return theme.GlyphPending, StyleSubtle
 	case checkRunning:
 		return reviewSpinnerFrame(now), StyleAccent
 	case checkPassed:
-		return "✓", StyleSuccess
+		return theme.GlyphSuccess, StyleSuccess
 	case checkFailed:
-		return "✗", StyleError
+		return theme.GlyphError, StyleError
 	case checkError:
-		return "✗", StyleError
+		return theme.GlyphError, StyleError
 	}
-	return "⋯", StyleSubtle
+	return theme.GlyphPending, StyleSubtle
 }
 
 // renderChecksTab renders the Checks tab body: a compact check list on top and
@@ -129,7 +127,7 @@ func renderChecksTab(cs *checksTabState, width, height int, now time.Time) []str
 		cursor := " "
 		nameStyle := StyleSubtle
 		if i == cs.cursor {
-			cursor = "›"
+			cursor = theme.GlyphCaret
 			nameStyle = lipgloss.NewStyle()
 		}
 

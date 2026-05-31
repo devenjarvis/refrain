@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/devenjarvis/refrain/internal/git"
 	"github.com/devenjarvis/refrain/internal/github"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // branchPickerItem represents a single entry in the branch picker.
@@ -231,11 +232,9 @@ func (m branchPickerModel) View() string {
 	left := m.renderList(leftWidth)
 	right := m.renderDetails(rightWidth)
 
-	leftStyle := lipgloss.NewStyle().
+	leftStyle := theme.BorderPaneLeft().
 		Width(leftWidth).
-		Height(m.height).
-		Border(lipgloss.NormalBorder(), false, true, false, false).
-		BorderForeground(ColorMuted)
+		Height(m.height)
 
 	rightStyle := lipgloss.NewStyle().
 		Width(rightWidth).

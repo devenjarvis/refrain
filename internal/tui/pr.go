@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/devenjarvis/refrain/internal/github"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // rowStatePhrase returns a human-readable badge for a session's shipping row.
@@ -113,16 +114,16 @@ func checkSymbolFor(checks *github.CheckStatus) string {
 	var style lipgloss.Style
 	switch checks.State {
 	case "success":
-		sym = "\u2713"
+		sym = theme.GlyphSuccess
 		style = StyleSuccess
 	case "failure":
-		sym = "\u2717"
+		sym = theme.GlyphError
 		style = StyleError
 	case "pending":
-		sym = "\u25cb"
+		sym = theme.GlyphIdle
 		style = StyleWarning
 	default:
-		sym = "?"
+		sym = theme.GlyphQuestion
 		style = StyleSubtle
 	}
 	return style.Render(sym)
@@ -152,7 +153,7 @@ func prIndicator(entry *prCacheEntry) string {
 
 	// Stacked: emit base-first chain. entry.stack is ordered immediate-parent
 	// (index 0) to root, so reversing gives root-to-head order.
-	sep := StyleSubtle.Render(" \u2192 ")
+	sep := StyleSubtle.Render(" " + theme.GlyphArrow + " ")
 	var parts []string
 	for i := len(entry.stack) - 1; i >= 0; i-- {
 		base := entry.stack[i]

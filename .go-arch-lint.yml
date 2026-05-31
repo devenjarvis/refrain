@@ -17,6 +17,8 @@ components:
     in: cmd
   tui:
     in: internal/tui
+  tui_theme:
+    in: internal/tui/theme
   tui_diff:
     in: internal/tui/diff
   tui_mdrender:
@@ -85,15 +87,21 @@ deps:
       - hook
       - state
       - vt
+      - tui_theme
       - tui_diff
       - tui_mdrender
       - tui_mdtextarea
+  tui_theme:
+    anyVendorDeps: true
+    mayDependOn: []
   tui_diff:
     mayDependOn:
       - diffmodel
+      - tui_theme
   tui_mdrender:
     anyVendorDeps: true
-    mayDependOn: []
+    mayDependOn:
+      - tui_theme
   tui_mdtestutil:
     anyVendorDeps: true
     mayDependOn: []

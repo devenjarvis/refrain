@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // fieldKind distinguishes toggle fields from text input fields.
@@ -215,8 +216,8 @@ func (f configForm) View() string {
 		return StyleSubtle.Render("No settings available")
 	}
 
-	labelStyle := lipgloss.NewStyle().Width(22).Foreground(ColorText)
-	focusedLabelStyle := StyleActive.Bold(true).Width(22)
+	labelStyle := lipgloss.NewStyle().Width(theme.LabelWidth).Foreground(ColorText)
+	focusedLabelStyle := StyleActive.Bold(true).Width(theme.LabelWidth)
 	toggleOn := StyleSuccess.Render("[x]")
 	toggleOff := StyleSubtle.Render("[ ]")
 

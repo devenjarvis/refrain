@@ -147,7 +147,7 @@ go func() { a.session.merged = client.MergePR(id) == nil }()
 
 **Styles**
 
-- Styles come from **one theme/style registry**. Don't scatter `lipgloss.NewStyle().Foreground(...)` literals at call sites; reference named styles so the palette changes in one place.
+- Styles come from **one theme/style registry**: `internal/tui/theme`. Don't scatter `lipgloss.NewStyle().Foreground(...)` literals, raw hex colors, or glyph runes at call sites; reference the named tokens so the palette changes in one place. The registry is a leaf package (no internal deps) so the `diff` and `mdrender` subpackages consume the same tokens. See [`DESIGN.md`](DESIGN.md) for the token catalog and role guidance.
 - Color/accent semantics (e.g. the `StatusWaiting` accent) are defined once and reused, not re-picked per component.
 
 ---

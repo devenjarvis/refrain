@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/devenjarvis/refrain/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // FileSelectedMsg is emitted when the user selects a file leaf in the tree.
@@ -284,7 +285,7 @@ func (t *Tree) View(width, height int) string {
 var (
 	treeStyleCursor    = lipgloss.NewStyle().Bold(true).Foreground(colSecondary)
 	treeStyleNormal    = lipgloss.NewStyle().Foreground(colMuted)
-	treeStyleFile      = lipgloss.NewStyle().Foreground(lipgloss.Color("#F9FAFB"))
+	treeStyleFile      = lipgloss.NewStyle().Foreground(theme.ColorText)
 	treeStyleFileDim   = lipgloss.NewStyle().Foreground(colMuted)
 	treeStyleAddCount  = lipgloss.NewStyle().Foreground(colAdd)
 	treeStyleDelCount  = lipgloss.NewStyle().Foreground(colDel)
@@ -301,7 +302,7 @@ func depthOf(path string) int {
 }
 
 func (t *Tree) renderNode(n *diffmodel.FileNode, isCursor bool, width int) string {
-	indent := strings.Repeat("  ", depthOf(n.Path))
+	indent := strings.Repeat(" ", theme.IndentTree*depthOf(n.Path))
 	var body string
 	if n.IsLeaf {
 		label := n.Name
@@ -315,14 +316,14 @@ func (t *Tree) renderNode(n *diffmodel.FileNode, isCursor bool, width int) strin
 	} else {
 		var glyph string
 		if t.expanded[n.Path] {
-			glyph = "▾ "
+			glyph = theme.GlyphFolderOpen + " "
 		} else {
-			glyph = "▸ "
+			glyph = theme.GlyphFolderClosed + " "
 		}
 		body = indent + treeStyleFolderTag.Render(glyph) + n.Name
 	}
 	if isCursor {
-		body = treeStyleCursor.Render("▍ ") + body
+		body = treeStyleCursor.Render(theme.GlyphCursor+" ") + body
 	} else {
 		body = treeStyleNormal.Render("  ") + body
 	}

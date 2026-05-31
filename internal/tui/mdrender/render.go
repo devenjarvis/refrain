@@ -29,6 +29,8 @@ import (
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // LineKind labels what role a source line plays in the markdown stream.
@@ -138,7 +140,7 @@ func (r *Renderer) StyleName() string { return r.styleName }
 func (r *Renderer) HeadingUnderline(level, headingWidth, maxWidth int) string {
 	if level == 1 {
 		color := styleH1.GetForeground()
-		return lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("━", maxWidth))
+		return lipgloss.NewStyle().Foreground(color).Render(strings.Repeat(theme.GlyphRuleHeavy, maxWidth))
 	}
 	// H2: thin rule no wider than the heading text.
 	w := headingWidth
@@ -148,7 +150,7 @@ func (r *Renderer) HeadingUnderline(level, headingWidth, maxWidth int) string {
 	if w < 1 {
 		w = 1
 	}
-	return lipgloss.NewStyle().Foreground(colMuted).Render(strings.Repeat("─", w))
+	return lipgloss.NewStyle().Foreground(colMuted).Render(strings.Repeat(theme.GlyphRuleThin, w))
 }
 
 // RenderLines is the full-buffer pass: parse, wrap, style, and return the
@@ -187,7 +189,7 @@ func (r *Renderer) RenderLines(plan string, width int) []string {
 			wrapWidth = width - 2
 		}
 		segments := wrapPlain(line, wrapWidth)
-		fenceBar := styleFenceBar.Render("│") + " "
+		fenceBar := styleFenceBar.Render(theme.GlyphFenceBar) + " "
 		if len(segments) == 0 {
 			styled := r.styleSegmentWithFence("", ctx, false, 0, wrapWidth)
 			if isFenceContent {
@@ -347,14 +349,14 @@ func (r *Renderer) styleSegmentWithFence(
 		if w < 1 {
 			w = ansi.StringWidth(segment)
 		}
-		return styleHR.Render(strings.Repeat("─", w))
+		return styleHR.Render(strings.Repeat(theme.GlyphRuleThin, w))
 	case LineBlockquote:
 		depth := parent.BlockquoteDepth
 		if depth < 1 {
 			depth = 1
 		}
 		barStyle := lipgloss.NewStyle().Foreground(colQuote)
-		bar := barStyle.Render(strings.Repeat("│", depth)) + " "
+		bar := barStyle.Render(strings.Repeat(theme.GlyphFenceBar, depth)) + " "
 		if isContinuation {
 			// Align continuation text under the body column.
 			indent := strings.Repeat(" ", depth+1)
@@ -606,35 +608,31 @@ func splitLines(s string) []string {
 
 // ── styles ───────────────────────────────────────────────────────────────────
 
+// Markdown colors come from the design-system registry (internal/tui/theme).
+// Heading levels map through theme.MarkdownHeadingColor; the remaining roles
+// reuse shared tokens (collapsing what were byte-identical duplicates).
 var (
-	colHeading1 = lipgloss.Color("#7C3AED") // primary purple — matches ColorPrimary
-	colHeading2 = lipgloss.Color("#06B6D4") // cyan — matches ColorSecondary
-	colHeading3 = lipgloss.Color("#10B981") // green — matches ColorSuccess
-	colHeading4 = lipgloss.Color("#F59E0B") // amber — matches ColorWarning
-	colHeading5 = lipgloss.Color("#A78BFA") // light purple
-	colHeading6 = lipgloss.Color("#9CA3AF") // light gray
+	colMuted        = theme.ColorMuted
+	colCodeFG       = theme.ColorCodeFg
+	colCodeBg       = theme.ColorCodeBg
+	colLink         = theme.ColorSecondary
+	colQuote        = theme.ColorMutedLight
+	colHR           = theme.ColorHairline
+	colBullet       = theme.ColorPrimaryLight
+	colListNum      = theme.ColorPrimaryLight
+	colCheckboxDone = theme.ColorSuccess
+	colParagraph    = theme.ColorTextProse
 
-	colMuted        = lipgloss.Color("#6B7280")
-	colCodeFG       = lipgloss.Color("#FBBF24") // amber for inline code
-	colCodeBg       = lipgloss.Color("#1A1D23") // subtle dark background for code blocks
-	colLink         = lipgloss.Color("#06B6D4")
-	colQuote        = lipgloss.Color("#9CA3AF")
-	colHR           = lipgloss.Color("#374151")
-	colBullet       = lipgloss.Color("#A78BFA")
-	colListNum      = lipgloss.Color("#A78BFA")
-	colCheckboxDone = lipgloss.Color("#10B981") // success green
-	colParagraph    = lipgloss.Color("#D1D5DB") // softer white for prose
-
-	styleH1 = lipgloss.NewStyle().Foreground(colHeading1).Bold(true)
-	styleH2 = lipgloss.NewStyle().Foreground(colHeading2).Bold(true)
-	styleH3 = lipgloss.NewStyle().Foreground(colHeading3).Bold(true)
-	styleH4 = lipgloss.NewStyle().Foreground(colHeading4).Bold(true)
-	styleH5 = lipgloss.NewStyle().Foreground(colHeading5).Bold(true)
-	styleH6 = lipgloss.NewStyle().Foreground(colHeading6).Bold(true)
+	styleH1 = lipgloss.NewStyle().Foreground(theme.MarkdownHeadingColor(1)).Bold(true)
+	styleH2 = lipgloss.NewStyle().Foreground(theme.MarkdownHeadingColor(2)).Bold(true)
+	styleH3 = lipgloss.NewStyle().Foreground(theme.MarkdownHeadingColor(3)).Bold(true)
+	styleH4 = lipgloss.NewStyle().Foreground(theme.MarkdownHeadingColor(4)).Bold(true)
+	styleH5 = lipgloss.NewStyle().Foreground(theme.MarkdownHeadingColor(5)).Bold(true)
+	styleH6 = lipgloss.NewStyle().Foreground(theme.MarkdownHeadingColor(6)).Bold(true)
 
 	styleBold       = lipgloss.NewStyle().Bold(true)
 	styleItalic     = lipgloss.NewStyle().Italic(true)
-	styleInlineCode = lipgloss.NewStyle().Foreground(colCodeFG).Background(lipgloss.AdaptiveColor{Dark: "#2D2D2D", Light: "#E8E8E8"})
+	styleInlineCode = lipgloss.NewStyle().Foreground(colCodeFG).Background(theme.ColorInlineCodeBg)
 	styleLink       = lipgloss.NewStyle().Foreground(colLink).Underline(true)
 	styleHR         = lipgloss.NewStyle().Foreground(colHR)
 	styleBullet     = lipgloss.NewStyle().Foreground(colBullet).Bold(true)
@@ -725,12 +723,12 @@ func styleListSegment(segment string, ctx LineCtx, isContinuation bool) string {
 		if ctx.CheckboxChecked {
 			for _, pfx := range []string{"[x] ", "[X] "} {
 				if strings.HasPrefix(body, pfx) {
-					glyph := lipgloss.NewStyle().Foreground(colCheckboxDone).Render("✓")
+					glyph := lipgloss.NewStyle().Foreground(colCheckboxDone).Render(theme.GlyphCheckboxDone)
 					return prefix + glyph + " " + styleInline(body[4:])
 				}
 			}
 		} else if strings.HasPrefix(body, "[ ] ") {
-			glyph := lipgloss.NewStyle().Foreground(colMuted).Render("☐")
+			glyph := lipgloss.NewStyle().Foreground(colMuted).Render(theme.GlyphCheckboxTodo)
 			return prefix + glyph + " " + styleInline(body[4:])
 		}
 	}
