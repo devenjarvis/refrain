@@ -103,8 +103,8 @@ type newSessionModel struct {
 
 	// Override form state. overrideFocus == -1 means the textarea has focus;
 	// >= 0 means that index of overrideFields has focus.
-	overrideFields  []overrideField
-	overrideFocus   int // -1 = textarea focused
+	overrideFields   []overrideField
+	overrideFocus    int // -1 = textarea focused
 	overrideDefaults sessionOverrides
 }
 
