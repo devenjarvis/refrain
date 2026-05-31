@@ -541,14 +541,14 @@ func TestResolve_Models_Defaults(t *testing.T) {
 func TestResolve_Models_GlobalOverride(t *testing.T) {
 	g := &config.GlobalSettings{
 		PlanModel:  strPtr("claude-haiku-4-5"),
-		AgentModel: strPtr("claude-opus-4-7"),
+		AgentModel: strPtr("claude-opus-4-8"),
 	}
 	r := config.Resolve(g, nil)
 	if r.PlanModel != "claude-haiku-4-5" {
 		t.Errorf("PlanModel = %q, want claude-haiku-4-5", r.PlanModel)
 	}
-	if r.AgentModel != "claude-opus-4-7" {
-		t.Errorf("AgentModel = %q, want claude-opus-4-7", r.AgentModel)
+	if r.AgentModel != "claude-opus-4-8" {
+		t.Errorf("AgentModel = %q, want claude-opus-4-8", r.AgentModel)
 	}
 }
 

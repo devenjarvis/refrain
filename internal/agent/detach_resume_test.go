@@ -374,13 +374,13 @@ func TestBuildResumeArgs(t *testing.T) {
 		},
 		{
 			name:     "agent model prepended for claude",
-			cfg:      Config{AgentModel: "claude-opus-4-7", BypassPermissions: true, Task: "do stuff"},
+			cfg:      Config{AgentModel: "claude-opus-4-8", BypassPermissions: true, Task: "do stuff"},
 			sessID:   "uuid-123",
-			wantArgs: []string{"--model", "claude-opus-4-7", "--dangerously-skip-permissions", "--resume", "uuid-123", "do stuff"},
+			wantArgs: []string{"--model", "claude-opus-4-8", "--dangerously-skip-permissions", "--resume", "uuid-123", "do stuff"},
 		},
 		{
 			name:     "agent model ignored for non-claude program",
-			cfg:      Config{AgentProgram: "bash", AgentModel: "claude-opus-4-7", BypassPermissions: true},
+			cfg:      Config{AgentProgram: "bash", AgentModel: "claude-opus-4-8", BypassPermissions: true},
 			sessID:   "uuid-456",
 			wantArgs: []string{"--dangerously-skip-permissions", "--resume", "uuid-456"},
 		},
