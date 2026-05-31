@@ -9,6 +9,31 @@ import (
 	"github.com/devenjarvis/refrain/internal/config"
 )
 
+// applyOverrideString returns override when non-empty, otherwise fallback.
+func applyOverrideString(override, fallback string) string {
+	if override != "" {
+		return override
+	}
+	return fallback
+}
+
+// applyOverrideBool returns *override when non-nil, otherwise fallback.
+func applyOverrideBool(override *bool, fallback bool) bool {
+	if override != nil {
+		return *override
+	}
+	return fallback
+}
+
+// planModelOpts returns a DraftOption slice containing WithPlanModel when the
+// override is non-empty, or nil when no override was set.
+func planModelOpts(over sessionOverrides) []agent.DraftOption {
+	if over.PlanModel != "" {
+		return []agent.DraftOption{agent.WithPlanModel(over.PlanModel)}
+	}
+	return nil
+}
+
 func (a App) handlePlannerQuestion(msg plannerQuestionMsg) (tea.Model, tea.Cmd) {
 	// If the plan editor isn't open for this session, auto-open it — but
 	// only when the editor panel is not already visible. If session A's
@@ -123,6 +148,7 @@ func (a App) handlePlanEditorAbandon(msg planEditorAbandonMsg) (tea.Model, tea.C
 	if repoPath == "" {
 		repoPath = a.repoPathForSession(msg.sessionID)
 	}
+	delete(a.pendingOverrides, msg.sessionID)
 	mgr := a.managers[repoPath]
 	a.closeModal()
 	if mgr == nil {
@@ -162,7 +188,7 @@ func (a App) handlePlanEditorRevise(msg planEditorReviseMsg) (tea.Model, tea.Cmd
 		}
 		return a, nil
 	}
-	if err := mgr.RevisePlan(msg.sessionID, msg.critique); err != nil {
+	if err := mgr.RevisePlan(msg.sessionID, msg.critique, planModelOpts(a.pendingOverrides[msg.sessionID])...); err != nil {
 		if a.modals.PlanEditor() != nil {
 			a.modals.PlanEditor().SetError("revise: " + err.Error())
 		}
@@ -207,7 +233,7 @@ func (a App) handlePlanEditorRetry(msg planEditorRetryMsg) (tea.Model, tea.Cmd) 
 		return a, nil
 	}
 	prompt := sess.OriginalPrompt()
-	if err := mgr.StartDraft(msg.sessionID, prompt); err != nil {
+	if err := mgr.StartDraft(msg.sessionID, prompt, planModelOpts(a.pendingOverrides[msg.sessionID])...); err != nil {
 		if a.modals.PlanEditor() != nil {
 			a.modals.PlanEditor().SetError("retry draft: " + err.Error())
 		}
@@ -250,21 +276,6 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// resolveOverride returns override when non-empty, otherwise fallback.
-	resolveOverride := func(override, fallback string) string {
-		if override != "" {
-			return override
-		}
-		return fallback
-	}
-	// resolveBoolOverride returns *override when non-nil, otherwise fallback.
-	resolveBoolOverride := func(override *bool, fallback bool) bool {
-		if override != nil {
-			return *override
-		}
-		return fallback
-	}
-
 	if msg.skipPlanning {
 		// Skip path: identical to today's `n` flow — create the session and
 		// spawn the real agent immediately with the user's prompt as the
@@ -274,9 +285,9 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		cfg := agent.Config{
 			Rows:              fixedH,
 			Cols:              fixedW,
-			BypassPermissions: resolveBoolOverride(msg.overrides.BypassPermissions, resolved.BypassPermissions),
+			BypassPermissions: applyOverrideBool(msg.overrides.BypassPermissions, resolved.BypassPermissions),
 			AgentProgram:      resolved.AgentProgram,
-			AgentModel:        resolveOverride(msg.overrides.AgentModel, resolved.AgentModel),
+			AgentModel:        applyOverrideString(msg.overrides.AgentModel, resolved.AgentModel),
 			BuildSystemPrompt: resolved.BuildSystemPrompt,
 			Task:              prompt,
 		}
@@ -297,9 +308,9 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	cfg := agent.Config{
 		Rows:              fixedH,
 		Cols:              fixedW,
-		BypassPermissions: resolveBoolOverride(msg.overrides.BypassPermissions, resolved.BypassPermissions),
+		BypassPermissions: applyOverrideBool(msg.overrides.BypassPermissions, resolved.BypassPermissions),
 		AgentProgram:      resolved.AgentProgram,
-		AgentModel:        resolveOverride(msg.overrides.AgentModel, resolved.AgentModel),
+		AgentModel:        applyOverrideString(msg.overrides.AgentModel, resolved.AgentModel),
 	}
 	sess, err := mgr.CreateSessionForPlanning(cfg)
 	if err != nil {
@@ -307,11 +318,7 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	sess.SetOriginalPrompt(prompt)
-	var draftOpts []agent.DraftOption
-	if msg.overrides.PlanModel != "" {
-		draftOpts = append(draftOpts, agent.WithPlanModel(msg.overrides.PlanModel))
-	}
-	if err := mgr.StartDraft(sess.ID, prompt, draftOpts...); err != nil {
+	if err := mgr.StartDraft(sess.ID, prompt, planModelOpts(msg.overrides)...); err != nil {
 		a.setError("start draft: " + err.Error())
 		// No fallback to openPlanEditor on error — the session stays on the
 		// dashboard in the planning card; the user can press enter to open the
@@ -404,12 +411,16 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 		return a, nil
 	}
 
+	// Apply any per-session overrides stored at submit time.
+	over := a.pendingOverrides[sess.ID]
+	delete(a.pendingOverrides, sess.ID)
+
 	cfg := agent.Config{
 		Rows:              fixedH,
 		Cols:              fixedW,
-		BypassPermissions: resolved.BypassPermissions,
+		BypassPermissions: applyOverrideBool(over.BypassPermissions, resolved.BypassPermissions),
 		AgentProgram:      resolved.AgentProgram,
-		AgentModel:        resolved.AgentModel,
+		AgentModel:        applyOverrideString(over.AgentModel, resolved.AgentModel),
 		BuildSystemPrompt: resolved.BuildSystemPrompt,
 		Task:              prompt,
 	}

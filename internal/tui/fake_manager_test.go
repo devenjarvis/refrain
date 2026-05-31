@@ -32,9 +32,7 @@ type fakeManager struct {
 	// Recorded configs for assertion in override tests.
 	lastCreateSessionCfg            agent.Config
 	lastCreateSessionForPlanningCfg agent.Config
-	// startDraftModel records the model extracted from the most recent
-	// StartDraft opts, "" when no WithPlanModel was passed.
-	startDraftModel string
+	lastAddAgentCfg                 agent.Config
 	// nextPlanningSession, when non-nil, is returned by CreateSessionForPlanning.
 	nextPlanningSession *agent.Session
 }
@@ -144,7 +142,13 @@ func (f *fakeManager) CreateSessionForPlanning(cfg agent.Config) (*agent.Session
 	return agent.NewSessionForTest("fake-plan-sess", "fake-branch"), nil
 }
 
-func (f *fakeManager) AddAgent(_ string, _ agent.Config) (*agent.Agent, error) {
+func (f *fakeManager) AddAgent(_ string, cfg agent.Config) (*agent.Agent, error) {
+	f.lastAddAgentCfg = cfg
+	// Return a minimal agent so approvePlanAndSpawn doesn't nil-deref on ag.ID.
+	if len(f.sessions) > 0 {
+		ag := f.sessions[0].AddTestAgent("fake-ag", false, agent.StatusIdle)
+		return ag, nil
+	}
 	return nil, nil
 }
 

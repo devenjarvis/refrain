@@ -4949,6 +4949,85 @@ func TestSubmitPromptModal_PlanningPath_StoresPendingOverrides(t *testing.T) {
 	}
 }
 
+func TestApprovePlanAndSpawn_AppliesAgentModelOverride(t *testing.T) {
+	const dir = "/fake/repo"
+	sess := agent.NewSessionForTest("sess-id", "branch")
+	mgr := newFakeManager(dir, sess)
+	resolved := config.ResolvedSettings{AgentModel: "claude-sonnet-4-6"}
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	app.pendingOverrides[sess.ID] = sessionOverrides{AgentModel: "claude-opus-4-8"}
+
+	_, cmd := app.Update(planEditorApproveMsg{sessionID: sess.ID, repoPath: dir})
+	if cmd != nil {
+		cmd() // executes mgr.AddAgent, recording the cfg
+	}
+
+	if got := mgr.lastAddAgentCfg.AgentModel; got != "claude-opus-4-8" {
+		t.Errorf("AddAgent cfg.AgentModel = %q, want \"claude-opus-4-8\"", got)
+	}
+	if _, stillPresent := app.pendingOverrides[sess.ID]; stillPresent {
+		t.Error("pendingOverrides entry should be deleted after approvePlanAndSpawn")
+	}
+}
+
+func TestApprovePlanAndSpawn_NoOverride_UsesResolvedDefault(t *testing.T) {
+	const dir = "/fake/repo"
+	sess := agent.NewSessionForTest("sess-id", "branch")
+	mgr := newFakeManager(dir, sess)
+	resolved := config.ResolvedSettings{AgentModel: "claude-sonnet-4-6"}
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	// No pendingOverrides entry for sess.ID.
+
+	_, cmd := app.Update(planEditorApproveMsg{sessionID: sess.ID, repoPath: dir})
+	if cmd != nil {
+		cmd()
+	}
+
+	if got := mgr.lastAddAgentCfg.AgentModel; got != "claude-sonnet-4-6" {
+		t.Errorf("AddAgent cfg.AgentModel = %q, want \"claude-sonnet-4-6\" (resolved)", got)
+	}
+}
+
+func TestHandlePlanEditorAbandon_ClearsPendingOverrides(t *testing.T) {
+	const dir = "/fake/repo"
+	mgr := newFakeManager(dir)
+	app := NewApp()
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.pendingOverrides["sess-id"] = sessionOverrides{PlanModel: "claude-opus-4-8"}
+
+	model, cmd := app.Update(planEditorAbandonMsg{sessionID: "sess-id", repoPath: dir})
+	if cmd != nil {
+		cmd()
+	}
+	var appAfter App
+	switch v := model.(type) {
+	case App:
+		appAfter = v
+	case *App:
+		appAfter = *v
+	default:
+		t.Fatalf("unexpected type %T", model)
+	}
+	if _, present := appAfter.pendingOverrides["sess-id"]; present {
+		t.Error("pendingOverrides entry should be deleted on abandon")
+	}
+}
+
 func TestNewApp_PendingOverridesInitialized(t *testing.T) {
 	app := NewApp()
 	if app.pendingOverrides == nil {
