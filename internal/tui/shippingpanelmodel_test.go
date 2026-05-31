@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/github"
 )
@@ -529,4 +531,51 @@ func TestShippingPanel_FeedbackKey_EmitsRepoPath(t *testing.T) {
 	if msg.repoPath != "/repoB" {
 		t.Errorf("repoPath = %q, want /repoB (pinned)", msg.repoPath)
 	}
+}
+
+// TestShippingPanel_View_FooterOnLastRow verifies that renderShippingPanel always
+// returns exactly height rows with the ESC hint on the last row.
+func TestShippingPanel_View_FooterOnLastRow(t *testing.T) {
+	const w, h = 120, 40
+	assertFooter := func(t *testing.T, view string) {
+		t.Helper()
+		n := strings.Count(view, "\n") + 1
+		if n != h {
+			t.Errorf("View() returned %d lines, want %d", n, h)
+		}
+		lines := strings.Split(view, "\n")
+		last := ansi.Strip(lines[len(lines)-1])
+		if !strings.Contains(last, "ESC") {
+			t.Errorf("last line %q does not contain 'ESC' hint", last)
+		}
+	}
+
+	t.Run("loading state (entry nil)", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s1", "ship")
+		deps, _ := newTestShippingDeps()
+		// state.pr is nil → PRCache returns nil → loading path
+		panel := newShippingPanel(sess, "", w, h, deps)
+		assertFooter(t, panel.View())
+	})
+
+	t.Run("populated entry no feedback", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s2", "ship")
+		deps, state := newTestShippingDeps()
+		state.pr = &prCacheEntry{pr: &github.PRState{Number: 42, Title: "fix bug"}}
+		panel := newShippingPanel(sess, "", w, h, deps)
+		assertFooter(t, panel.View())
+	})
+
+	t.Run("populated entry with feedback", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s3", "ship")
+		deps, state := newTestShippingDeps()
+		state.pr = &prCacheEntry{
+			pr: &github.PRState{Number: 43, Title: "feat"},
+			threads: []github.ReviewThread{
+				{Reviewer: "alice", State: "CHANGES_REQUESTED", Body: "please fix this thing"},
+			},
+		}
+		panel := newShippingPanel(sess, "", w, h, deps)
+		assertFooter(t, panel.View())
+	})
 }

@@ -194,8 +194,8 @@ func TestNewSession_CtrlJInsertsNewline(t *testing.T) {
 
 func TestNewSession_View_FillsTerminalHeight(t *testing.T) {
 	cases := []struct {
-		name   string
-		w, h   int
+		name string
+		w, h int
 	}{
 		{"wide tall", 120, 40},
 		{"narrow shorter", 90, 24},

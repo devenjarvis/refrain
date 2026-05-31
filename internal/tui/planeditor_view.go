@@ -174,7 +174,7 @@ func (m planEditorModel) View() string {
 		if len(previewLines) > previewH {
 			previewLines = previewLines[:previewH]
 		}
-		body = strings.Join(previewLines, "\n") + "\n\n" + StyleActive.Render("revise:")+" "+m.reviseInput.View()
+		body = strings.Join(previewLines, "\n") + "\n\n" + StyleActive.Render("revise:") + " " + m.reviseInput.View()
 	case planEditorModeQuestion:
 		body = m.renderQuestionBody()
 	default:
