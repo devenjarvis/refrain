@@ -82,6 +82,7 @@ deps:
       - editor
       - git
       - github
+      - hook
       - state
       - vt
       - tui_diff
