@@ -4137,7 +4137,7 @@ func TestNewSessionFlow_SubmitReturnsToDashboard(t *testing.T) {
 	app.newSession.returnTo = ViewDashboard
 
 	// Planning path (skipPlanning=false) should return to dashboard.
-	model, _ := app.Update(promptModalSubmitMsg{prompt: "add dark mode", skipPlanning: false})
+	model, _ := app.Update(promptModalSubmitMsg{prompt: "add dark mode", skipPlanning: false, overrides: sessionOverrides{}})
 	if p, ok := model.(*App); ok {
 		app = *p
 	} else {
@@ -4245,7 +4245,7 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 	}
 	app.resolvedCache[dir] = resolved
 
-	model, _ := app.Update(promptModalSubmitMsg{prompt: "write the feature", skipPlanning: false})
+	model, _ := app.Update(promptModalSubmitMsg{prompt: "write the feature", skipPlanning: false, overrides: sessionOverrides{}})
 	if p, ok := model.(*App); ok {
 		app = *p
 	} else {
@@ -4490,7 +4490,7 @@ func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 	sessionsBefore1 := len(mgr1.ListSessions())
 	sessionsBefore2 := len(mgr2.ListSessions())
 
-	model, _ = app.Update(promptModalSubmitMsg{prompt: "test", skipPlanning: false})
+	model, _ = app.Update(promptModalSubmitMsg{prompt: "test", skipPlanning: false, overrides: sessionOverrides{}})
 	// submitPromptModal is on *App so the returned tea.Model is *App, not App.
 	if p, ok := model.(*App); ok {
 		app = *p
