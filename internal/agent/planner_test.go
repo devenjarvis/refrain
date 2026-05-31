@@ -474,12 +474,12 @@ func TestDefaultPlanDrafter_EmptyModelFallsBackToDefault(t *testing.T) {
 }
 
 func TestDefaultPlanDrafter_NonEmptyModelPreserved(t *testing.T) {
-	d, ok := DefaultPlanDrafter("claude-opus-4-7").(*defaultPlanDrafter)
+	d, ok := DefaultPlanDrafter("claude-opus-4-8").(*defaultPlanDrafter)
 	if !ok {
-		t.Fatalf("DefaultPlanDrafter(\"claude-opus-4-7\") not *defaultPlanDrafter")
+		t.Fatalf("DefaultPlanDrafter(\"claude-opus-4-8\") not *defaultPlanDrafter")
 	}
-	if d.Model() != "claude-opus-4-7" {
-		t.Errorf("Model() = %q, want claude-opus-4-7", d.Model())
+	if d.Model() != "claude-opus-4-8" {
+		t.Errorf("Model() = %q, want claude-opus-4-8", d.Model())
 	}
 }
 

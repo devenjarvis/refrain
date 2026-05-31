@@ -94,7 +94,7 @@ NEVER squash commits, NEVER amend a previous commit to add new task work, and NE
 // dropdowns for fields that pass `--model` to a real subprocess (e.g. the
 // plan drafter). The first entry is the form's default selection.
 var KnownModels = []string{
-	"claude-opus-4-7",
+	"claude-opus-4-8",
 	"claude-sonnet-4-6",
 	"claude-haiku-4-5-20251001",
 }

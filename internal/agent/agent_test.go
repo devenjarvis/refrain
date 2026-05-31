@@ -543,8 +543,8 @@ func TestBuildSpawnArgs_AgentModel(t *testing.T) {
 	}{
 		{
 			name:     "model prepended for default claude program",
-			cfg:      Config{AgentModel: "claude-opus-4-7", BypassPermissions: true, Task: "do stuff"},
-			wantArgs: []string{"--model", "claude-opus-4-7", "--dangerously-skip-permissions", "do stuff"},
+			cfg:      Config{AgentModel: "claude-opus-4-8", BypassPermissions: true, Task: "do stuff"},
+			wantArgs: []string{"--model", "claude-opus-4-8", "--dangerously-skip-permissions", "do stuff"},
 		},
 		{
 			name:     "empty model no flag",
@@ -553,7 +553,7 @@ func TestBuildSpawnArgs_AgentModel(t *testing.T) {
 		},
 		{
 			name:     "model ignored for non-claude program",
-			cfg:      Config{AgentProgram: "bash", AgentModel: "claude-opus-4-7", Task: "hi"},
+			cfg:      Config{AgentProgram: "bash", AgentModel: "claude-opus-4-8", Task: "hi"},
 			wantArgs: []string{"hi"},
 		},
 		{
@@ -618,12 +618,12 @@ func TestBuildSpawnArgs_BuildSystemPrompt(t *testing.T) {
 		{
 			name: "model and prompt both prepend, model first",
 			cfg: Config{
-				AgentModel:        "claude-opus-4-7",
+				AgentModel:        "claude-opus-4-8",
 				BuildSystemPrompt: "p",
 				Task:              "t",
 			},
 			wantArgs: []string{
-				"--model", "claude-opus-4-7",
+				"--model", "claude-opus-4-8",
 				"--append-system-prompt", "p",
 				"t",
 			},
@@ -678,11 +678,11 @@ func TestBuildResumeArgs_BuildSystemPrompt(t *testing.T) {
 		{
 			name: "model and prompt both prepend on resume, model first",
 			cfg: Config{
-				AgentModel:        "claude-opus-4-7",
+				AgentModel:        "claude-opus-4-8",
 				BuildSystemPrompt: "p",
 			},
 			sid:      "sid",
-			wantArgs: []string{"--model", "claude-opus-4-7", "--append-system-prompt", "p", "--resume", "sid"},
+			wantArgs: []string{"--model", "claude-opus-4-8", "--append-system-prompt", "p", "--resume", "sid"},
 		},
 	}
 	for _, tt := range tests {
