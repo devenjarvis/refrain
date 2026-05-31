@@ -400,6 +400,71 @@ func TestNewSession_EnterOnSelectField_CyclesSelection(t *testing.T) {
 	}
 }
 
+func TestNewSession_SubmitCarriesOverrides_PlanModel(t *testing.T) {
+	m := newNewSessionModel()
+	m.SetSize(140, 40)
+	m.SetDefaults(config.ResolvedSettings{
+		PlanModel:  config.KnownModels[0],
+		AgentModel: config.KnownAgentModels[0],
+	})
+	m.Open(ViewDashboard)
+	m.textarea.SetValue("my goal")
+
+	// Tab to Plan Model, cycle right to select a different value.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight, Text: "right"})
+	wantPlan := config.KnownModels[1]
+
+	// Tab back to textarea and submit.
+	for m.overrideFocus != -1 {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	}
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	_ = m
+	if cmd == nil {
+		t.Fatal("expected cmd on enter")
+	}
+	got, ok := cmd().(promptModalSubmitMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want promptModalSubmitMsg", cmd())
+	}
+	if got.overrides.PlanModel != wantPlan {
+		t.Errorf("overrides.PlanModel = %q, want %q", got.overrides.PlanModel, wantPlan)
+	}
+}
+
+func TestNewSession_SubmitCarriesOverrides_DefaultsTreatedAsNoOverride(t *testing.T) {
+	m := newNewSessionModel()
+	m.SetSize(140, 40)
+	// Defaults match the first option in each list (no change).
+	m.SetDefaults(config.ResolvedSettings{
+		PlanModel:  config.KnownModels[0],
+		AgentModel: config.KnownAgentModels[0],
+	})
+	m.Open(ViewDashboard)
+	m.textarea.SetValue("my goal")
+
+	// Submit without changing anything.
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	_ = m
+	if cmd == nil {
+		t.Fatal("expected cmd on enter")
+	}
+	got, ok := cmd().(promptModalSubmitMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want promptModalSubmitMsg", cmd())
+	}
+	if got.overrides.PlanModel != "" {
+		t.Errorf("overrides.PlanModel = %q, want \"\" (no override when equal to default)", got.overrides.PlanModel)
+	}
+	if got.overrides.AgentModel != "" {
+		t.Errorf("overrides.AgentModel = %q, want \"\" (no override when equal to default)", got.overrides.AgentModel)
+	}
+	if got.overrides.BypassPermissions != nil {
+		t.Errorf("overrides.BypassPermissions = %v, want nil (no override when equal to default)", got.overrides.BypassPermissions)
+	}
+}
+
 func TestNewSession_EscCancelsFromOverrideField(t *testing.T) {
 	m := openModelWithDefaults()
 	// Move focus to override.

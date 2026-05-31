@@ -188,6 +188,46 @@ func (m *newSessionModel) Close() {
 	m.textarea.Blur()
 }
 
+// buildSubmitOverrides computes the sessionOverrides to attach to the submit
+// message. A field value equal to its resolved default is treated as "not
+// overridden" (empty string / nil pointer) so submitPromptModal can fall back
+// to the resolved value cleanly.
+func (m *newSessionModel) buildSubmitOverrides() sessionOverrides {
+	var over sessionOverrides
+	for _, f := range m.overrideFields {
+		switch f.label {
+		case "Plan Model":
+			val := ""
+			if len(f.options) > 0 {
+				val = f.options[f.selected]
+			}
+			def := m.overrideDefaults.PlanModel
+			if val != def {
+				over.PlanModel = val
+			}
+		case "Agent Model":
+			val := ""
+			if len(f.options) > 0 {
+				val = f.options[f.selected]
+			}
+			def := m.overrideDefaults.AgentModel
+			if val != def {
+				over.AgentModel = val
+			}
+		case "Bypass Permissions":
+			defVal := false
+			if m.overrideDefaults.BypassPermissions != nil {
+				defVal = *m.overrideDefaults.BypassPermissions
+			}
+			if f.toggleValue != defVal {
+				v := f.toggleValue
+				over.BypassPermissions = &v
+			}
+		}
+	}
+	return over
+}
+
 // Update routes a tea.Msg. Intercepts focus-navigation (tab/shift+tab),
 // override-field interaction (enter/space/left/right/h/l) when focus is on a
 // form row, and esc/enter/ctrl+enter for cancel/submit from the textarea.
@@ -274,18 +314,20 @@ func (m newSessionModel) Update(msg tea.Msg) (newSessionModel, tea.Cmd) {
 			if val == "" {
 				return m, nil
 			}
+			over := m.buildSubmitOverrides()
 			m.Close()
 			return m, func() tea.Msg {
-				return promptModalSubmitMsg{prompt: val, skipPlanning: true}
+				return promptModalSubmitMsg{prompt: val, skipPlanning: true, overrides: over}
 			}
 		case "enter":
 			val := strings.TrimSpace(m.textarea.Value())
 			if val == "" {
 				return m, nil
 			}
+			over := m.buildSubmitOverrides()
 			m.Close()
 			return m, func() tea.Msg {
-				return promptModalSubmitMsg{prompt: val, skipPlanning: false}
+				return promptModalSubmitMsg{prompt: val, skipPlanning: false, overrides: over}
 			}
 		}
 	}
