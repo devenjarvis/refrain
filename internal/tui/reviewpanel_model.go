@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
 	"github.com/devenjarvis/refrain/internal/github"
 )
 
@@ -21,6 +22,10 @@ type reviewPanelModel struct {
 	specOverlayScroll int
 	checksCursor      int // cursor within the inline checks strip
 	checksScroll      int // scroll offset for checks strip output
+
+	// parsedDiffs is a lazy cache of parsed diff models keyed by taskIndex.
+	// Populated by focusedDiffModel on first access; lives with the panel.
+	parsedDiffs map[int]*diffmodel.Model
 
 	// dashboardTopY is the screen Y offset where dashboard content begins.
 	// App pushes this in via SetDashboardTopY; handleClick reads it instead of

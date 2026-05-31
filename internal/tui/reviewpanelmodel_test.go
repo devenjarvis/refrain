@@ -852,6 +852,54 @@ func writePlanForTest(planDir string, sess *agent.Session, content string) error
 	return os.WriteFile(filepath.Join(planDir, "plan.md"), []byte(content), 0o644)
 }
 
+// TestReviewPanel_DiffCacheReusesParse verifies that focusedDiffModel returns
+// the same *diffmodel.Model pointer for the same cursor position (cache hit)
+// and a new pointer after moving to a different task (cache miss).
+func TestReviewPanel_DiffCacheReusesParse(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	rawDiff1 := "diff --git a/a.go b/a.go\nindex 000..111 100644\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n package main\n+// marker1\n"
+	rawDiff2 := "diff --git a/b.go b/b.go\nindex 000..222 100644\n--- a/b.go\n+++ b/b.go\n@@ -1 +1,2 @@\n package main\n+// marker2\n"
+
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "task one"},
+			{Index: 2, Text: "task two"},
+		},
+		groups: []taskReviewGroup{
+			{taskIndex: 1, rawDiff: rawDiff1},
+			{taskIndex: 2, rawDiff: rawDiff2},
+		},
+	}
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+
+	// First call for cursor=0 (task 1).
+	m1a, _, ok1 := panel.focusedDiffModel(entry)
+	if !ok1 {
+		t.Fatal("focusedDiffModel returned ok=false for task with rawDiff")
+	}
+	if m1a == nil {
+		t.Fatal("focusedDiffModel returned nil model for task 1")
+	}
+
+	// Second call at same cursor must return the same pointer (cache hit).
+	m1b, _, _ := panel.focusedDiffModel(entry)
+	if m1a != m1b {
+		t.Error("second call for same cursor must return cached *diffmodel.Model (same pointer)")
+	}
+
+	// Move cursor to task 2 → cache miss → new pointer.
+	panel.taskCursor = 1
+	m2, _, ok2 := panel.focusedDiffModel(entry)
+	if !ok2 {
+		t.Fatal("focusedDiffModel returned ok=false for task 2 with rawDiff")
+	}
+	if m2 == m1a {
+		t.Error("different task must return a different *diffmodel.Model pointer")
+	}
+}
+
 // restoreOpenURL captures the current openURL and returns a cleanup that
 // restores it, so tests that swap openURL don't leak across cases.
 func restoreOpenURL() func() {
