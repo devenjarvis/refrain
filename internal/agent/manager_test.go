@@ -1043,6 +1043,83 @@ func setupTestRepoWithRemote(t *testing.T) string {
 	return work
 }
 
+// TestCreateSession_BranchesOffFreshRemoteMain verifies that when a commit is
+// pushed to origin/main between the last local sync and session creation,
+// the new worktree starts from that new commit (not from the stale local ref).
+func TestCreateSession_BranchesOffFreshRemoteMain(t *testing.T) {
+	work := setupTestRepoWithRemote(t)
+
+	bareURL, err := git.GetRemoteURL(work)
+	if err != nil {
+		t.Fatalf("GetRemoteURL: %v", err)
+	}
+
+	// Push fresh.txt via a sibling clone so origin/main is ahead of work.
+	tmp := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "clone", bareURL, "."},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "config", "commit.gpgsign", "false"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = tmp
+		if out, err2 := cmd.CombinedOutput(); err2 != nil {
+			t.Fatalf("setup sibling %v: %v\n%s", args, err2, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "fresh.txt"), []byte("fresh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var pushSHA string
+	for _, args := range [][]string{
+		{"git", "add", "."},
+		{"git", "commit", "-m", "out-of-band push"},
+		{"git", "push", "origin", "main"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = tmp
+		if out, err2 := cmd.CombinedOutput(); err2 != nil {
+			t.Fatalf("sibling push %v: %v\n%s", args, err2, out)
+		}
+	}
+	shaCmd := exec.Command("git", "rev-parse", "HEAD")
+	shaCmd.Dir = tmp
+	shaBytes, err := shaCmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse sibling HEAD: %v", err)
+	}
+	pushSHA = strings.TrimSpace(string(shaBytes))
+
+	mgr := NewManager(work, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	sess, _, err := mgr.CreateSessionWithCommand(
+		Config{Task: "test", Rows: 24, Cols: 80},
+		func(name string) *exec.Cmd { return exec.Command("bash", "-c", "sleep 5") },
+	)
+	if err != nil {
+		t.Fatalf("CreateSessionWithCommand: %v", err)
+	}
+
+	gotRevCmd := exec.Command("git", "rev-parse", "HEAD")
+	gotRevCmd.Dir = sess.Worktree.Path
+	gotBytes, err := gotRevCmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD in worktree: %v", err)
+	}
+	gotSHA := strings.TrimSpace(string(gotBytes))
+
+	if gotSHA != pushSHA {
+		t.Errorf("worktree HEAD = %s, want %s (the out-of-band push SHA)", gotSHA, pushSHA)
+	}
+
+	// Belt-and-suspenders: the file from the new commit should be present.
+	if _, err := os.Stat(filepath.Join(sess.Worktree.Path, "fresh.txt")); os.IsNotExist(err) {
+		t.Error("fresh.txt not present in worktree; worktree did not start from the pushed commit")
+	}
+}
+
 // TestCreateSession_BranchesOffRemoteDefault verifies that a new session's
 // worktree is created from the remote default branch (origin/main) even when
 // the user has a different branch checked out locally in the main worktree.
