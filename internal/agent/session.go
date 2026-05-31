@@ -895,7 +895,7 @@ type PlanTask struct {
 // "## Tasks" heading we fall back to scanning the entire document so freeform
 // plans still report a useful count; with a "## Tasks" heading present, only
 // checkboxes within that section count — stray "- [ ]" lines in Spec or
-// Verification do not corrupt the [task N] commit-to-task mapping.
+// Verification do not affect the Plan-Task trailer–based commit-to-task mapping.
 func ParsePlanTasks(plan string) []PlanTask {
 	tasks := make([]PlanTask, 0, 16)
 	idx := 0
@@ -1364,9 +1364,9 @@ func (s *Session) RestorePrevPlan() (string, bool, error) {
 	return prev, true, nil
 }
 
-// CommitTaskCount returns the cached count of distinct [task N] indices and
-// the maximum task index seen in commits ahead of the base branch. Both values
-// are zero until RefreshCommitTaskCount is called at least once.
+// CommitTaskCount returns the cached count of distinct Plan-Task trailer indices
+// and the maximum task index seen in commits ahead of the base branch. Both
+// values are zero until RefreshCommitTaskCount is called at least once.
 func (s *Session) CommitTaskCount() (done, maxIdx int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1374,8 +1374,8 @@ func (s *Session) CommitTaskCount() (done, maxIdx int) {
 }
 
 // RefreshCommitTaskCount reads commits ahead of the base branch (via
-// git.LogCommitsAgainstBase), groups them by [task N] prefix, and caches the
-// resulting (distinct count, max index) pair. Callers that want to avoid a
+// git.LogCommitsAgainstBase), groups them by Plan-Task: N body trailer, and
+// caches the resulting (distinct count, max index) pair. Callers that want to avoid a
 // shell-out on the render path should call this from a background goroutine and
 // read the cached result via CommitTaskCount.
 //

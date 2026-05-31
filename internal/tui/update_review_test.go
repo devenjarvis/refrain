@@ -59,7 +59,7 @@ func TestRunValidationCheckCmd_FailingCommand(t *testing.T) {
 }
 
 // TestBuildReviewReworkPrompt_InstructsTrailer verifies the rework prompt uses
-// Plan-Task trailers and not the legacy [task N] subject prefix.
+// Plan-Task trailers and not the legacy subject-prefix format.
 func TestBuildReviewReworkPrompt_InstructsTrailer(t *testing.T) {
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 2, Text: "Add widget"}},

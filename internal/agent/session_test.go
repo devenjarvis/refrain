@@ -1634,7 +1634,7 @@ func TestSession_CommitTaskCount_CorrectAfterRefresh(t *testing.T) {
 	}
 	baseBranch := strings.TrimSpace(string(branchOut))
 
-	// Create a feature branch so [task N] commits are ahead of the base.
+	// Create a feature branch so Plan-Task trailer commits are ahead of the base.
 	cmd = exec.Command("git", "checkout", "-b", "feature")
 	cmd.Dir = repo
 	if out, err := cmd.CombinedOutput(); err != nil {

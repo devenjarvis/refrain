@@ -4856,7 +4856,7 @@ func TestReviewPanel_EnterOpensDiffViewer(t *testing.T) {
 		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "fix: fix handler"}},
 			rawDiff:   rawDiff,
 		}},
 		verdicts: map[int]*taskVerdictRecord{
@@ -4908,7 +4908,7 @@ func TestReviewPanel_SpaceIsNoOp(t *testing.T) {
 		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "fix: fix handler"}},
 			rawDiff:   "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,4 @@\n package main\n \n+// marker\n func A() {}\n",
 		}},
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},

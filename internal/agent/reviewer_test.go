@@ -59,8 +59,8 @@ func TestParsePlanTasks_EmptyPlan(t *testing.T) {
 
 // TestParsePlanTasks_IgnoresCheckboxesOutsideTasks pins the section-scoping
 // fix: when a "## Tasks" heading is present, checkboxes in other sections
-// (Spec, Verification, sub-bullets) must not be counted because the
-// "[task N]" commit prefix depends on the in-section ordering.
+// (Spec, Verification, sub-bullets) must not be counted — only the in-section
+// position matters for Plan-Task trailer indices.
 func TestParsePlanTasks_IgnoresCheckboxesOutsideTasks(t *testing.T) {
 	plan := `# Goal
 Add a feature.

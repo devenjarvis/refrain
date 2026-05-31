@@ -67,13 +67,13 @@ func TestRenderTaskLedger_CardLayout(t *testing.T) {
 		groups: []taskReviewGroup{
 			{
 				taskIndex: 1,
-				commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] implement"}},
+				commits:   []git.Commit{{Hash: "abc1234", Subject: "feat: implement"}},
 				files:     []git.FileStat{{Path: "auth.go", Insertions: 42, Deletions: 3}},
 				stats:     &git.DiffStats{Files: 1, Insertions: 42, Deletions: 3},
 			},
 			{
 				taskIndex: 2,
-				commits:   []git.Commit{{Hash: "def5678", Subject: "[task 2] tests"}},
+				commits:   []git.Commit{{Hash: "def5678", Subject: "test: add tests"}},
 				files:     []git.FileStat{{Path: "auth_test.go", Insertions: 10, Deletions: 0}},
 				stats:     &git.DiffStats{Files: 1, Insertions: 10, Deletions: 0},
 			},
@@ -193,7 +193,7 @@ func TestRenderTaskListPane_RowFormat(t *testing.T) {
 		groups: []taskReviewGroup{
 			{
 				taskIndex: 1,
-				commits:   []git.Commit{{Hash: "abc123", Subject: "[task 1] add middleware"}},
+				commits:   []git.Commit{{Hash: "abc123", Subject: "feat: add middleware"}},
 				stats:     &git.DiffStats{Files: 1, Insertions: 10, Deletions: 2},
 			},
 			{
@@ -635,7 +635,7 @@ func TestRenderReviewPanel_TaskListShown(t *testing.T) {
 		groups: []taskReviewGroup{
 			{
 				taskIndex: 1,
-				commits:   []git.Commit{{Hash: "abc123", Subject: "[task 1] add middleware"}},
+				commits:   []git.Commit{{Hash: "abc123", Subject: "feat: add middleware"}},
 				stats:     &git.DiffStats{Files: 1, Insertions: 10, Deletions: 2},
 			},
 		},
@@ -838,7 +838,7 @@ func TestRenderReviewPanel_NoDiffFoundBadge(t *testing.T) {
 		groups: []taskReviewGroup{
 			{
 				taskIndex: 1,
-				commits:   []git.Commit{{Hash: "abc123", Subject: "[task 1] add middleware"}},
+				commits:   []git.Commit{{Hash: "abc123", Subject: "feat: add middleware"}},
 				stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
 			},
 		},
@@ -1056,7 +1056,7 @@ func TestRenderReviewPanel_UnifiedFooter(t *testing.T) {
 		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler"}},
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix"}},
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "fix: fix"}},
 		}},
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
@@ -1177,7 +1177,7 @@ func TestRenderReviewPanel_TaskHasDiff(t *testing.T) {
 		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "fix: fix handler"}},
 			stats:     &git.DiffStats{Files: 1, Insertions: 1, Deletions: 0},
 			rawDiff:   rawDiff,
 		}},
@@ -1352,7 +1352,7 @@ func TestRenderReviewPanel_NoDiffTask(t *testing.T) {
 		tasks: []agent.PlanTask{{Index: 1, Text: "Fix handler", Done: false}},
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix handler"}},
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "fix: fix handler"}},
 			stats:     &git.DiffStats{Files: 0, Insertions: 0, Deletions: 0},
 			rawDiff:   "",
 		}},
@@ -1381,7 +1381,7 @@ func TestReviewRedesign_LegacyStringsRemoved(t *testing.T) {
 		tasks: []agent.PlanTask{{Index: 1, Text: "Refactor handler"}},
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] refactor"}},
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "refactor: refactor"}},
 			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
 		}},
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},

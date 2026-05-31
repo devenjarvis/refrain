@@ -326,8 +326,9 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 // auto-advance to ReadyForReview when its agent goes idle/done. A session with
 // no cached plan is promotable; one with a plan is promotable only once every
 // task is accounted for (by the plan's own checkbox count or the per-commit
-// [task N] count, whichever is larger). Outstanding tasks keep the session in
-// BUILDING so its progress bar stays visible. Pure: no App or manager state.
+// Plan-Task trailer count, whichever is larger). Outstanding tasks keep the
+// session in BUILDING so its progress bar stays visible. Pure: no App or
+// manager state.
 func shouldAutoPromote(sess *agent.Session) bool {
 	plan, present := sess.CachedPlan()
 	if !present {

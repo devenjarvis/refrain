@@ -135,7 +135,7 @@ func reviewTaskIndexAtCursor(entry *reviewDiffEntry, cursor int) (int, bool) {
 	if cursor < len(entry.tasks) {
 		return entry.tasks[cursor].Index, true
 	}
-	// "Other changes" row, only present when some commit has no [task N] prefix.
+	// "Other changes" row, only present when some commit has no Plan-Task trailer.
 	if cursor == len(entry.tasks) {
 		for i := range entry.groups {
 			if entry.groups[i].taskIndex == 0 {
@@ -508,7 +508,7 @@ func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 		return ""
 	}
 	// Build a taskIndex → text lookup, including the special index 0 used for
-	// commits without a `[task N]` prefix.
+	// commits without a Plan-Task trailer.
 	taskText := map[int]string{0: "Other changes"}
 	for _, t := range entry.tasks {
 		taskText[t.Index] = t.Text
