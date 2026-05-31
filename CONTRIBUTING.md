@@ -33,7 +33,7 @@ go test ./...               # run all tests
 go test -race ./...         # run with race detector
 go vet ./...                # static analysis
 golangci-lint run           # lint (config in .golangci.yml)
-gofumpt -w .                # format all Go files
+gofmt -w .                  # format all Go files
 ```
 
 Always run `go test -race ./...` before opening a PR. Refrain runs several goroutines per agent (PTY/VT/git) and the race detector has caught real bugs here.
@@ -57,7 +57,7 @@ gremlins unleash --diff origin/main .
 2. Keep PRs focused — one concern per PR.
 3. Add or update tests. Bug fixes should include a regression test where practical.
 4. Update `CHANGELOG.md` under `[Unreleased]`.
-5. Run locally before pushing: `go test -race ./... && go vet ./... && golangci-lint run && gofumpt -l .` (the last should print nothing).
+5. Run locally before pushing: `go test -race ./... && go vet ./... && golangci-lint run && gofmt -l .` (the last should print nothing).
 6. Open a PR. The template prompts for summary and test plan.
 
 ## Commit messages

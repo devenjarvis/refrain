@@ -210,7 +210,7 @@ Run before every commit / in every PR:
 
 - [ ] `go test -race ./...` passes (required — not optional).
 - [ ] `go vet ./...` clean.
-- [ ] `gofumpt -w .` applied.
+- [ ] `gofmt -w .` applied.
 - [ ] `golangci-lint run` clean.
 - [ ] Changelog fragment added under `changelog.d/` (`### Added` / `### Fixed` / …).
 - [ ] No new field added to a model without a clear single owner (§6).
