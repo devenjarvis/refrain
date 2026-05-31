@@ -1276,4 +1276,13 @@ func TestPlanEditor_View_FooterOnLastRow(t *testing.T) {
 		}
 		assertFooter(t, editor)
 	})
+
+	t.Run("question mode", func(t *testing.T) {
+		sess, _ := newEditorTestSession(t)
+		_ = sess.WritePlan("# Goal\nDo X\n")
+		editor := newPlanEditor(sess, "", 80, h)
+		editor.mode = planEditorModeQuestion
+		editor.questionText = "Is the acceptance criterion measurable?"
+		assertFooter(t, editor)
+	})
 }

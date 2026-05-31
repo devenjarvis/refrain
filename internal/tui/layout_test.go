@@ -70,9 +70,6 @@ func TestPreviewTermWidth(t *testing.T) {
 
 func TestFillHeight(t *testing.T) {
 	lineCount := func(s string) int {
-		if s == "" {
-			return 1
-		}
 		return strings.Count(s, "\n") + 1
 	}
 	cases := []struct {
@@ -84,7 +81,7 @@ func TestFillHeight(t *testing.T) {
 	}{
 		{"short content padded to height", "line1\nline2\nline3", 80, 10, 10},
 		{"exact fit unchanged", "line1\nline2\nline3", 80, 3, 3},
-		{"zero height returns empty/one row", "", 80, 0, 1},
+		{"zero height is a no-op for 1-line content", "line1", 80, 0, 1},
 		{"zero width does not panic", "line1\nline2", 0, 5, 5},
 	}
 	for _, tc := range cases {

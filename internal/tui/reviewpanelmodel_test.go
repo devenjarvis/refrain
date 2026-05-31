@@ -931,4 +931,25 @@ func TestReviewPanel_View_FooterOnLastRow(t *testing.T) {
 		// validationRuns is nil → checkState is nil → placeholder tab
 		assertFooter(t, panel.View())
 	})
+
+	t.Run("tasks tab with entry", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s4", "fix-auth")
+		app := reviewTestApp()
+		app.reviewDiffCache[cacheKey("", sess.ID)] = &reviewDiffEntry{
+			tasks: []agent.PlanTask{
+				{Index: 1, Text: "task one"},
+				{Index: 2, Text: "task two"},
+			},
+		}
+		panel := newReviewPanel(sess, "", w, h, app.buildReviewDeps())
+		assertFooter(t, panel.View())
+	})
+
+	t.Run("draft PR in flight", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s5", "fix-auth")
+		app := reviewTestApp()
+		panel := newReviewPanel(sess, "", w, h, app.buildReviewDeps())
+		panel.drafting = true
+		assertFooter(t, panel.View())
+	})
 }
