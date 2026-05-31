@@ -1,6 +1,8 @@
 # CLAUDE.md
 
 > **Architecture & code conventions:** see [`CONVENTIONS.md`](CONVENTIONS.md). This file describes *what the system does*; `CONVENTIONS.md` describes *how the code must be structured* (component architecture, message/render rules, layering). Read it before writing or changing code.
+>
+> **Design system / visual tokens:** see [`DESIGN.md`](DESIGN.md). Colors, glyphs, borders, spacing, and animation palettes live in one registry (`internal/tui/theme`). Never hardcode a hex or glyph rune — reference a token.
 
 ## Project
 

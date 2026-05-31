@@ -17,6 +17,7 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 
 	"github.com/devenjarvis/refrain/internal/diffmodel"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // SideBySideMinWidth is the terminal-width threshold (inclusive) above which
@@ -112,15 +113,18 @@ func (r *Renderer) Render(width int, sideBySide bool) string {
 
 // ── styles ───────────────────────────────────────────────────────────────────
 
+// Diff colors come from the design-system registry (internal/tui/theme). These
+// package-private names are shared with tree.go; add/del foregrounds reuse the
+// success/error roles, and the four backgrounds are the dedicated diff tokens.
 var (
-	colAdd         = lipgloss.Color("#10B981")
-	colDel         = lipgloss.Color("#EF4444")
-	colMuted       = lipgloss.Color("#6B7280")
-	colSecondary   = lipgloss.Color("#06B6D4")
-	colAddBg       = lipgloss.Color("#0a2e1f")
-	colDelBg       = lipgloss.Color("#2e0a14")
-	colAddBgBright = lipgloss.Color("#165c3f")
-	colDelBgBright = lipgloss.Color("#5c1629")
+	colAdd         = theme.ColorSuccess
+	colDel         = theme.ColorError
+	colMuted       = theme.ColorMuted
+	colSecondary   = theme.ColorSecondary
+	colAddBg       = theme.ColorDiffAddBg
+	colDelBg       = theme.ColorDiffDelBg
+	colAddBgBright = theme.ColorDiffAddBgEmph
+	colDelBgBright = theme.ColorDiffDelBgEmph
 
 	styleAddRow    = lipgloss.NewStyle().Background(colAddBg)
 	styleDelRow    = lipgloss.NewStyle().Background(colDelBg)

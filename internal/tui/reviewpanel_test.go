@@ -11,6 +11,7 @@ import (
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/git"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // TestRenderReviewHeader_TwoLineIntentCap checks that a long prompt is capped to
@@ -833,7 +834,7 @@ func TestReviewTaskCount(t *testing.T) {
 // TestVerdictBadge verifies the icon, label, and style returned for each verdict state.
 func TestVerdictBadge(t *testing.T) {
 	spinnerChars := map[string]bool{}
-	for _, f := range spinnerFrames {
+	for _, f := range theme.SpinnerBraille {
 		spinnerChars[f] = true
 	}
 

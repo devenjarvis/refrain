@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 	"github.com/devenjarvis/refrain/internal/vt"
 )
 
@@ -177,17 +178,17 @@ func (items listItems) sessionFocusStatus(sess *agent.Session) string {
 		}
 	}
 	if hasError {
-		return StyleError.Render("✗ error")
+		return StyleError.Render(theme.GlyphError + " error")
 	}
 	if waitingCount > 0 {
-		badge := fmt.Sprintf("⏸ %d waiting", waitingCount)
+		badge := fmt.Sprintf("%s %d waiting", theme.GlyphWaiting, waitingCount)
 		if firstWaitingReason != "" {
 			badge += " — " + truncateVisible(firstWaitingReason, 40)
 		}
 		return StyleWaiting.Render(badge)
 	}
 	if idleAskingCount > 0 {
-		return StyleWarning.Render(fmt.Sprintf("? %d idle — may need input", idleAskingCount))
+		return StyleWarning.Render(fmt.Sprintf("%s %d idle — may need input", theme.GlyphQuestion, idleAskingCount))
 	}
 	// Progress bar takes priority over the idle/reviewable badge so it
 	// stays visible while the agent pauses between tasks. Once all tasks
@@ -297,17 +298,17 @@ func (items listItems) sessionStatusGlyph(sess *agent.Session) (glyph string, co
 	}
 	switch {
 	case hasError:
-		return "✗", ColorError
+		return theme.GlyphError, ColorError
 	case hasWaiting:
-		return "⏸", ColorWaiting
+		return theme.GlyphWaiting, ColorWaiting
 	case hasIdleAsking:
-		return "?", ColorWarning
+		return theme.GlyphQuestion, ColorWarning
 	case sess.IsReviewable() || !sess.DoneAt().IsZero():
-		return "✓", ColorSuccess
+		return theme.GlyphSuccess, ColorSuccess
 	case hasActive:
-		return "●", ColorSecondary
+		return theme.GlyphActive, ColorSecondary
 	default:
-		return "○", ColorMuted
+		return theme.GlyphIdle, ColorMuted
 	}
 }
 
@@ -325,7 +326,7 @@ func (d dashboardModel) renderFocusSessionCard(props dashboardProps, sess *agent
 	if selected {
 		stripeColor = ColorSecondary
 	}
-	stripe := lipgloss.NewStyle().Foreground(stripeColor).Render("▎")
+	stripe := lipgloss.NewStyle().Foreground(stripeColor).Render(theme.GlyphStripe)
 	const indent = "   "
 	const stripeIndentWidth = 4 // stripe (1) + 3 spaces
 
@@ -491,7 +492,7 @@ func renderBranchLabel(branch string) string {
 	if branch == "" {
 		return ""
 	}
-	return StyleSubtle.Render("⎇ " + branch)
+	return StyleSubtle.Render(theme.GlyphBranch + " " + branch)
 }
 
 // planningStatusBadge renders the right-aligned status badge for a Planning
@@ -774,7 +775,7 @@ func (d dashboardModel) renderPipelineWidget(props dashboardProps, width int) st
 		cnt := lipgloss.NewStyle().Foreground(color).Bold(true).Render(fmt.Sprintf("%d", count))
 		lbl := StyleSubtle.Render(truncateVisible(label, cellWidth-2))
 		inner := fmt.Sprintf("%s\n%s", lbl, cnt)
-		style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Width(cellWidth)
+		style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(theme.PadCell[0], theme.PadCell[1]).Width(cellWidth)
 		if highlight {
 			style = style.BorderForeground(color)
 		}
@@ -794,11 +795,11 @@ func (d dashboardModel) renderPipelineWidget(props dashboardProps, width int) st
 func focusLaunchTabDot(ag *agent.Agent) string {
 	switch ag.Status() {
 	case agent.StatusActive, agent.StatusWaiting:
-		return "●"
+		return theme.GlyphActive
 	case agent.StatusError, agent.StatusDone:
-		return "×"
+		return theme.GlyphCross
 	default:
-		return "○"
+		return theme.GlyphIdle
 	}
 }
 
@@ -917,22 +918,12 @@ var breatheFramesCompact = [12][3]string{
 	{"   · · · ", "  · · ·  ", " · · ·   "},
 }
 
-// breatheColors cycles through calm hues. The longer cycle gives the user
-// something to gently track without becoming repetitive.
-var breatheColors = [4]lipgloss.Color{
-	"#38BDF8", // sky blue
-	"#818CF8", // indigo
-	"#34D399", // emerald
-	"#F472B6", // rose — adds variety on every other breath
-}
-
-// completeColors pulse warm tones once the timer is up so the screen reads
-// unmistakably as "done" without auto-advancing the user back to work.
-var completeColors = [3]lipgloss.Color{
-	"#F59E0B", // amber
-	"#FBBF24", // gold
-	"#FACC15", // yellow
-}
+// breatheColors and completeColors are the wellness-overlay animation palettes,
+// sourced from the design-system registry (internal/tui/theme).
+var (
+	breatheColors  = theme.BreatheColors
+	completeColors = theme.CompleteColors
+)
 
 // generateBreatheFrames builds a smooth concentric breath cycle. The first
 // half of the cycle inhales (radius grows), the second half exhales. A

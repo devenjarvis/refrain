@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
 // repoPickerAddRepoIdx is the sentinel value stored in repoPickerModel.filtered
@@ -216,11 +217,9 @@ func (m repoPickerModel) View() string {
 	left := m.renderList(leftWidth)
 	right := m.renderDetails(rightWidth)
 
-	leftStyle := lipgloss.NewStyle().
+	leftStyle := theme.BorderPaneLeft().
 		Width(leftWidth).
-		Height(m.height).
-		Border(lipgloss.NormalBorder(), false, true, false, false).
-		BorderForeground(ColorMuted)
+		Height(m.height)
 
 	rightStyle := lipgloss.NewStyle().
 		Width(rightWidth).
