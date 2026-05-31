@@ -69,11 +69,10 @@ type ReviseRequest struct {
 // success. Wall-of-text risk is bounded by writing-density rules baked into
 // the prompt (Goal one sentence, Spec items one line, imperative task names,
 // labeled one-line sub-bullets) so the human reviewer's scan cost stays low
-// while the building agent gets executable detail. The checkbox-counting
-// constraint is load-bearing: ParsePlanTasks (session.go) and planTaskCounts
-// (tui/dashboard.go) count ALL "- [ ]" / "- [x]" lines top-to-bottom to derive
-// [task N] commit prefixes, so the prompt forbids checkbox syntax outside the
-// Tasks section.
+// while the building agent gets executable detail. ParsePlanTasks (session.go)
+// and planTaskCounts (tui/dashboard.go) count "- [ ]" / "- [x]" lines inside
+// ## Tasks only; the building agent maps commits to tasks via Plan-Task: N
+// trailers in the commit body (N = 1-based position inside ## Tasks).
 const planDraftPrompt = `You are drafting a plan with two readers: a separate coding agent that will execute it end-to-end, and a human developer who will scan it for correctness before approving. Write for both — the human cares about Goal, Spec, and the task list; the agent cares about the per-task sub-bullets. Detail is what makes this work: a plan that names specific files, line ranges, type signatures, and test expectations turns into a deterministic agent run, while a plan that hand-waves turns into rework.
 
 Your working directory is the developer's worktree root. You have a read-only toolset: Read, Grep, Glob, LS, LSP, WebFetch, WebSearch. USE THEM aggressively before drafting — locate every file the change touches, scan the surrounding code conventions, identify existing helpers you can reuse, and pull the relevant tests so you can name them by path. You cannot write, edit, or run shell commands; this is a research-then-draft pass.
@@ -96,7 +95,7 @@ Produce a markdown plan with exactly these sections, in this order. Section name
 
 ` + "`## Risks`" + ` — bullet list of architectural unknowns, external API contracts, concurrency hazards, or tests that will need updating. State load-bearing assumptions so the building agent knows what to probe early.
 
-` + "`## Tasks`" + ` — ordered checklist. Each ` + "`- [ ]`" + ` line is one task and maps to a [task N] commit prefix. Task names are imperative short phrases ("Add --json flag to doctor", not "Working on adding a JSON output mode to the doctor command"). Each task includes labeled sub-bullets, one line each:
+` + "`## Tasks`" + ` — ordered checklist. Each ` + "`- [ ]`" + ` line is one task. Task names are imperative short phrases ("Add --json flag to doctor", not "Working on adding a JSON output mode to the doctor command"). The building agent maps each commit to its task via a ` + "`Plan-Task: N`" + ` trailer in the commit body (N = 1-based position of the checkbox inside this section). Each task includes labeled sub-bullets, one line each:
 
   - Files: path/to/file.go:42, path/to/other.go
   - Signatures: func Foo(ctx context.Context, x Bar) (Baz, error)  (only if introducing or changing one; omit otherwise)
@@ -104,7 +103,7 @@ Produce a markdown plan with exactly these sections, in this order. Section name
   - Implement: 1–3 sentences describing the production change
   - Verify: go test -race ./internal/foo passes; manually confirm <X>
 
-Sub-bullets MUST use two-space-indent ` + "`  - `" + ` (a regular bullet, no brackets). NEVER use ` + "`- [ ]`" + ` or ` + "`- [x]`" + ` anywhere except as a task name in this section — the build agent counts ALL checkbox lines top-to-bottom across the entire document to derive [task N] commit prefixes, so a stray checkbox in Goal, Spec, Context, Reuse, Risks, Verification, or Not in scope shifts every commit's task index and breaks the review panel.
+Sub-bullets MUST use two-space-indent ` + "`  - `" + ` (a regular bullet, no brackets). NEVER use ` + "`- [ ]`" + ` or ` + "`- [x]`" + ` anywhere except as a task name in this section — the review panel counts checkboxes inside ` + "`## Tasks`" + ` only to track progress, so stray checkboxes outside this section are confusing and should be avoided.
 
 Every task follows test-first ordering. If a task has no meaningful test, say so explicitly in Verify ("manual: <specific check>") — never omit verification.
 
@@ -139,7 +138,7 @@ const planRevisePrompt = `You are revising an existing plan for a coding task ba
 
 Output the full revised plan with the same eight sections (Goal / Spec / Context / Reuse / Risks / Tasks / Verification / Not in scope). Preserve sections, wording, and tasks the feedback does not touch — make small, surgical changes.
 
-The same length, density, structure, and forbidden-language rules from the original drafting prompt apply: Goal is one sentence; Spec items are one line each; Context, Reuse, Risks, and Verification are bullet lists with one fact per bullet; task names are imperative short phrases; per-task sub-bullets are labeled and indented with ` + "`  - `" + ` (NEVER ` + "`- [ ]`" + ` or ` + "`- [x]`" + ` outside task names — the build agent counts checkbox lines globally to derive [task N] commit prefixes, so a stray checkbox shifts every commit's task index); no filler phrases. There is no word cap.
+The same length, density, structure, and forbidden-language rules from the original drafting prompt apply: Goal is one sentence; Spec items are one line each; Context, Reuse, Risks, and Verification are bullet lists with one fact per bullet; task names are imperative short phrases; per-task sub-bullets are labeled and indented with ` + "`  - `" + ` (NEVER ` + "`- [ ]`" + ` or ` + "`- [x]`" + ` outside task names — stray checkboxes outside ` + "`## Tasks`" + ` are confusing and should be avoided); no filler phrases. There is no word cap.
 
 Your response MUST begin with ` + "`# Goal`" + ` on the very first line — do not write any text, summary, or transitional sentence before it.
 
