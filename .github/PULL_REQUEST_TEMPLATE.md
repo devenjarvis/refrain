@@ -10,7 +10,7 @@
 
 - [ ] `go build ./...`
 - [ ] `go vet ./...`
-- [ ] `gofumpt -l .` (clean)
+- [ ] `gofmt -l .` (clean)
 - [ ] `golangci-lint run ./...`
 - [ ] `go test -race ./...`
 - [ ] Manual TUI:

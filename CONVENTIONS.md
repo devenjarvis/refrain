@@ -211,7 +211,7 @@ Run before every commit / in every PR:
 
 - [ ] `go test -race ./...` passes (required — not optional).
 - [ ] `go vet ./...` clean.
-- [ ] `gofumpt -w .` applied.
+- [ ] `gofmt -w .` applied.
 - [ ] `golangci-lint run` clean.
 - [ ] `go-arch-lint check` clean (enforces §2 layering rules).
 - [ ] Changelog fragment added under `changelog.d/` (`### Added` / `### Fixed` / …).

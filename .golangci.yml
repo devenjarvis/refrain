@@ -40,11 +40,7 @@ linters:
 
 formatters:
   enable:
-    - gofumpt
-
-  settings:
-    gofumpt:
-      extra-rules: true
+    - gofmt
 
 issues:
   max-issues-per-linter: 0
