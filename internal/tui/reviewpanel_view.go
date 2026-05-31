@@ -16,18 +16,6 @@ import (
 	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
-// reviewDetailMaxMeasure is the maximum content column width for the right detail
-// pane. Matches docEditorMaxMeasure so typography is consistent across panels.
-const reviewDetailMaxMeasure = docEditorMaxMeasure
-
-// reviewRenderer is the markdown renderer used for rationale text in the detail pane.
-var reviewRenderer = mdrender.New(docEditorChromaStyle)
-
-// detailContentMeasure returns the effective content width and left-margin padding
-// for centering the detail pane content. Thin wrapper around mdrender.ContentMeasure.
-func detailContentMeasure(paneWidth, maxMeasure int) (measure, leftPad int) {
-	return mdrender.ContentMeasure(paneWidth, maxMeasure)
-}
 
 // reviewSpinnerFrame returns the spinner character for the given render clock.
 // now is the model's tick-refreshed timestamp (§5: no clock read at render
@@ -351,23 +339,12 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 		bodyH = 4
 	}
 
-	// Body: task ledger + detail pane (stacked).
+	// Body: task-card ledger (full height in narrow/stacked mode).
 	var bodyLines []string
 	if entry == nil {
 		bodyLines = append(bodyLines, StyleSubtle.Render("loading diff stats…"))
 	} else {
-		listH := bodyH * 2 / 5
-		detailH := bodyH - listH - 1
-		if listH < 2 {
-			listH = 2
-		}
-		if detailH < 2 {
-			detailH = 2
-		}
-		paneW := innerWidth(width)
-		bodyLines = append(bodyLines, renderTaskListPane(entry, paneW, listH, cursor, now)...)
-		bodyLines = append(bodyLines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
-		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, paneW, detailH, now)...)
+		bodyLines = renderTaskListPane(entry, innerWidth(width), bodyH, cursor, now)
 	}
 
 	// Pad body to exactly bodyH rows so the footer always pins to the bottom
@@ -433,10 +410,18 @@ func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLe
 	return rowIdx
 }
 
-// renderTaskListPane renders the left-pane compact task list with icon, index, text, stat.
-// Row format: <icon> [N] <truncated text>  +X -Y
+// renderTaskListPane renders the task-card ledger.
+// Each card occupies 4 lines:
+//
+//	line 1: <icon> [N] <text>   +X -Y
+//	line 2:   <verdict_label> — <rationale>  (or  ⋯ Pending)
+//	line 3:   <top file> +X -Y  (or blank)
+//	line 4:   (blank separator)
+//
+// The selected card gets vertical-bar cursor stripes on the first line.
 func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now time.Time) []string {
 	const headerLines = 2
+	const cardH = 4
 	planTasksStyle := StyleHeading.Foreground(ColorSecondary)
 	header := []string{
 		planTasksStyle.Render("PLAN TASKS"),
@@ -469,52 +454,48 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 		}
 	}
 
-	rowsH := height - headerLines
-	if rowsH < 1 {
-		rowsH = 1
+	// How many cards fit in the available body height.
+	cardsH := (height - headerLines) / cardH
+	if cardsH < 1 {
+		cardsH = 1
 	}
-	offset := cursor - rowsH/2
+	offset := cursor - cardsH/2
 	if offset < 0 {
 		offset = 0
 	}
-	if offset+rowsH > len(rows) {
-		offset = len(rows) - rowsH
+	if offset+cardsH > len(rows) {
+		offset = len(rows) - cardsH
 		if offset < 0 {
 			offset = 0
 		}
 	}
 
-	// Selection affordance: a vertical bar in primary color on each side of the
-	// cursor row. We reserve 2 columns globally (one per side) so moving the
-	// cursor never reflows text — both selected and unselected rows have the
-	// same content budget.
 	cursorBar := StyleAccent.Render("│")
 	subtleGreen := StyleSuccess
 	subtleRed := StyleError
 
-	end := offset + rowsH
+	end := offset + cardsH
 	if end > len(rows) {
 		end = len(rows)
 	}
-	lines := make([]string, 0, headerLines+end-offset)
+	lines := make([]string, 0, headerLines+cardH*(end-offset))
 	lines = append(lines, header...)
 
 	for i := offset; i < end; i++ {
 		r := rows[i]
 		selected := i == cursor
 
-		// Icon from verdict badge.
+		// Verdict record and icon.
 		var rec *taskVerdictRecord
 		if entry.verdicts != nil {
 			rec = entry.verdicts[r.taskIndex]
 		}
-		icon, _, style := verdictBadge(rec, now)
-		// For the synthetic overview row, use a dot.
+		icon, verdictLabel, iconStyle := verdictBadge(rec, now)
 		if r.taskIndex == -1 {
 			icon = "·"
-			style = StyleSubtle
+			iconStyle = StyleSubtle
 		}
-		iconStr := style.Render(icon)
+		iconStr := iconStyle.Render(icon)
 
 		// Index label.
 		label := fmt.Sprintf("[%d]", r.taskIndex)
@@ -525,7 +506,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 			label = "   "
 		}
 
-		// Stat string — for verdictNoDiff, show the label as the stat.
+		// Stat string for line 1 (aggregate +X -Y).
 		statStr := ""
 		if rec != nil && rec.state == verdictNoDiff {
 			_, lbl, sty := verdictBadge(rec, now)
@@ -538,21 +519,16 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 			}
 		}
 
-		// Text: truncate to fit remaining width.
+		// Line 1: icon + label + text + stat, right-aligned.
 		iconW := ansi.StringWidth(iconStr)
 		labelW := len(label)
 		statW := ansi.StringWidth(statStr)
-		// 1 outer space + 1 border + icon + space + label + space + ... + 2 sep
-		// + stat + 1 border + 1 outer space. The +4 over the prior layout
-		// reserves columns for the cursor border on both sides.
 		overhead := 4 + iconW + 1 + labelW + 1 + 2 + statW
 		maxTextW := width - overhead
 		if maxTextW < 4 {
 			maxTextW = 4
 		}
 		textStr := truncateVisible(r.taskText, maxTextW)
-
-		// Assemble row.
 		rowText := iconStr + " " + StyleSubtle.Render(label) + " " + textStr
 		if statStr != "" {
 			usedW := iconW + 1 + labelW + 1 + ansi.StringWidth(textStr)
@@ -563,185 +539,58 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 			rowText += strings.Repeat(" ", padW) + statStr
 		}
 
+		var line1 string
 		if selected {
 			contentW := modalContentWidth(width)
 			if w := ansi.StringWidth(rowText); w < contentW {
 				rowText += strings.Repeat(" ", contentW-w)
 			}
-			lines = append(lines, " "+cursorBar+rowText+cursorBar+" ")
+			line1 = " " + cursorBar + rowText + cursorBar + " "
 		} else {
-			lines = append(lines, "  "+rowText)
+			line1 = "  " + rowText
 		}
+
+		// Line 2: verdict label — rationale (or ⋯ Pending).
+		var line2 string
+		if rec != nil && rec.state == verdictDone && rec.verdict.Rationale != "" {
+			rationale := truncateVisible(rec.verdict.Rationale, width-len(verdictLabel)-7)
+			_, _, vStyle := verdictBadge(rec, now)
+			line2 = "  " + vStyle.Render(verdictLabel) + " — " + rationale
+		} else {
+			_, lbl, lstyle := verdictBadge(rec, now)
+			line2 = "  " + lstyle.Render("⋯ "+lbl)
+		}
+
+		// Line 3: top file +X -Y, or commit count, or blank.
+		var line3 string
+		if r.group != nil && len(r.group.files) > 0 {
+			sorted := make([]git.FileStat, len(r.group.files))
+			copy(sorted, r.group.files)
+			sortFileStatsByChurn(sorted)
+			top := sorted[0]
+			fileStat := subtleGreen.Render(fmt.Sprintf("+%d", top.Insertions)) +
+				" " + subtleRed.Render(fmt.Sprintf("-%d", top.Deletions))
+			fileStatW := ansi.StringWidth(fileStat)
+			maxFileW := width - 4 - fileStatW - 2
+			if maxFileW < 4 {
+				maxFileW = 4
+			}
+			nameTrunc := truncateVisible(top.Path, maxFileW)
+			suffix := ""
+			if len(sorted) > 1 {
+				suffix = StyleSubtle.Render(fmt.Sprintf(" … %d more", len(sorted)-1))
+			}
+			line3 = "  " + StyleSubtle.Render(nameTrunc) + " " + fileStat + suffix
+		} else if r.group != nil && len(r.group.commits) > 0 {
+			line3 = "  " + StyleSubtle.Render(fmt.Sprintf("%d commit(s)", len(r.group.commits)))
+		}
+
+		lines = append(lines, line1, line2, line3, "")
 	}
 
 	return lines
 }
 
-// renderTaskDetailPane renders the right-pane detail for the cursor-selected task.
-// Sections: task heading, verdict badge, rationale, changed files, commits.
-func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int, now time.Time) []string {
-	if entry == nil {
-		return []string{StyleSubtle.Render("loading…")}
-	}
-
-	measure, leftPad := detailContentMeasure(width, reviewDetailMaxMeasure)
-
-	// capAndCenter caps lines to height then prepends centering padding to each
-	// non-empty line. Applied at every return point in the function.
-	capAndCenter := func(lines []string) []string {
-		capped := capLines(lines, height)
-		if leftPad > 0 {
-			pad := strings.Repeat(" ", leftPad)
-			for i, l := range capped {
-				if l != "" {
-					capped[i] = pad + l
-				}
-			}
-		}
-		return capped
-	}
-
-	// No-plan overview path.
-	if len(entry.tasks) == 0 && len(entry.groups) == 0 {
-		var lines []string
-		if entry.aggregate != nil {
-			agg := entry.aggregate
-			subtleGreen := StyleSuccess
-			subtleRed := StyleError
-			summary := fmt.Sprintf("%d files · ", agg.Files) +
-				subtleGreen.Render(fmt.Sprintf("+%d", agg.Insertions)) +
-				" " + subtleRed.Render(fmt.Sprintf("-%d", agg.Deletions))
-			lines = append(lines, summary, "")
-			sorted := make([]git.FileStat, len(entry.files))
-			copy(sorted, entry.files)
-			sortFileStatsByChurn(sorted)
-			top := sorted
-			if len(top) > 8 {
-				top = sorted[:8]
-			}
-			for _, f := range top {
-				name := truncateVisible(f.Path, measure-14)
-				stat := subtleGreen.Render(fmt.Sprintf("+%d", f.Insertions)) +
-					" " + subtleRed.Render(fmt.Sprintf("-%d", f.Deletions))
-				lines = append(lines, "  "+name+"  "+stat)
-			}
-			if len(sorted) > 8 {
-				lines = append(lines, StyleSubtle.Render(fmt.Sprintf("  … %d more files", len(sorted)-8)))
-			}
-		}
-		return capAndCenter(lines)
-	}
-
-	// Resolve selected task and group using same row order as renderTaskListPane.
-	groupByIdx := make(map[int]*taskReviewGroup, len(entry.groups))
-	for i := range entry.groups {
-		g := &entry.groups[i]
-		groupByIdx[g.taskIndex] = g
-	}
-
-	var selectedTask *agent.PlanTask
-	var group *taskReviewGroup
-	row := 0
-	for i := range entry.tasks {
-		if row == cursor {
-			t := entry.tasks[i]
-			selectedTask = &t
-			group = groupByIdx[t.Index]
-			break
-		}
-		row++
-	}
-	if selectedTask == nil {
-		if other, ok := groupByIdx[0]; ok && row == cursor {
-			group = other
-		}
-	}
-
-	var lines []string
-	maxW := measure - 2
-
-	// H2 heading style: matches colHeading2 / styleH2 in mdrender.
-	headingStyle := StyleHeading.Foreground(ColorSecondary)
-
-	// (1) Task heading with H2 color and thin underline.
-	heading := ""
-	if selectedTask != nil {
-		heading = fmt.Sprintf("Task %d: %s", selectedTask.Index, selectedTask.Text)
-	} else if group != nil {
-		heading = "Other changes"
-	}
-	if heading != "" {
-		displayHeading := truncateVisible(heading, maxW)
-		lines = append(lines, headingStyle.Render(displayHeading))
-		lines = append(lines, reviewRenderer.HeadingUnderline(2, ansi.StringWidth(displayHeading), measure))
-		lines = append(lines, "")
-	}
-
-	// (2) Verdict badge.
-	var rec *taskVerdictRecord
-	if entry.verdicts != nil && selectedTask != nil {
-		rec = entry.verdicts[selectedTask.Index]
-	} else if entry.verdicts != nil && group != nil {
-		rec = entry.verdicts[group.taskIndex]
-	}
-	icon, label, style := verdictBadge(rec, now)
-	lines = append(lines, style.Render(icon+" "+label))
-
-	// (3) Rationale rendered through mdrender for inline bold/italic/code styling.
-	if rec != nil && rec.state == verdictDone && rec.verdict.Rationale != "" {
-		lines = append(lines, "")
-		lines = append(lines, reviewRenderer.RenderLines(rec.verdict.Rationale, measure)...)
-	}
-
-	if group == nil {
-		lines = append(lines, "", StyleSubtle.Render("(no commits matched this task)"))
-		return capAndCenter(lines)
-	}
-
-	// (4) Changed files.
-	if len(group.files) > 0 {
-		lines = append(lines, "", StyleSubtle.Render("Changed:"))
-		sorted := make([]git.FileStat, len(group.files))
-		copy(sorted, group.files)
-		sortFileStatsByChurn(sorted)
-		subtleGreen := StyleSuccess
-		subtleRed := StyleError
-		const maxFiles = 8
-		top := sorted
-		if len(top) > maxFiles {
-			top = sorted[:maxFiles]
-		}
-		for _, f := range top {
-			stat := subtleGreen.Render(fmt.Sprintf("+%d", f.Insertions)) +
-				" " + subtleRed.Render(fmt.Sprintf("-%d", f.Deletions))
-			statW := ansi.StringWidth(stat)
-			nameMax := maxW - 2 - 2 - statW
-			if nameMax < 4 {
-				nameMax = 4
-			}
-			name := truncateVisible(f.Path, nameMax)
-			lines = append(lines, "  "+name+"  "+stat)
-		}
-		if len(sorted) > maxFiles {
-			lines = append(lines, StyleSubtle.Render(fmt.Sprintf("  … %d more", len(sorted)-maxFiles)))
-		}
-	}
-
-	// (5) Commits.
-	if len(group.commits) > 0 {
-		lines = append(lines, "", StyleSubtle.Render("Commits:"))
-		for _, c := range group.commits {
-			hash := c.Hash
-			if len(hash) > 7 {
-				hash = hash[:7]
-			}
-			subject := truncateVisible(c.Subject, maxW-2-8)
-			lines = append(lines, "  "+StyleSubtle.Render(hash)+" "+subject)
-		}
-	}
-
-	return capAndCenter(lines)
-}
 
 // capLines returns lines capped to height, with a trailing truncation note if needed.
 func capLines(lines []string, height int) []string {
