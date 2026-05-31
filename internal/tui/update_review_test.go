@@ -64,7 +64,11 @@ func TestBuildReviewReworkPrompt_InstructsTrailer(t *testing.T) {
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 2, Text: "Add widget"}},
 		verdicts: map[int]*taskVerdictRecord{
-			2: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail, Rationale: "missing validation"}},
+			2: {
+				state:       verdictDone,
+				verdict:     agent.ReviewVerdict{Kind: agent.VerdictFail, Rationale: "missing validation"},
+				userFlagged: true,
+			},
 		},
 	}
 	prompt := buildReviewReworkPrompt(entry)
@@ -75,7 +79,10 @@ func TestBuildReviewReworkPrompt_InstructsTrailer(t *testing.T) {
 	if strings.Contains(prompt, "[task 2]") {
 		t.Errorf("rework prompt must NOT contain legacy [task 2] subject prefix, got: %q", prompt)
 	}
-	// The "Other changes" branch must still be explained.
+	if !strings.Contains(prompt, "Flagged by you: yes") {
+		t.Errorf("rework prompt must surface 'Flagged by you: yes' for flagged task, got: %q", prompt)
+	}
+	// The "Other changes" branch must still be explained in the trailing instruction.
 	if !strings.Contains(prompt, "Other changes") {
 		t.Errorf("rework prompt must still mention 'Other changes', got: %q", prompt)
 	}
