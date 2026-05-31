@@ -1600,6 +1600,17 @@ func makeTestCommit(t *testing.T, dir, message string) {
 	}
 }
 
+// makeTestCommitWithTaskTrailer creates an empty git commit with a Plan-Task: N body trailer.
+func makeTestCommitWithTaskTrailer(t *testing.T, dir, subject string, taskIdx int) {
+	t.Helper()
+	trailer := fmt.Sprintf("Plan-Task: %d", taskIdx)
+	cmd := exec.Command("git", "commit", "--allow-empty", "-m", subject, "-m", trailer)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("makeTestCommitWithTaskTrailer %q task %d: %v\n%s", subject, taskIdx, err, out)
+	}
+}
+
 func TestSession_CommitTaskCount_ZeroWithNoCommits(t *testing.T) {
 	repo := setupTestRepo(t)
 	wt := &git.WorktreeInfo{Path: repo, Branch: "main", BaseBranch: "main"}
@@ -1630,10 +1641,10 @@ func TestSession_CommitTaskCount_CorrectAfterRefresh(t *testing.T) {
 		t.Fatalf("checkout -b feature: %v\n%s", err, out)
 	}
 
-	makeTestCommit(t, repo, "[task 1] first task")
-	makeTestCommit(t, repo, "[task 2] second task")
-	makeTestCommit(t, repo, "[task 2] also second task") // duplicate index
-	makeTestCommit(t, repo, "chore: noop")               // non-task commit
+	makeTestCommitWithTaskTrailer(t, repo, "feat: first task", 1)
+	makeTestCommitWithTaskTrailer(t, repo, "feat: second task", 2)
+	makeTestCommitWithTaskTrailer(t, repo, "test: also second task", 2) // duplicate index
+	makeTestCommit(t, repo, "chore: noop")                              // non-task commit
 
 	wt := &git.WorktreeInfo{Path: repo, Branch: "feature", BaseBranch: baseBranch}
 	s := newSession("id", "name", wt)
