@@ -4843,6 +4843,112 @@ func TestNewApp_InitsFeedbackTriage(t *testing.T) {
 	}
 }
 
+func setupSubmitModalApp(t *testing.T, resolved config.ResolvedSettings) (App, *fakeManager) {
+	t.Helper()
+	const dir = "/fake/repo"
+	mgr := newFakeManager(dir)
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	return app, mgr
+}
+
+func TestSubmitPromptModal_SkipPath_AppliesAgentModelOverride(t *testing.T) {
+	resolved := config.ResolvedSettings{AgentModel: "claude-sonnet-4-6"}
+	app, mgr := setupSubmitModalApp(t, resolved)
+
+	_, cmd := app.Update(promptModalSubmitMsg{
+		prompt:       "add dark mode",
+		skipPlanning: true,
+		overrides:    sessionOverrides{AgentModel: "claude-opus-4-8"},
+	})
+	if cmd == nil {
+		t.Fatal("expected cmd from skip-path submit")
+	}
+	cmd() // executes mgr.CreateSession, recording the cfg
+
+	if got := mgr.lastCreateSessionCfg.AgentModel; got != "claude-opus-4-8" {
+		t.Errorf("CreateSession cfg.AgentModel = %q, want \"claude-opus-4-8\"", got)
+	}
+}
+
+func TestSubmitPromptModal_SkipPath_BypassPermissionsOverride(t *testing.T) {
+	resolved := config.ResolvedSettings{BypassPermissions: false}
+	app, mgr := setupSubmitModalApp(t, resolved)
+
+	trueVal := true
+	_, cmd := app.Update(promptModalSubmitMsg{
+		prompt:       "add dark mode",
+		skipPlanning: true,
+		overrides:    sessionOverrides{BypassPermissions: &trueVal},
+	})
+	if cmd == nil {
+		t.Fatal("expected cmd from skip-path submit")
+	}
+	cmd()
+
+	if got := mgr.lastCreateSessionCfg.BypassPermissions; got != true {
+		t.Errorf("CreateSession cfg.BypassPermissions = %v, want true", got)
+	}
+}
+
+func TestSubmitPromptModal_SkipPath_NoOverride_UsesResolved(t *testing.T) {
+	resolved := config.ResolvedSettings{AgentModel: "claude-sonnet-4-6"}
+	app, mgr := setupSubmitModalApp(t, resolved)
+
+	_, cmd := app.Update(promptModalSubmitMsg{
+		prompt:       "add dark mode",
+		skipPlanning: true,
+		overrides:    sessionOverrides{}, // no override
+	})
+	if cmd == nil {
+		t.Fatal("expected cmd")
+	}
+	cmd()
+
+	if got := mgr.lastCreateSessionCfg.AgentModel; got != "claude-sonnet-4-6" {
+		t.Errorf("CreateSession cfg.AgentModel = %q, want \"claude-sonnet-4-6\" (resolved)", got)
+	}
+}
+
+func TestSubmitPromptModal_PlanningPath_StoresPendingOverrides(t *testing.T) {
+	resolved := config.ResolvedSettings{}
+	app, _ := setupSubmitModalApp(t, resolved)
+
+	over := sessionOverrides{PlanModel: "claude-opus-4-8", AgentModel: "claude-sonnet-4-6"}
+	model2, _ := app.Update(promptModalSubmitMsg{
+		prompt:       "add dark mode",
+		skipPlanning: false,
+		overrides:    over,
+	})
+	var appAfter App
+	switch v := model2.(type) {
+	case App:
+		appAfter = v
+	case *App:
+		appAfter = *v
+	default:
+		t.Fatalf("Update returned unexpected type %T", model2)
+	}
+
+	// The fake planning session has ID "fake-plan-sess".
+	got, ok := appAfter.pendingOverrides["fake-plan-sess"]
+	if !ok {
+		t.Fatalf("pendingOverrides missing entry for planning session; map = %v", appAfter.pendingOverrides)
+	}
+	if got.PlanModel != "claude-opus-4-8" {
+		t.Errorf("pendingOverrides.PlanModel = %q, want \"claude-opus-4-8\"", got.PlanModel)
+	}
+	if got.AgentModel != "claude-sonnet-4-6" {
+		t.Errorf("pendingOverrides.AgentModel = %q, want \"claude-sonnet-4-6\"", got.AgentModel)
+	}
+}
+
 func TestNewApp_PendingOverridesInitialized(t *testing.T) {
 	app := NewApp()
 	if app.pendingOverrides == nil {

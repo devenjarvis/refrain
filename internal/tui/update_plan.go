@@ -250,6 +250,21 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	// resolveOverride returns override when non-empty, otherwise fallback.
+	resolveOverride := func(override, fallback string) string {
+		if override != "" {
+			return override
+		}
+		return fallback
+	}
+	// resolveBoolOverride returns *override when non-nil, otherwise fallback.
+	resolveBoolOverride := func(override *bool, fallback bool) bool {
+		if override != nil {
+			return *override
+		}
+		return fallback
+	}
+
 	if msg.skipPlanning {
 		// Skip path: identical to today's `n` flow — create the session and
 		// spawn the real agent immediately with the user's prompt as the
@@ -259,9 +274,9 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		cfg := agent.Config{
 			Rows:              fixedH,
 			Cols:              fixedW,
-			BypassPermissions: resolved.BypassPermissions,
+			BypassPermissions: resolveBoolOverride(msg.overrides.BypassPermissions, resolved.BypassPermissions),
 			AgentProgram:      resolved.AgentProgram,
-			AgentModel:        resolved.AgentModel,
+			AgentModel:        resolveOverride(msg.overrides.AgentModel, resolved.AgentModel),
 			BuildSystemPrompt: resolved.BuildSystemPrompt,
 			Task:              prompt,
 		}
@@ -282,9 +297,9 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	cfg := agent.Config{
 		Rows:              fixedH,
 		Cols:              fixedW,
-		BypassPermissions: resolved.BypassPermissions,
+		BypassPermissions: resolveBoolOverride(msg.overrides.BypassPermissions, resolved.BypassPermissions),
 		AgentProgram:      resolved.AgentProgram,
-		AgentModel:        resolved.AgentModel,
+		AgentModel:        resolveOverride(msg.overrides.AgentModel, resolved.AgentModel),
 	}
 	sess, err := mgr.CreateSessionForPlanning(cfg)
 	if err != nil {
@@ -292,12 +307,18 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	sess.SetOriginalPrompt(prompt)
-	if err := mgr.StartDraft(sess.ID, prompt); err != nil {
+	var draftOpts []agent.DraftOption
+	if msg.overrides.PlanModel != "" {
+		draftOpts = append(draftOpts, agent.WithPlanModel(msg.overrides.PlanModel))
+	}
+	if err := mgr.StartDraft(sess.ID, prompt, draftOpts...); err != nil {
 		a.setError("start draft: " + err.Error())
 		// No fallback to openPlanEditor on error — the session stays on the
 		// dashboard in the planning card; the user can press enter to open the
 		// editor and edit or abandon the plan by hand.
 	}
+	// Store overrides for the approve path to read.
+	a.pendingOverrides[sess.ID] = msg.overrides
 	// sessionsCreatedCount is intentionally NOT incremented here. The user
 	// hasn't committed to this session yet — they could abandon it from the
 	// editor (`q`) before any real agent spawns. We count the session only

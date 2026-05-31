@@ -28,6 +28,15 @@ type fakeManager struct {
 	killAgentCalls   map[string]int
 	shutdownCalls    int
 	updateSettings   []config.ResolvedSettings
+
+	// Recorded configs for assertion in override tests.
+	lastCreateSessionCfg            agent.Config
+	lastCreateSessionForPlanningCfg agent.Config
+	// startDraftModel records the model extracted from the most recent
+	// StartDraft opts, "" when no WithPlanModel was passed.
+	startDraftModel string
+	// nextPlanningSession, when non-nil, is returned by CreateSessionForPlanning.
+	nextPlanningSession *agent.Session
 }
 
 // Compile-time guarantee: keep fakeManager in sync with the SessionManager
@@ -111,8 +120,11 @@ func (f *fakeManager) FindAgentAndSession(agentID string) (*agent.Agent, *agent.
 func (f *fakeManager) Events() <-chan agent.Event                     { return f.events }
 func (f *fakeManager) PlannerQuestions() <-chan agent.PlannerQuestion { return f.plannerQuestions }
 
-func (f *fakeManager) CreateSession(_ agent.Config) (*agent.Session, *agent.Agent, error) {
-	return nil, nil, nil
+func (f *fakeManager) CreateSession(cfg agent.Config) (*agent.Session, *agent.Agent, error) {
+	f.lastCreateSessionCfg = cfg
+	sess := agent.NewSessionForTest("fake-sess", "fake-branch")
+	ag := sess.AddTestAgent("fake-ag", false, agent.StatusIdle)
+	return sess, ag, nil
 }
 
 func (f *fakeManager) CreateSessionWithCommand(_ agent.Config, _ func(string) *exec.Cmd) (*agent.Session, *agent.Agent, error) {
@@ -123,8 +135,13 @@ func (f *fakeManager) CreateSessionOnBranch(_, _ string, _ agent.Config) (*agent
 	return nil, nil, nil
 }
 
-func (f *fakeManager) CreateSessionForPlanning(_ agent.Config) (*agent.Session, error) {
-	return nil, nil
+func (f *fakeManager) CreateSessionForPlanning(cfg agent.Config) (*agent.Session, error) {
+	f.lastCreateSessionForPlanningCfg = cfg
+	if f.nextPlanningSession != nil {
+		return f.nextPlanningSession, nil
+	}
+	// Return a minimal session so callers can access sess.ID without panicking.
+	return agent.NewSessionForTest("fake-plan-sess", "fake-branch"), nil
 }
 
 func (f *fakeManager) AddAgent(_ string, _ agent.Config) (*agent.Agent, error) {
