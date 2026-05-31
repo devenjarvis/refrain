@@ -77,11 +77,17 @@ func (m *reviewPanelModel) Update(msg tea.Msg) (PanelModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.SetSize(msg.Width, msg.Height-1)
+		m.syncDiffPane()
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.MouseClickMsg:
+		before := m.taskCursor
 		m.handleClick(msg)
+		if m.taskCursor != before {
+			m.vpFileIdx = 0
+			m.syncDiffPane()
+		}
 		return m, nil
 	}
 	return m, nil
@@ -90,24 +96,6 @@ func (m *reviewPanelModel) Update(msg tea.Msg) (PanelModel, tea.Cmd) {
 // handleKey is the per-key dispatch extracted from app.go's monolithic
 // Update. Spec overlay intercepts all keys while active.
 func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) {
-	// Tab-switching keys work even while spec overlay is open.
-	switch msg.String() {
-	case "1":
-		m.activeTab = reviewTabTasks
-		return m, nil
-	case "2":
-		m.activeTab = reviewTabDiff
-		return m, nil
-	case "3":
-		m.activeTab = reviewTabChecks
-		return m, nil
-	case "tab":
-		m.activeTab = (m.activeTab + 1) % 3
-		return m, nil
-	case "shift+tab":
-		m.activeTab = (m.activeTab + 2) % 3
-		return m, nil
-	}
 
 	if m.specOverlay {
 		switch msg.String() {
@@ -165,7 +153,8 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 				}
 			},
 		)
-	case "c":
+	case "m", "c":
+		// m is the advertised key ("m approve"); c kept for backwards compatibility.
 		sess := m.session
 		sess.SetLifecyclePhase(agent.LifecycleComplete)
 		mgr := m.deps.Manager(m.repoPath)
@@ -176,39 +165,24 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 	case "e":
 		return m, reviewOpenIDECmd(m.session, m.repoPath, m.deps.Resolved)
 	case "j", "down":
-		switch m.activeTab {
-		case reviewTabTasks:
-			if entry := m.deps.ReviewCache(m.repoPath, m.session.ID); entry != nil {
-				maxIdx := reviewTaskCount(entry) - 1
-				if m.taskCursor < maxIdx {
-					m.taskCursor++
-				}
-			}
-		case reviewTabChecks:
-			if m.deps.ValidationRuns != nil {
-				if run := m.deps.ValidationRuns(m.repoPath, m.session.ID); run != nil {
-					maxIdx := len(run.results) - 1
-					if m.checksCursor < maxIdx {
-						m.checksCursor++
-					}
-				}
+		if entry := m.deps.ReviewCache(m.repoPath, m.session.ID); entry != nil {
+			maxIdx := reviewTaskCount(entry) - 1
+			if m.taskCursor < maxIdx {
+				m.taskCursor++
+				m.vpFileIdx = 0
+				m.syncDiffPane()
 			}
 		}
 		return m, nil
 	case "k", "up":
-		switch m.activeTab {
-		case reviewTabTasks:
-			if m.taskCursor > 0 {
-				m.taskCursor--
-			}
-		case reviewTabChecks:
-			if m.checksCursor > 0 {
-				m.checksCursor--
-			}
+		if m.taskCursor > 0 {
+			m.taskCursor--
+			m.vpFileIdx = 0
+			m.syncDiffPane()
 		}
 		return m, nil
 	case "r":
-		if m.activeTab == reviewTabChecks && m.deps.TriggerValidationRerun != nil {
+		if m.deps.TriggerValidationRerun != nil {
 			var run *validationRunState
 			if m.deps.ValidationRuns != nil {
 				run = m.deps.ValidationRuns(m.repoPath, m.session.ID)
@@ -230,15 +204,47 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 		}
 		return m, nil
 	case "pgdown":
-		if m.activeTab == reviewTabChecks {
-			m.checksScroll += m.height - 4
-		}
+		m.vp.PageDown()
 		return m, nil
 	case "pgup":
-		if m.activeTab == reviewTabChecks {
-			m.checksScroll -= m.height - 4
-			if m.checksScroll < 0 {
-				m.checksScroll = 0
+		m.vp.PageUp()
+		return m, nil
+	case "ctrl+d":
+		m.vp.HalfPageDown()
+		return m, nil
+	case "ctrl+u":
+		m.vp.HalfPageUp()
+		return m, nil
+	case "g":
+		m.vp.GotoTop()
+		return m, nil
+	case "G":
+		m.vp.GotoBottom()
+		return m, nil
+	case "s":
+		m.sideBySide = !m.sideBySide
+		m.renderersByPath = nil
+		m.syncDiffPane()
+		return m, nil
+	case "[":
+		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
+		if dm, _, ok := m.focusedDiffModel(entry); ok && dm != nil {
+			if m.vpFileIdx > 0 {
+				m.vpFileIdx--
+				m.vp.GotoTop()
+				m.renderersByPath = nil
+				m.syncDiffPane()
+			}
+		}
+		return m, nil
+	case "]":
+		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
+		if dm, _, ok := m.focusedDiffModel(entry); ok && dm != nil {
+			if m.vpFileIdx < len(dm.Files)-1 {
+				m.vpFileIdx++
+				m.vp.GotoTop()
+				m.renderersByPath = nil
+				m.syncDiffPane()
 			}
 		}
 		return m, nil
@@ -273,30 +279,27 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 			return reviewReworkRequestMsg{sessionID: sessID, repoPath: repoPath, prompt: prompt}
 		}
 	case "enter":
-		if m.activeTab == reviewTabTasks {
-			entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
-			group := reviewTaskGroupAtCursor(entry, m.taskCursor)
-			if group == nil || group.rawDiff == "" {
-				return m, nil
-			}
-			// Build "[N] task text" label using same row order as the list pane.
-			label := "Other changes"
-			if entry != nil {
-				row := 0
-				for _, t := range entry.tasks {
-					if row == m.taskCursor {
-						label = fmt.Sprintf("[%d] %s", t.Index, t.Text)
-						break
-					}
-					row++
+		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
+		group := reviewTaskGroupAtCursor(entry, m.taskCursor)
+		if group == nil || group.rawDiff == "" {
+			return m, nil
+		}
+		// Build "[N] task text" label using same row order as the list pane.
+		label := "Other changes"
+		if entry != nil {
+			row := 0
+			for _, t := range entry.tasks {
+				if row == m.taskCursor {
+					label = fmt.Sprintf("[%d] %s", t.Index, t.Text)
+					break
 				}
-			}
-			rawDiff := group.rawDiff
-			return m, func() tea.Msg {
-				return reviewOpenTaskDiffMsg{rawDiff: rawDiff, taskLabel: label}
+				row++
 			}
 		}
-		return m, nil
+		rawDiff := group.rawDiff
+		return m, func() tea.Msg {
+			return reviewOpenTaskDiffMsg{rawDiff: rawDiff, taskLabel: label}
+		}
 	case "space":
 		return m, nil
 	case "?":
@@ -309,8 +312,8 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 }
 
 // handleClick maps a mouse-click on the review task list pane to a cursor
-// move. Mirrors the offset math in renderTaskListPane so the visual row
-// under the click becomes the new cursor.
+// move. Mirrors the layout math in renderTaskListPane and View() so the card
+// under the click becomes the new cursor position.
 func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg) {
 	if m == nil || m.session == nil {
 		return
@@ -319,30 +322,55 @@ func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg) {
 	if entry == nil {
 		return
 	}
+
+	// Compute left-pane width the same way as View() and the renderer.
+	leftPaneW := reviewLeftPaneWidth(m.width)
+	if leftPaneW == 0 {
+		// Narrow stacked mode: full width is the task ledger.
+		leftPaneW = m.width - 2
+	} else if msg.X >= leftPaneW+1 {
+		// Click is in the right (diff) pane — ignore.
+		return
+	}
+
 	headerH := len(renderReviewHeader(m.session, m.width, m.now))
-	const tabBarH = 2
-	paneTop := m.dashboardTopY + headerH + tabBarH
-	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, m.width-2)
+	// Compute checksH from actual run state so click coordinates match the render.
+	var checksCS *checksTabState
+	if m.deps.ValidationRuns != nil {
+		if run := m.deps.ValidationRuns(m.repoPath, m.session.ID); run != nil {
+			checksCS = &checksTabState{
+				checks:  run.checks,
+				results: run.results,
+				cursor:  m.checksCursor,
+				scroll:  m.checksScroll,
+			}
+		}
+	}
+	checksH := len(renderChecksStrip(checksCS, m.width, m.now))
+	paneTop := m.dashboardTopY + headerH + checksH
+	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, leftPaneW)
 	if rowIdx < 0 {
 		return
 	}
+
 	footerLines := 3
-	bodyH := m.height - m.dashboardTopY - headerH - tabBarH - footerLines
+	bodyH := m.height - m.dashboardTopY - headerH - checksH - footerLines
 	if bodyH < 4 {
 		bodyH = 4
 	}
 	const listHeaderLines = 2
-	rowsH := bodyH - listHeaderLines
-	if rowsH < 1 {
-		rowsH = 1
+	const cardH = 4
+	cardsH := (bodyH - listHeaderLines) / cardH
+	if cardsH < 1 {
+		cardsH = 1
 	}
 	nRows := reviewTaskCount(entry)
-	offset := m.taskCursor - rowsH/2
+	offset := m.taskCursor - cardsH/2
 	if offset < 0 {
 		offset = 0
 	}
-	if offset+rowsH > nRows {
-		offset = nRows - rowsH
+	if offset+cardsH > nRows {
+		offset = nRows - cardsH
 		if offset < 0 {
 			offset = 0
 		}

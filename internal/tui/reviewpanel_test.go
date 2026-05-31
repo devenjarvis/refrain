@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/config"
@@ -56,6 +56,133 @@ func TestRenderReviewHeader_TwoLineIntentCap(t *testing.T) {
 	}
 }
 
+// TestRenderTaskLedger_CardLayout verifies that each task card occupies exactly
+// 4 lines with the expected content in each line.
+func TestRenderTaskLedger_CardLayout(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "Implement feature"},
+			{Index: 2, Text: "Write tests"},
+		},
+		groups: []taskReviewGroup{
+			{
+				taskIndex: 1,
+				commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] implement"}},
+				files:     []git.FileStat{{Path: "auth.go", Insertions: 42, Deletions: 3}},
+				stats:     &git.DiffStats{Files: 1, Insertions: 42, Deletions: 3},
+			},
+			{
+				taskIndex: 2,
+				commits:   []git.Commit{{Hash: "def5678", Subject: "[task 2] tests"}},
+				files:     []git.FileStat{{Path: "auth_test.go", Insertions: 10, Deletions: 0}},
+				stats:     &git.DiffStats{Files: 1, Insertions: 10, Deletions: 0},
+			},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: "Solid impl"}},
+			2: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictConcerns, Rationale: "missing test"}},
+		},
+	}
+
+	const width = 60
+	// Height: 2 header + 2 cards × 4 lines = 10 minimum.
+	lines := renderTaskListPane(entry, width, 12, 0, time.Now())
+
+	// Skip 2-line header; card 0 starts at lines[2].
+	const headerLen = 2
+	if len(lines) < headerLen+8 {
+		t.Fatalf("expected at least %d lines, got %d:\n%s", headerLen+8, len(lines), strings.Join(lines, "\n"))
+	}
+
+	card0 := lines[headerLen : headerLen+4]
+	card1 := lines[headerLen+4 : headerLen+8]
+
+	// Card 0: pass verdict.
+	l0 := ansi.Strip(card0[0])
+	if !strings.Contains(l0, "[1]") {
+		t.Errorf("card0 line1: missing [1]; got: %q", l0)
+	}
+	if !strings.Contains(l0, "Implement feature") {
+		t.Errorf("card0 line1: missing task text; got: %q", l0)
+	}
+	if !strings.Contains(l0, "+42") {
+		t.Errorf("card0 line1: missing +42 stat; got: %q", l0)
+	}
+	if !strings.Contains(l0, "-3") {
+		t.Errorf("card0 line1: missing -3 stat; got: %q", l0)
+	}
+	l1 := ansi.Strip(card0[1])
+	if !strings.Contains(l1, "pass") {
+		t.Errorf("card0 line2: missing 'pass' verdict; got: %q", l1)
+	}
+	if !strings.Contains(l1, "Solid impl") {
+		t.Errorf("card0 line2: missing rationale; got: %q", l1)
+	}
+	l2 := ansi.Strip(card0[2])
+	if !strings.Contains(l2, "auth.go") {
+		t.Errorf("card0 line3: missing top file name; got: %q", l2)
+	}
+	if card0[3] != "" {
+		t.Errorf("card0 line4: expected blank separator, got: %q", card0[3])
+	}
+
+	// Card 1: concerns verdict.
+	l0c1 := ansi.Strip(card1[0])
+	if !strings.Contains(l0c1, "[2]") {
+		t.Errorf("card1 line1: missing [2]; got: %q", l0c1)
+	}
+	l1c1 := ansi.Strip(card1[1])
+	if !strings.Contains(l1c1, "concerns") {
+		t.Errorf("card1 line2: missing 'concerns' verdict; got: %q", l1c1)
+	}
+	if !strings.Contains(l1c1, "missing test") {
+		t.Errorf("card1 line2: missing rationale; got: %q", l1c1)
+	}
+	if card1[3] != "" {
+		t.Errorf("card1 line4: expected blank separator, got: %q", card1[3])
+	}
+}
+
+// TestRenderTaskLedger_CursorStripeOnSelected verifies that the selected card's
+// lines start and end with the cursor-stripe character '│'.
+func TestRenderTaskLedger_CursorStripeOnSelected(t *testing.T) {
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "task one"},
+			{Index: 2, Text: "task two"},
+		},
+		groups: []taskReviewGroup{
+			{taskIndex: 1, stats: &git.DiffStats{Insertions: 1}},
+			{taskIndex: 2, stats: &git.DiffStats{Insertions: 2}},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictPending},
+			2: {state: verdictPending},
+		},
+	}
+
+	// cursor=1: card 1 is selected.
+	lines := renderTaskListPane(entry, 60, 12, 1, time.Now())
+
+	const headerLen = 2
+	if len(lines) < headerLen+8 {
+		t.Fatalf("expected at least %d lines, got %d", headerLen+8, len(lines))
+	}
+
+	card0 := lines[headerLen : headerLen+4]   // unselected
+	card1 := lines[headerLen+4 : headerLen+8] // selected
+
+	// Unselected card must NOT have cursor stripes on first line.
+	if strings.Contains(card0[0], "│") {
+		t.Errorf("unselected card line1 must not contain │; got: %q", card0[0])
+	}
+
+	// Selected card must have cursor stripes on first line.
+	if !strings.Contains(card1[0], "│") {
+		t.Errorf("selected card line1 must contain │ cursor stripe; got: %q", card1[0])
+	}
+}
+
 // TestRenderTaskListPane_RowFormat verifies the compact left-pane row structure.
 func TestRenderTaskListPane_RowFormat(t *testing.T) {
 	entry := &reviewDiffEntry{
@@ -81,7 +208,8 @@ func TestRenderTaskListPane_RowFormat(t *testing.T) {
 		},
 	}
 
-	const width, height, cursor = 40, 10, 0
+	// height=16 fits all 3 cards (2 header + 3×4 card lines).
+	const width, height, cursor = 40, 16, 0
 	lines := renderTaskListPane(entry, width, height, cursor, time.Now())
 	out := strings.Join(lines, "\n")
 
@@ -126,119 +254,61 @@ func TestRenderTaskListPane_RowFormat(t *testing.T) {
 	}
 }
 
-// TestRenderTaskDetailPane_FullRationaleNoTruncation verifies that a 250-char
-// rationale renders in full without any ellipsis truncation.
-func TestRenderTaskDetailPane_FullRationaleNoTruncation(t *testing.T) {
-	rationale := strings.Repeat("Great implementation. ", 12)[:250]
+// TestRenderReviewPanel_RightPaneShowsFocusedTaskDiff verifies that the right
+// pane in wide mode shows the diff for the cursor-selected task and swaps
+// when the cursor moves.
+func TestRenderReviewPanel_RightPaneShowsFocusedTaskDiff(t *testing.T) {
+	rawDiff1 := "diff --git a/a.go b/a.go\nindex 000..111 100644\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n package main\n+// MARKER_TASK_1\n"
+	rawDiff2 := "diff --git a/b.go b/b.go\nindex 000..222 100644\n--- a/b.go\n+++ b/b.go\n@@ -1 +1,2 @@\n package main\n+// MARKER_TASK_2\n"
+
+	sess := agent.NewSessionForTest("sess-rightpane", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+
 	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
-		groups: []taskReviewGroup{{
-			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
-			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
-		}},
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "task one"},
+			{Index: 2, Text: "task two"},
+		},
+		groups: []taskReviewGroup{
+			{taskIndex: 1, rawDiff: rawDiff1},
+			{taskIndex: 2, rawDiff: rawDiff2},
+		},
 		verdicts: map[int]*taskVerdictRecord{
-			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: rationale}},
+			1: {state: verdictPending},
+			2: {state: verdictPending},
 		},
 	}
 
-	const width, height, cursor = 60, 20, 0
-	lines := renderTaskDetailPane(entry, cursor, width, height, time.Now())
-	out := strings.Join(lines, "\n")
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
 
-	// Full rationale must appear — check a phrase that fits within one wrapped line.
-	if !strings.Contains(out, "Great implementation.") {
-		t.Error("full rationale must be present ('Great implementation.' not found)")
+	// Prime the viewport via WindowSizeMsg (triggers syncDiffPane for cursor=0).
+	_, _ = panel.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+
+	// cursor=0 → task 1 diff in right pane.
+	out0 := ansi.Strip(panel.View())
+	if !strings.Contains(out0, "MARKER_TASK_1") {
+		t.Errorf("cursor=0: right pane must show MARKER_TASK_1; got:\n%s", out0)
 	}
-	// Rationale is long enough to span multiple lines; verify last word also present.
-	if !strings.Contains(out, rationale[200:220]) {
-		t.Error("tail of rationale must also be present (rationale truncated)")
-	}
-	if strings.Contains(out, "…") {
-		t.Error("rationale must not be truncated with …")
+	if strings.Contains(out0, "MARKER_TASK_2") {
+		t.Errorf("cursor=0: right pane must NOT show MARKER_TASK_2; got:\n%s", out0)
 	}
 
-	// No individual rendered line exceeds width visible cells.
-	// Rationale is now rendered at measure=width (when width<reviewDetailMaxMeasure),
-	// so lines may be up to width wide rather than the old width-2.
-	for i, l := range lines {
-		if vw := ansi.StringWidth(l); vw > width {
-			t.Errorf("line %d visible width %d exceeds %d: %q", i, vw, width, l)
-		}
+	// cursor=1 → task 2 diff in right pane (j key triggers syncDiffPane).
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	out1 := ansi.Strip(panel.View())
+	if !strings.Contains(out1, "MARKER_TASK_2") {
+		t.Errorf("cursor=1: right pane must show MARKER_TASK_2; got:\n%s", out1)
+	}
+	if strings.Contains(out1, "MARKER_TASK_1") {
+		t.Errorf("cursor=1: right pane must NOT show MARKER_TASK_1; got:\n%s", out1)
 	}
 }
 
-// TestRenderTaskDetailPane_VerdictStatesRender verifies each verdict state produces
-// the expected label string in the detail pane.
-func TestRenderTaskDetailPane_VerdictStatesRender(t *testing.T) {
-	tests := []struct {
-		name      string
-		rec       *taskVerdictRecord
-		wantLabel string
-	}{
-		{"pass", &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}}, "pass"},
-		{"concerns", &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictConcerns}}, "concerns"},
-		{"fail", &taskVerdictRecord{state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail}}, "fail"},
-		{"pending", &taskVerdictRecord{state: verdictPending}, "Pending"},
-		{"running", &taskVerdictRecord{state: verdictRunning}, "Reviewing…"},
-		{"err", &taskVerdictRecord{state: verdictErr}, "error"},
-		{"noDiff", &taskVerdictRecord{state: verdictNoDiff}, "no diff found"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			entry := &reviewDiffEntry{
-				tasks:    []agent.PlanTask{{Index: 1, Text: "Do something"}},
-				groups:   []taskReviewGroup{{taskIndex: 1, commits: []git.Commit{{Hash: "abc1234"}}}},
-				verdicts: map[int]*taskVerdictRecord{1: tt.rec},
-			}
-			lines := renderTaskDetailPane(entry, 0, 80, 20, time.Now())
-			out := strings.Join(lines, "\n")
-			if !strings.Contains(out, tt.wantLabel) {
-				t.Errorf("verdict state %s: want label %q in output; got:\n%s", tt.name, tt.wantLabel, out)
-			}
-		})
-	}
-}
-
-// TestRenderTaskDetailPane_ShowsFilesAndCommits verifies that file paths, +X -Y
-// stats, and commit subjects all appear in the detail pane.
-func TestRenderTaskDetailPane_ShowsFilesAndCommits(t *testing.T) {
-	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "Implement feature"}},
-		groups: []taskReviewGroup{{
-			taskIndex: 1,
-			commits: []git.Commit{
-				{Hash: "abc1234def", Subject: "feat: add new handler"},
-				{Hash: "fff5678abc", Subject: "test: add handler tests"},
-			},
-			files: []git.FileStat{
-				{Path: "internal/handler.go", Insertions: 42, Deletions: 3},
-				{Path: "internal/handler_test.go", Insertions: 80, Deletions: 0},
-			},
-			stats: &git.DiffStats{Files: 2, Insertions: 122, Deletions: 3},
-		}},
-		verdicts: map[int]*taskVerdictRecord{
-			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}},
-		},
-	}
-
-	lines := renderTaskDetailPane(entry, 0, 80, 30, time.Now())
-	out := strings.Join(lines, "\n")
-
-	for _, want := range []string{
-		"internal/handler.go", "+42", "-3",
-		"internal/handler_test.go", "+80",
-		"abc1234", "feat: add new handler",
-		"fff5678", "test: add handler tests",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("detail pane must contain %q; got:\n%s", want, out)
-		}
-	}
-}
-
-// TestRenderReviewPanel_TwoPaneLayout verifies that wide rendering composes both
-// panes side-by-side: left pane task list and right pane task detail.
+// TestRenderReviewPanel_TwoPaneLayout verifies that the card ledger renders
+// task data: PLAN TASKS header, task index, verdict label, and footer hint.
 func TestRenderReviewPanel_TwoPaneLayout(t *testing.T) {
 	rationale := strings.Repeat("This implementation is well structured and correct. ", 4)
 	sess := agent.NewSessionForTest("sess-1", "fix-auth")
@@ -256,22 +326,19 @@ func TestRenderReviewPanel_TwoPaneLayout(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 140, 30, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 140, 30, 0, false, nil, time.Now())
 
 	if !strings.Contains(output, "PLAN TASKS") {
-		t.Error("must contain PLAN TASKS from left pane")
-	}
-	if !strings.Contains(output, "Task 1:") {
-		t.Error("must contain 'Task 1:' from right pane detail heading")
+		t.Error("must contain PLAN TASKS from task ledger")
 	}
 	if !strings.Contains(output, "[1]") {
-		t.Error("must contain [1] task index from left pane row")
+		t.Error("must contain [1] task index from card line 1")
 	}
-	if !strings.Contains(output, "This implementation") {
-		t.Error("must contain rationale text from right pane")
+	if !strings.Contains(output, "pass") {
+		t.Error("must contain 'pass' verdict label from card line 2")
 	}
-	if !strings.Contains(output, "create or open PR") {
-		t.Error("footer must still advertise 'create or open PR'")
+	if !strings.Contains(output, "ship") {
+		t.Error("footer must still advertise 'ship' (p ship)")
 	}
 }
 
@@ -296,24 +363,15 @@ func TestRenderReviewPanel_FullWidthStack(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, nil, time.Now())
 
 	if !strings.Contains(output, "PLAN TASKS") {
-		t.Error("must contain PLAN TASKS from list pane")
+		t.Error("must contain PLAN TASKS from task ledger")
 	}
-	if !strings.Contains(output, "Task 1:") {
-		t.Error("must contain 'Task 1:' from detail pane")
+	if !strings.Contains(output, "[1]") {
+		t.Error("must contain [1] task index")
 	}
-	// In stacked mode, PLAN TASKS and Task 1: are never on the same line.
-	for _, line := range strings.Split(output, "\n") {
-		stripped := ansi.Strip(line)
-		if strings.Contains(stripped, "PLAN TASKS") && strings.Contains(stripped, "Task 1:") {
-			t.Errorf("in stacked mode panes must not be side-by-side; found both on one line: %q", line)
-		}
-	}
-	// Full-width: the long task name must not be truncated. In the old 40%-width
-	// left pane, text beyond ~48 chars was cut. At width=120 the list pane is
-	// now 118 chars wide, so the full task text must appear.
+	// Full-width: the long task name must not be truncated.
 	if !strings.Contains(ansi.Strip(output), "token validation and redirect") {
 		t.Errorf("full-width stacked layout must not truncate long task text; got:\n%s", output)
 	}
@@ -337,20 +395,16 @@ func TestRenderReviewPanel_NarrowWidthStacks(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 70, 30, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 70, 30, 0, false, nil, time.Now())
 
 	if !strings.Contains(output, "PLAN TASKS") {
-		t.Error("must contain PLAN TASKS from list pane")
+		t.Error("must contain PLAN TASKS from task ledger")
 	}
-	if !strings.Contains(output, "Task 1:") {
-		t.Error("must contain 'Task 1:' from detail pane")
+	if !strings.Contains(output, "[1]") {
+		t.Error("must contain [1] task index")
 	}
-
-	// In stacked mode, no single line should contain both PLAN TASKS and Task 1:.
-	for _, line := range strings.Split(output, "\n") {
-		if strings.Contains(line, "PLAN TASKS") && strings.Contains(line, "Task 1:") {
-			t.Errorf("in narrow mode panes must be stacked, not side-by-side; found both on one line: %q", line)
-		}
+	if !strings.Contains(output, "pass") {
+		t.Error("must contain 'pass' verdict in card line 2")
 	}
 }
 
@@ -367,13 +421,10 @@ func TestRenderReviewPanel_ShowsOriginalPrompt(t *testing.T) {
 		aggregate: &git.DiffStats{Files: 2, Insertions: 213, Deletions: 34},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, nil, time.Now())
 
 	if !strings.Contains(output, "Fix the auth bug") {
-		t.Error("review panel must show the original prompt")
-	}
-	if !strings.Contains(output, "middleware/auth.go") {
-		t.Error("review panel must show top changed file")
+		t.Error("review panel must show the original prompt in the header")
 	}
 }
 
@@ -382,7 +433,7 @@ func TestRenderReviewPanel_NilDiffEntry(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 
 	// nil entry — should not panic
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, nil, time.Now())
 	if !strings.Contains(output, "Fix the auth bug") {
 		t.Error("must still show prompt even with nil diff entry")
 	}
@@ -406,12 +457,64 @@ func TestRenderReviewPanel_UsesThemeColors(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 30, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 120, 30, 0, false, nil, time.Now())
 
 	// The pass verdict icon should carry the ColorSuccess ANSI escape.
 	expectedPrefix := StyleSuccess.Render("✓")
 	if !strings.Contains(output, expectedPrefix) {
 		t.Errorf("pass verdict must use StyleSuccess ANSI color; styled icon %q not found in output", expectedPrefix)
+	}
+}
+
+// TestReviewPanel_ClickHitsLeftPaneOnly verifies that at width=140 (two-pane)
+// a click in the left pane moves the cursor but a click in the right pane
+// (x=80) leaves the cursor unchanged. At width=80 (stacked), clicks in the
+// task-ledger area move the cursor.
+func TestReviewPanel_ClickHitsLeftPaneOnly(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+	// renderReviewHeader for this session returns 3 lines (title+prompt+divider).
+	// No tab bar → paneTop = dashboardTopY(0) + headerH(3) = 3.
+	// listHeaderLines=2 → first card at Y=5.
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "task one"},
+			{Index: 2, Text: "task two"},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictPending},
+			2: {state: verdictPending},
+		},
+	}
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+
+	// Width=140: two-pane mode. leftPaneWidth = clamp(140*40/100, 38, 52) = 52.
+	panel140 := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
+	// Move cursor to 1 so we can test a click that should return it to 0.
+	panel140.taskCursor = 1
+
+	// Click at x=10, Y=5 (first card, within left pane width=52) → cursor 0.
+	_, _ = panel140.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 10, Y: 5})
+	if panel140.TaskCursor() != 0 {
+		t.Errorf("wide: click at x=10 (left pane) should move cursor to 0, got %d", panel140.TaskCursor())
+	}
+
+	// Reset cursor.
+	panel140.taskCursor = 1
+	// Click at x=80 (right pane: x >= leftPaneWidth+1 = 53) → cursor unchanged.
+	_, _ = panel140.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 80, Y: 5})
+	if panel140.TaskCursor() != 1 {
+		t.Errorf("wide: click at x=80 (right pane) must not change cursor, got %d", panel140.TaskCursor())
+	}
+
+	// Width=80: stacked mode. Full width for task ledger. leftPaneWidth = 0.
+	panel80 := newReviewPanel(sess, "", 80, 40, app.buildReviewDeps())
+	panel80.taskCursor = 1
+	// Click at x=10, Y=5 (first card) → cursor 0.
+	_, _ = panel80.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 10, Y: 5})
+	if panel80.TaskCursor() != 0 {
+		t.Errorf("stacked: click at Y=5 should move cursor to 0, got %d", panel80.TaskCursor())
 	}
 }
 
@@ -428,18 +531,20 @@ func TestReviewListPaneRowAt(t *testing.T) {
 
 	const paneTop, paneLeft, paneWidth = 4, 0, 40
 
+	// With 4-line cards: header at paneTop+0,+1; card 0 at paneTop+2..+5; card 1 at +6..+9; card 2 at +10..+13.
 	tests := []struct {
 		name    string
 		mouseX  int
 		mouseY  int
 		wantRow int
 	}{
-		{"click row 0", 5, paneTop + 2, 0},
-		{"click row 1", 5, paneTop + 3, 1},
-		{"click row 2", 5, paneTop + 4, 2},
-		{"Y below rows", 5, paneTop + 5, -1},
+		{"click card 0 line 0", 5, paneTop + 2, 0},
+		{"click card 0 line 3", 5, paneTop + 5, 0}, // still within card 0
+		{"click card 1 line 0", 5, paneTop + 6, 1},
+		{"click card 2 line 0", 5, paneTop + 10, 2},
+		{"Y below all cards", 5, paneTop + 14, -1}, // 3 cards = 12 lines, so +14 is beyond
 		{"in PLAN TASKS header", 5, paneTop, -1},
-		{"in blank header line", 5, paneTop + 1, -1},
+		{"in underline header line", 5, paneTop + 1, -1},
 		{"X past right edge", paneLeft + paneWidth, paneTop + 2, -1},
 		{"X before left edge", paneLeft - 1, paneTop + 2, -1},
 		{"Y above pane", 5, paneTop - 1, -1},
@@ -468,16 +573,10 @@ func TestRenderReviewPanel_NoPlanShowsOverview(t *testing.T) {
 		aggregate: &git.DiffStats{Files: 2, Insertions: 30, Deletions: 2},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 30, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 120, 30, 0, false, nil, time.Now())
 
 	if !strings.Contains(output, "Overview") {
-		t.Error("must show 'Overview' row in list pane for no-plan session")
-	}
-	if !strings.Contains(output, "auth.go") {
-		t.Error("must show auth.go in detail pane aggregate view")
-	}
-	if !strings.Contains(output, "+10") {
-		t.Error("must show +10 insertions for auth.go")
+		t.Error("must show 'Overview' card in task ledger for no-plan session")
 	}
 	if strings.Contains(output, "REVIEW SHAPE") {
 		t.Error("must not show legacy 'REVIEW SHAPE' string")
@@ -508,37 +607,14 @@ func TestRenderReviewPanel_FooterAdvertisesAllActions(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, nil, time.Now())
 
 	for _, want := range []string{
-		"open PR",
-		"open agent terminal",
-		"mark complete",
-		"open in editor",
-		"defer",
-		"back to focus",
+		"ship", "rework", "approve", "flag", "defer", "editor", "terminal", "expand", "spec", "back",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("footer must advertise %q; got:\n%s", want, output)
 		}
-	}
-}
-
-// TestRenderReviewPanel_ChecksTabFooter verifies that when activeTab is Checks,
-// the footer shows the r-run hint and does not contain the flag-task hint.
-func TestRenderReviewPanel_ChecksTabFooter(t *testing.T) {
-	sess := agent.NewSessionForTest("sess-1", "fix-auth")
-	sess.SetOriginalPrompt("Fix auth")
-	sess.MarkDone()
-
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, nil, time.Now())
-	stripped := ansi.Strip(output)
-
-	if !strings.Contains(stripped, "run checks") {
-		t.Errorf("Checks tab footer must contain 'run checks'; got:\n%s", stripped)
-	}
-	if strings.Contains(stripped, "flag task") {
-		t.Errorf("Checks tab footer must not contain 'flag task'; got:\n%s", stripped)
 	}
 }
 
@@ -569,7 +645,7 @@ func TestRenderReviewPanel_TaskListShown(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, nil, time.Now())
 
 	if !strings.Contains(output, "PLAN TASKS") {
 		t.Error("task list view must show PLAN TASKS header")
@@ -777,7 +853,7 @@ func TestRenderReviewPanel_NoDiffFoundBadge(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, nil, time.Now())
 
 	if !strings.Contains(output, "Write tests") {
 		t.Error("must render a row for task 2 even though it has no commits")
@@ -969,11 +1045,10 @@ func TestRenderReviewHeader_NoGoalWhenNoPlan(t *testing.T) {
 	}
 }
 
-// TestRenderReviewPanel_HintsIncludeSpecAndEnter verifies that the footer hints
-// include ? (spec) and enter (open task diff), and no longer show "view task diff"
-// or "pgdn/pgup" (the inline diff viewport was removed).
-func TestRenderReviewPanel_HintsIncludeSpecAndEnter(t *testing.T) {
-	sess := agent.NewSessionForTest("sess-hints", "fix-auth")
+// TestRenderReviewPanel_UnifiedFooter verifies the unified single-line footer
+// contains all the expected action keywords and is a single hint line.
+func TestRenderReviewPanel_UnifiedFooter(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-footer-unified", "fix-auth")
 	sess.SetOriginalPrompt("Fix auth")
 	sess.MarkDone()
 
@@ -982,25 +1057,30 @@ func TestRenderReviewPanel_HintsIncludeSpecAndEnter(t *testing.T) {
 		groups: []taskReviewGroup{{
 			taskIndex: 1,
 			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] fix"}},
-			rawDiff:   "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,3 @@\n package main\n+// marker\n func A() {}\n",
 		}},
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 
-	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil, time.Now())
+	// Without checks — should not contain "rerun checks".
+	output := renderReviewPanel(sess, entry, 140, 40, 0, false, nil, time.Now())
 	stripped := ansi.Strip(output)
 
-	if !strings.Contains(stripped, "?") {
-		t.Error("footer must include '?' hint for spec overlay")
+	for _, want := range []string{"ship", "rework", "approve", "flag", "defer", "editor", "terminal", "expand", "spec", "back"} {
+		if !strings.Contains(stripped, want) {
+			t.Errorf("unified footer must contain %q; got:\n%s", want, stripped)
+		}
 	}
-	if !strings.Contains(stripped, "enter") {
-		t.Error("footer must include 'enter' hint for opening task diff")
+	// "rerun checks" should only appear when checks are configured (tested below).
+
+	// With checks configured — should contain "rerun checks".
+	cs := &checksTabState{
+		checks:  []config.ValidationCheck{{Name: "Tests", Command: "go test ./..."}},
+		results: []validationCheckResult{{state: checkPassed}},
 	}
-	if strings.Contains(stripped, "pgdn") {
-		t.Error("footer must not include 'pgdn' hint (inline viewport removed)")
-	}
-	if strings.Contains(output, "view task diff") {
-		t.Error("footer must not include 'view task diff' hint (removed in favor of full-screen diff viewer)")
+	outputChecks := renderReviewPanel(sess, entry, 140, 40, 0, false, cs, time.Now())
+	strippedChecks := ansi.Strip(outputChecks)
+	if !strings.Contains(strippedChecks, "rerun checks") {
+		t.Errorf("unified footer must contain 'rerun checks' when checks are configured; got:\n%s", strippedChecks)
 	}
 }
 
@@ -1061,7 +1141,7 @@ func TestRenderReviewPanel_PRDraftInFlight(t *testing.T) {
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, true, 0, nil, time.Now())
+	output := renderReviewPanel(sess, nil, 120, 40, 0, true, nil, time.Now())
 
 	if !strings.Contains(output, "Pushing branch and drafting PR") {
 		t.Error("in-flight state must show draft spinner line")
@@ -1069,8 +1149,8 @@ func TestRenderReviewPanel_PRDraftInFlight(t *testing.T) {
 	if !strings.Contains(output, "in progress") {
 		t.Error("in-flight state must show disabled p hint")
 	}
-	if strings.Contains(output, "create or open PR") {
-		t.Error("in-flight state must not show normal p hint")
+	if strings.Contains(output, " ship") {
+		t.Error("in-flight state must not show normal p-ship hint")
 	}
 }
 
@@ -1106,7 +1186,7 @@ func TestRenderReviewPanel_TaskHasDiff(t *testing.T) {
 		},
 	}
 
-	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 140, 40, 0, false, nil, time.Now())
 
 	if !strings.Contains(output, "pass") {
 		t.Error("must contain verdict label 'pass'")
@@ -1117,10 +1197,10 @@ func TestRenderReviewPanel_TaskHasDiff(t *testing.T) {
 	}
 }
 
-// TestReviewPanel_CursorMoveSwapsDetail verifies that moving the cursor from task 1
-// to task 2 causes the detail pane to show task 2's heading and commits.
-// Diffs are no longer shown inline — they open via enter.
-func TestReviewPanel_CursorMoveSwapsDetail(t *testing.T) {
+// TestReviewPanel_CursorMoveSelectsCard verifies that the cursor stripe (│) moves
+// to the correct card as the cursor changes — cursor=0 selects task [1] and
+// cursor=1 selects task [2].
+func TestReviewPanel_CursorMoveSelectsCard(t *testing.T) {
 	sess := agent.NewSessionForTest("sess-cursor", "fix-auth")
 	sess.SetOriginalPrompt("Fix auth")
 	sess.MarkDone()
@@ -1140,126 +1220,40 @@ func TestReviewPanel_CursorMoveSwapsDetail(t *testing.T) {
 		},
 	}
 
-	// cursor=0 → task 1 heading in detail pane
-	out0 := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil, time.Now())
-	if !strings.Contains(out0, "Task 1:") {
-		t.Errorf("cursor=0: expected 'Task 1:' in detail pane; got:\n%s", out0)
-	}
-	if strings.Contains(out0, "Task 2:") {
-		t.Errorf("cursor=0: must not contain 'Task 2:'; got:\n%s", out0)
-	}
-
-	// cursor=1 → task 2 heading in detail pane
-	out1 := renderReviewPanel(sess, entry, 140, 40, 1, false, 0, nil, time.Now())
-	if !strings.Contains(out1, "Task 2:") {
-		t.Errorf("cursor=1: expected 'Task 2:' in detail pane; got:\n%s", out1)
-	}
-	if strings.Contains(out1, "Task 1:") {
-		t.Errorf("cursor=1: must not contain 'Task 1:'; got:\n%s", out1)
-	}
-}
-
-// TestRenderTaskDetailPane_ContentWidthCapped asserts that on a wide pane, content
-// is capped at reviewDetailMaxMeasure rather than filling the full pane width.
-func TestRenderTaskDetailPane_ContentWidthCapped(t *testing.T) {
-	rationale := strings.Repeat("This is a long rationale that should be wrapped correctly. ", 5)
-	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
-		groups: []taskReviewGroup{{
-			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
-			files:     []git.FileStat{{Path: "internal/auth.go", Insertions: 5, Deletions: 1}},
-			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
-		}},
-		verdicts: map[int]*taskVerdictRecord{
-			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: rationale}},
-		},
-	}
-
-	const width = 120
-	lines := renderTaskDetailPane(entry, 0, width, 30, time.Now())
-
-	for i, l := range lines {
-		if l == "" {
-			continue
+	// cursor=0 → [1] card has the cursor stripe, [2] card does not.
+	out0Lines := strings.Split(renderReviewPanel(sess, entry, 120, 40, 0, false, nil, time.Now()), "\n")
+	found1Stripe, found2Stripe := false, false
+	for _, l := range out0Lines {
+		if strings.Contains(l, "│") && strings.Contains(l, "[1]") {
+			found1Stripe = true
 		}
-		// Strip centering padding (leading spaces added for centering) then check
-		// that no content line exceeds the max measure.
-		stripped := strings.TrimLeft(l, " ")
-		cw := ansi.StringWidth(stripped)
-		if cw > reviewDetailMaxMeasure {
-			t.Errorf("line %d content width %d exceeds reviewDetailMaxMeasure %d: %q",
-				i, cw, reviewDetailMaxMeasure, l)
+		if strings.Contains(l, "│") && strings.Contains(l, "[2]") {
+			found2Stripe = true
 		}
 	}
-}
-
-// TestRenderTaskDetailPane_RationaleHasANSIStyling asserts that rationale text is
-// rendered via reviewRenderer.RenderLines(measure=72) rather than wrapText(maxW=70).
-// A 72-char string that fits in measure=72 but not maxW=70 is used as the probe:
-// wrapText(70) would split "token refresh!!" across lines, while RenderLines(72)
-// keeps it on one line. This test works in no-color environments.
-func TestRenderTaskDetailPane_RationaleHasANSIStyling(t *testing.T) {
-	// Exactly 72 chars — fits in measure=72, does NOT fit in maxW=70.
-	rationale := "This implementation is correct and handles auth redirect token refresh!!"
-	if len(rationale) != 72 {
-		t.Fatalf("test string must be 72 chars, got %d", len(rationale))
+	if !found1Stripe {
+		t.Error("cursor=0: [1] card must have cursor stripe │")
 	}
-	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
-		groups: []taskReviewGroup{{
-			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
-			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
-		}},
-		verdicts: map[int]*taskVerdictRecord{
-			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass, Rationale: rationale}},
-		},
+	if found2Stripe {
+		t.Error("cursor=0: [2] card must NOT have cursor stripe │")
 	}
 
-	// width=80 → measure=72 (capped), maxW=70. If wrapText(70) were used, "refresh!!"
-	// would land on its own line; RenderLines(72) keeps "token refresh!!" together.
-	lines := renderTaskDetailPane(entry, 0, 80, 30, time.Now())
-	out := strings.Join(lines, "\n")
-
-	if !strings.Contains(ansi.Strip(out), "token refresh!!") {
-		t.Error("72-char rationale must not be split: 'token refresh!!' should appear on one line " +
-			"(verifies RenderLines(measure=72) is used, not wrapText(maxW=70))")
-	}
-}
-
-// TestRenderTaskDetailPane_HeadingHasUnderline asserts that the line immediately
-// following the "Task N:" heading contains the ─ underline character.
-func TestRenderTaskDetailPane_HeadingHasUnderline(t *testing.T) {
-	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
-		groups: []taskReviewGroup{{
-			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
-			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
-		}},
-		verdicts: map[int]*taskVerdictRecord{
-			1: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictPass}},
-		},
-	}
-
-	lines := renderTaskDetailPane(entry, 0, 80, 20, time.Now())
-
-	headingIdx := -1
-	for i, l := range lines {
-		if strings.Contains(ansi.Strip(l), "Task 1:") {
-			headingIdx = i
-			break
+	// cursor=1 → [2] card has the stripe.
+	out1Lines := strings.Split(renderReviewPanel(sess, entry, 120, 40, 1, false, nil, time.Now()), "\n")
+	found1Stripe, found2Stripe = false, false
+	for _, l := range out1Lines {
+		if strings.Contains(l, "│") && strings.Contains(l, "[1]") {
+			found1Stripe = true
+		}
+		if strings.Contains(l, "│") && strings.Contains(l, "[2]") {
+			found2Stripe = true
 		}
 	}
-	if headingIdx < 0 {
-		t.Fatal("heading line 'Task 1:' not found")
+	if found1Stripe {
+		t.Error("cursor=1: [1] card must NOT have cursor stripe │")
 	}
-	if headingIdx+1 >= len(lines) {
-		t.Fatal("no line after heading")
-	}
-	if !strings.Contains(lines[headingIdx+1], "─") {
-		t.Errorf("line after heading must contain '─' underline; got: %q", lines[headingIdx+1])
+	if !found2Stripe {
+		t.Error("cursor=1: [2] card must have cursor stripe │")
 	}
 }
 
@@ -1271,7 +1265,7 @@ func TestRenderReviewPanel_FooterUsesThemeStyles(t *testing.T) {
 	sess.SetOriginalPrompt("Fix auth")
 	sess.MarkDone()
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, nil, 120, 40, 0, false, nil, time.Now())
 
 	// StyleActive.Render("p") — carries ANSI codes in color mode, is "p" otherwise.
 	// In both cases the rendered footer must contain it.
@@ -1323,71 +1317,6 @@ func TestRenderTaskListPane_HeaderUsesHeadingColor(t *testing.T) {
 	}
 }
 
-// TestRenderReviewPanel_ShowsTabBar verifies that renderReviewPanel includes a
-// tab bar containing all three tab labels.
-func TestRenderReviewPanel_ShowsTabBar(t *testing.T) {
-	sess := agent.NewSessionForTest("sess-tabs", "fix-auth")
-	sess.SetOriginalPrompt("Fix auth")
-	sess.MarkDone()
-	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "Add auth middleware"}},
-		groups: []taskReviewGroup{{
-			taskIndex: 1,
-			commits:   []git.Commit{{Hash: "abc1234", Subject: "add middleware"}},
-		}},
-		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
-	}
-
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, 0, nil, time.Now())
-
-	for _, tab := range []string{"Tasks", "Diff", "Checks"} {
-		if !strings.Contains(ansi.Strip(output), tab) {
-			t.Errorf("panel must contain tab label %q; got:\n%s", tab, output)
-		}
-	}
-}
-
-// TestRenderReviewPanel_DiffTabPlaceholder verifies that when activeTab=1 (Diff)
-// the panel output contains the placeholder text and not the task list header.
-func TestRenderReviewPanel_DiffTabPlaceholder(t *testing.T) {
-	sess := agent.NewSessionForTest("sess-difftab", "fix-auth")
-	sess.SetOriginalPrompt("Fix auth")
-	sess.MarkDone()
-	entry := &reviewDiffEntry{
-		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
-		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
-	}
-
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabDiff, nil, time.Now())
-	stripped := ansi.Strip(output)
-
-	if !strings.Contains(stripped, "full diff browser coming soon") {
-		t.Errorf("Diff tab must show placeholder; got:\n%s", stripped)
-	}
-	if strings.Contains(stripped, "PLAN TASKS") {
-		t.Errorf("Diff tab must not show task list header; got:\n%s", stripped)
-	}
-}
-
-// TestRenderReviewPanel_TasksTabStillWorks verifies that activeTab=0 (Tasks)
-// still renders the task list as a regression guard.
-func TestRenderReviewPanel_TasksTabStillWorks(t *testing.T) {
-	sess := agent.NewSessionForTest("sess-taskstab", "fix-auth")
-	sess.SetOriginalPrompt("Fix auth")
-	sess.MarkDone()
-	entry := &reviewDiffEntry{
-		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
-		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
-	}
-
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabTasks, nil, time.Now())
-	stripped := ansi.Strip(output)
-
-	if !strings.Contains(stripped, "PLAN TASKS") {
-		t.Errorf("Tasks tab must show task list header; got:\n%s", stripped)
-	}
-}
-
 // TestRenderReviewPanel_FooterShowsEnterHint verifies that the footer hint
 // says "enter — open task diff" instead of the old "pgdn/pgup — scroll diff".
 func TestRenderReviewPanel_FooterShowsEnterHint(t *testing.T) {
@@ -1399,7 +1328,7 @@ func TestRenderReviewPanel_FooterShowsEnterHint(t *testing.T) {
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 
-	output := renderReviewPanel(sess, entry, 120, 40, 0, false, reviewTabTasks, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 120, 40, 0, false, nil, time.Now())
 	stripped := ansi.Strip(output)
 
 	if !strings.Contains(stripped, "enter") {
@@ -1407,76 +1336,6 @@ func TestRenderReviewPanel_FooterShowsEnterHint(t *testing.T) {
 	}
 	if strings.Contains(stripped, "pgdn") {
 		t.Errorf("footer must not contain old 'pgdn' hint; got:\n%s", stripped)
-	}
-}
-
-// TestRenderReviewPlaceholderTab verifies that renderReviewPlaceholderTab
-// returns exactly height lines, that the first line contains the label text
-// horizontally centered, and that remaining lines are empty.
-func TestRenderReviewPlaceholderTab(t *testing.T) {
-	label := "full diff browser coming soon"
-	const width = 80
-	lines := renderReviewPlaceholderTab(label, width, 20)
-	if len(lines) != 20 {
-		t.Fatalf("expected 20 lines, got %d", len(lines))
-	}
-	stripped := ansi.Strip(lines[0])
-	if !strings.Contains(stripped, label) {
-		t.Errorf("first line must contain label %q; got: %q", label, stripped)
-	}
-	// Centered: the first line must have leading spaces pushing the label toward
-	// the middle. With width=80 and the label shorter than width, there should be
-	// at least one leading space.
-	if !strings.HasPrefix(lines[0], " ") {
-		t.Errorf("first line must be horizontally centered (leading spaces expected); got: %q", lines[0])
-	}
-	// Remaining lines are empty.
-	for i := 1; i < 20; i++ {
-		if lines[i] != "" {
-			t.Errorf("line %d: expected empty, got %q", i, lines[i])
-		}
-	}
-}
-
-// TestRenderReviewTabBar_HighlightsActiveTab verifies that renderReviewTabBar
-// returns 2 lines, contains all three tab labels in the first line, and applies
-// the correct styling: active tab in ColorSecondary bold, inactive tabs in StyleSubtle.
-func TestRenderReviewTabBar_HighlightsActiveTab(t *testing.T) {
-	tabNames := []string{"Tasks", "Diff", "Checks"}
-	activeStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
-
-	for activeIdx, activeName := range tabNames {
-		lines := renderReviewTabBar(activeIdx, 120)
-		if len(lines) != 2 {
-			t.Fatalf("activeTab=%d: expected 2 lines, got %d", activeIdx, len(lines))
-		}
-		stripped := ansi.Strip(lines[0])
-		for _, name := range tabNames {
-			if !strings.Contains(stripped, name) {
-				t.Errorf("activeTab=%d: label line must contain %q; got: %q", activeIdx, name, stripped)
-			}
-		}
-		// Second line must be a divider.
-		if !strings.Contains(ansi.Strip(lines[1]), "─") {
-			t.Errorf("activeTab=%d: line 1 must be a divider; got: %q", activeIdx, lines[1])
-		}
-
-		// Active tab must use ColorSecondary bold; inactive tabs must use StyleSubtle.
-		styledActive := activeStyle.Render(activeName)
-		if !strings.Contains(lines[0], styledActive) {
-			t.Errorf("activeTab=%d: active label %q not styled with ColorSecondary bold;\nraw line: %q",
-				activeIdx, activeName, lines[0])
-		}
-		for i, name := range tabNames {
-			if i == activeIdx {
-				continue
-			}
-			styledInactive := StyleSubtle.Render(name)
-			if !strings.Contains(lines[0], styledInactive) {
-				t.Errorf("activeTab=%d: inactive label %q not styled with StyleSubtle;\nraw line: %q",
-					activeIdx, name, lines[0])
-			}
-		}
 	}
 }
 
@@ -1503,9 +1362,64 @@ func TestRenderReviewPanel_NoDiffTask(t *testing.T) {
 	}
 
 	// Must not panic and must show the "no diff found" verdict badge.
-	output := renderReviewPanel(sess, entry, 140, 40, 0, false, 0, nil, time.Now())
+	output := renderReviewPanel(sess, entry, 140, 40, 0, false, nil, time.Now())
 	if !strings.Contains(output, "no diff found") {
 		t.Errorf("must show 'no diff found' verdict badge; got:\n%s", output)
+	}
+}
+
+// TestReviewRedesign_LegacyStringsRemoved is a scaffold test that pins the
+// desired end state for the review panel redesign. Assertions for legacy
+// strings pass as the refactor progresses; new-layout assertions pass when
+// the corresponding tasks land.
+func TestReviewRedesign_LegacyStringsRemoved(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-redesign", "redesign-review")
+	sess.SetOriginalPrompt("Redesign the review panel")
+	sess.MarkDone()
+
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "Refactor handler"}},
+		groups: []taskReviewGroup{{
+			taskIndex: 1,
+			commits:   []git.Commit{{Hash: "abc1234", Subject: "[task 1] refactor"}},
+			stats:     &git.DiffStats{Files: 1, Insertions: 5, Deletions: 1},
+		}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	// Seed validation runs so the checks strip shows after refactor.
+	app.validationRuns[cacheKey("", sess.ID)] = &validationRunState{
+		runID:   1,
+		checks:  []config.ValidationCheck{{Name: "Tests", Command: "go test ./..."}},
+		results: []validationCheckResult{{state: checkPassed}},
+	}
+	panel := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
+
+	output := panel.View()
+	stripped := ansi.Strip(output)
+
+	// Should NOT contain legacy tab-bar labels after the refactor.
+	if strings.Contains(stripped, "Tasks") {
+		t.Error("panel must NOT contain 'Tasks' as a tab label (tab bar removed)")
+	}
+	if strings.Contains(stripped, "Diff") {
+		t.Error("panel must NOT contain 'Diff' as a tab label (tab bar removed)")
+	}
+	if strings.Contains(stripped, "(full diff browser coming soon)") {
+		t.Error("panel must NOT contain the old Diff-tab placeholder")
+	}
+
+	// Should contain new layout markers after the refactor.
+	if !strings.Contains(stripped, "PLAN TASKS") {
+		t.Error("panel must contain 'PLAN TASKS' header in the task ledger")
+	}
+	if !strings.Contains(stripped, "Checks") {
+		t.Error("panel must contain 'Checks' as the inline checks strip header")
+	}
+	if !strings.Contains(stripped, "enter expand") {
+		t.Error("footer must contain 'enter expand' hint")
 	}
 }
 
@@ -1634,40 +1548,81 @@ func TestRenderChecksTab_OutputPane(t *testing.T) {
 	}
 }
 
-// TestRenderChecksTab_NilState_ShowsPlaceholder verifies the no-checks placeholder.
-func TestRenderChecksTab_NilState_ShowsPlaceholder(t *testing.T) {
-	sess := agent.NewSessionForTest("sess-1", "fix-auth")
-	sess.SetOriginalPrompt("Fix auth")
-	sess.MarkDone()
+// TestRenderChecksStrip_AllPassOneLine verifies that when all checks have
+// passed, renderChecksStrip returns exactly one summary line containing
+// "Checks", a pass count with ✓, and a duration suffix.
+func TestRenderChecksStrip_AllPassOneLine(t *testing.T) {
+	cs := &checksTabState{
+		checks: []config.ValidationCheck{
+			{Name: "Tests", Command: "go test ./..."},
+			{Name: "Lint", Command: "golangci-lint run"},
+		},
+		results: []validationCheckResult{
+			{state: checkPassed, duration: 2 * 1e9},
+			{state: checkPassed, duration: 1 * 1e9},
+		},
+	}
 
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, nil, time.Now())
-	stripped := ansi.Strip(output)
+	lines := renderChecksStrip(cs, 120, time.Now())
 
-	if !strings.Contains(stripped, "No validation checks configured") {
-		t.Errorf("must show no-checks placeholder; got:\n%s", stripped)
+	if len(lines) != 1 {
+		t.Fatalf("all-pass strip must be exactly 1 line, got %d: %v", len(lines), lines)
+	}
+	stripped := ansi.Strip(lines[0])
+	if !strings.Contains(stripped, "Checks") {
+		t.Errorf("summary line must contain 'Checks'; got: %q", stripped)
+	}
+	if !strings.Contains(stripped, "✓") {
+		t.Errorf("summary line must contain '✓'; got: %q", stripped)
+	}
+	if !strings.Contains(stripped, "2") {
+		t.Errorf("summary line must contain check count '2'; got: %q", stripped)
+	}
+	if !strings.Contains(stripped, "s") {
+		t.Errorf("summary line must contain a duration suffix 's'; got: %q", stripped)
 	}
 }
 
-// TestRenderReviewPanel_ChecksTabWithState verifies that renderReviewPanel routes
-// to renderChecksTab when checkState is non-nil, showing check names in the body.
-func TestRenderReviewPanel_ChecksTabWithState(t *testing.T) {
-	sess := agent.NewSessionForTest("sess-1", "fix-auth")
-	sess.SetOriginalPrompt("Fix auth")
-	sess.MarkDone()
-
+// TestRenderChecksStrip_FailureExpandsWithTail verifies that a failed check
+// expands the strip to a summary + the last 4 lines of the failed output.
+func TestRenderChecksStrip_FailureExpandsWithTail(t *testing.T) {
 	cs := &checksTabState{
 		checks: []config.ValidationCheck{
 			{Name: "Tests", Command: "go test ./..."},
 		},
-		results: []validationCheckResult{{state: checkPassed}},
+		results: []validationCheckResult{
+			{
+				state:  checkFailed,
+				output: "line1\nline2\nline3\nline4\nFAIL: x\n",
+			},
+		},
 	}
-	output := renderReviewPanel(sess, nil, 120, 40, 0, false, reviewTabChecks, cs, time.Now())
-	stripped := ansi.Strip(output)
 
-	if !strings.Contains(stripped, "Tests") {
-		t.Errorf("renderReviewPanel with non-nil checkState must show check names; got:\n%s", stripped)
+	lines := renderChecksStrip(cs, 120, time.Now())
+
+	out := strings.Join(lines, "\n")
+	stripped := ansi.Strip(out)
+
+	if !strings.Contains(stripped, "Checks") {
+		t.Errorf("summary line must contain 'Checks'; got:\n%s", stripped)
 	}
-	if strings.Contains(stripped, "No validation checks configured") {
-		t.Error("must not show placeholder when checkState is non-nil")
+	if !strings.Contains(stripped, "Tests") {
+		t.Errorf("summary line must contain the failed check name 'Tests'; got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "line2") {
+		t.Errorf("strip must contain 'line2' (tail line); got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "line3") {
+		t.Errorf("strip must contain 'line3' (tail line); got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "line4") {
+		t.Errorf("strip must contain 'line4' (tail line); got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "FAIL: x") {
+		t.Errorf("strip must contain 'FAIL: x' (last output line); got:\n%s", stripped)
+	}
+	// line1 is beyond the last 4 lines (output has 5 non-empty lines).
+	if strings.Contains(stripped, "line1") {
+		t.Errorf("strip must only show last 4 output lines; 'line1' should be omitted; got:\n%s", stripped)
 	}
 }

@@ -16,19 +16,6 @@ import (
 	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
-// reviewDetailMaxMeasure is the maximum content column width for the right detail
-// pane. Matches docEditorMaxMeasure so typography is consistent across panels.
-const reviewDetailMaxMeasure = docEditorMaxMeasure
-
-// reviewRenderer is the markdown renderer used for rationale text in the detail pane.
-var reviewRenderer = mdrender.New(docEditorChromaStyle)
-
-// detailContentMeasure returns the effective content width and left-margin padding
-// for centering the detail pane content. Thin wrapper around mdrender.ContentMeasure.
-func detailContentMeasure(paneWidth, maxMeasure int) (measure, leftPad int) {
-	return mdrender.ContentMeasure(paneWidth, maxMeasure)
-}
-
 // reviewSpinnerFrame returns the spinner character for the given render clock.
 // now is the model's tick-refreshed timestamp (§5: no clock read at render
 // time); deriving the frame from it keeps all running rows in sync. The frame
@@ -174,6 +161,79 @@ func renderChecksTab(cs *checksTabState, width, height int, now time.Time) []str
 	return lines
 }
 
+// tailLines returns the last n non-empty lines from s (split on "\n"),
+// trimming a trailing empty element from strings that end with "\n".
+func tailLines(s string, n int) []string {
+	all := strings.Split(s, "\n")
+	// Trim trailing empty element produced by a trailing newline.
+	if len(all) > 0 && all[len(all)-1] == "" {
+		all = all[:len(all)-1]
+	}
+	if len(all) <= n {
+		return all
+	}
+	return all[len(all)-n:]
+}
+
+// renderChecksStrip renders the compact inline checks strip.
+// When cs is nil or has no checks, returns an empty slice (strip is omitted).
+// When all results are checkPassed, returns a single summary line.
+// When any result is checkFailed/checkError, returns a 6-line expanded form:
+// 1 summary, 4 tail lines of the first failed check's output, 1 divider.
+func renderChecksStrip(cs *checksTabState, width int, now time.Time) []string {
+	if cs == nil || len(cs.checks) == 0 {
+		return nil
+	}
+
+	var passCount, failCount int
+	var firstFailed *validationCheckResult
+	var firstFailedName string
+	var totalDuration time.Duration
+	for i, result := range cs.results {
+		switch result.state {
+		case checkPassed:
+			passCount++
+			totalDuration += result.duration
+		case checkFailed, checkError:
+			failCount++
+			if firstFailed == nil {
+				r := result
+				firstFailed = &r
+				if i < len(cs.checks) {
+					firstFailedName = cs.checks[i].Name
+				}
+			}
+			totalDuration += result.duration
+		}
+	}
+
+	passStr := StyleSuccess.Render(fmt.Sprintf("%d✓", passCount))
+
+	if failCount == 0 {
+		dur := totalDuration.Round(time.Second)
+		summary := fmt.Sprintf("  Checks  %s  ran in %s", passStr, dur)
+		return []string{summary}
+	}
+
+	// Expanded: summary + 4 tail output lines + divider.
+	failStr := StyleError.Render(fmt.Sprintf("%d✗", failCount))
+	nameStr := StyleSubtle.Render("❯ " + firstFailedName)
+	summary := fmt.Sprintf("  Checks  %s %s  %s", passStr, failStr, nameStr)
+
+	tail := tailLines(firstFailed.output, 4)
+	lines := make([]string, 0, 6)
+	lines = append(lines, summary)
+	for _, l := range tail {
+		lines = append(lines, "  "+l)
+	}
+	// Pad to exactly 4 tail lines if there are fewer.
+	for len(lines) < 5 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
+	return lines
+}
+
 // renderReviewHeader returns the 4-line collapsed header:
 // [0] REVIEW › <name> [age], [1] prompt line 1, [2] prompt line 2 (with …), [3] divider.
 // For short prompts that fit in one line, returns 3 lines: [0] title, [1] prompt, [2] divider.
@@ -244,39 +304,6 @@ func renderReviewHeader(sess *agent.Session, width int, now time.Time) []string 
 	return lines
 }
 
-// renderReviewPlaceholderTab renders a height-line placeholder body for tabs
-// that haven't been implemented yet. The label is horizontally centered on
-// the first line; remaining lines are empty strings.
-func renderReviewPlaceholderTab(label string, width, height int) []string {
-	lines := make([]string, height)
-	text := StyleSubtle.Render("(" + label + ")")
-	pad := (width - ansi.StringWidth(text)) / 2
-	if pad < 0 {
-		pad = 0
-	}
-	lines[0] = strings.Repeat(" ", pad) + text
-	return lines
-}
-
-// renderReviewTabBar renders the 2-line tab bar for the review panel.
-// Line 0: tab labels separated by two spaces; active tab in ColorSecondary bold,
-// inactive tabs in StyleSubtle. Line 1: a subtle horizontal divider.
-func renderReviewTabBar(activeTab, width int) []string {
-	labels := []string{"Tasks", "Diff", "Checks"}
-	activeStyle := StyleActive.Bold(true)
-	var parts []string
-	for i, label := range labels {
-		if i == activeTab {
-			parts = append(parts, activeStyle.Render(label))
-		} else {
-			parts = append(parts, StyleSubtle.Render(label))
-		}
-	}
-	labelLine := "  " + strings.Join(parts, "  ")
-	divider := StyleSubtle.Render(strings.Repeat("─", innerWidth(width)))
-	return []string{labelLine, divider}
-}
-
 // checksTabState carries the data needed to render the Checks tab body.
 // checks and results are sourced from App-level validationRunState; cursor
 // and scroll are panel-local since they don't need to survive panel close.
@@ -291,15 +318,14 @@ type checksTabState struct {
 // entry may be nil while diff stats are being fetched (shows loading placeholder).
 // cursor is the currently selected task row index (0-based among all task rows).
 // prDraftInFlight, when true, shows a spinner status line and disables the p hint.
-// activeTab selects which tab body to render (0=Tasks, 1=Diff, 2=Checks).
 // checkState is non-nil when validation checks are configured and their results
 // are available; nil when no checks are configured or the run state is absent.
-func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, activeTab int, checkState *checksTabState, now time.Time) string {
+func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, height, cursor int, prDraftInFlight bool, checkState *checksTabState, now time.Time) string {
 	// Header (3–4 lines depending on prompt length).
 	headerLines := renderReviewHeader(sess, width, now)
 
-	// Tab bar: 2 lines (labels + divider).
-	const tabBarH = 2
+	// Checks strip: 0–6 lines depending on check state.
+	checksStripLines := renderChecksStrip(checkState, width, now)
 
 	// Footer: blank + divider + hints = 3 lines; +1 when draft in flight.
 	footerLineCount := 3
@@ -307,38 +333,17 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	if prDraftInFlight {
 		draftLineCount = 1
 	}
-	bodyH := height - len(headerLines) - tabBarH - footerLineCount - draftLineCount
+	bodyH := height - len(headerLines) - len(checksStripLines) - footerLineCount - draftLineCount
 	if bodyH < 4 {
 		bodyH = 4
 	}
 
-	// Build body lines based on active tab.
+	// Body: task-card ledger (full height in narrow/stacked mode).
 	var bodyLines []string
-	switch {
-	case activeTab == reviewTabDiff:
-		bodyLines = renderReviewPlaceholderTab("full diff browser coming soon", width, bodyH)
-	case activeTab == reviewTabChecks:
-		if checkState != nil {
-			bodyLines = renderChecksTab(checkState, width, bodyH, now)
-		} else {
-			bodyLines = renderReviewPlaceholderTab("No validation checks configured — add them in .refrain/config.json", width, bodyH)
-		}
-	case entry == nil:
+	if entry == nil {
 		bodyLines = append(bodyLines, StyleSubtle.Render("loading diff stats…"))
-	default:
-		// Tasks tab: full-width stacked layout.
-		listH := bodyH * 2 / 5
-		detailH := bodyH - listH - 1
-		if listH < 2 {
-			listH = 2
-		}
-		if detailH < 2 {
-			detailH = 2
-		}
-		paneW := innerWidth(width)
-		bodyLines = append(bodyLines, renderTaskListPane(entry, paneW, listH, cursor, now)...)
-		bodyLines = append(bodyLines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
-		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, paneW, detailH, now)...)
+	} else {
+		bodyLines = renderTaskListPane(entry, innerWidth(width), bodyH, cursor, now)
 	}
 
 	// Pad body to exactly bodyH rows so the footer always pins to the bottom
@@ -349,7 +354,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	// Assemble full panel.
 	var lines []string
 	lines = append(lines, headerLines...)
-	lines = append(lines, renderReviewTabBar(activeTab, width)...)
+	lines = append(lines, checksStripLines...)
 	lines = append(lines, bodyLines...)
 
 	// In-flight PR draft status line.
@@ -361,45 +366,45 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	// Action footer.
 	lines = append(lines, "")
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
-	var pHint string
-	if prDraftInFlight {
-		pHint = StyleSubtle.Render("p — (in progress…)")
-	} else {
-		pHint = StyleActive.Render("p") + StyleSubtle.Render(" — create or open PR")
-	}
-	var hints string
-	if activeTab == reviewTabChecks {
-		hints = "  " +
-			pHint +
-			"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
-			"  " + StyleActive.Render("r") + StyleSubtle.Render(" — run checks") +
-			"  " + StyleActive.Render("pgdn/pgup") + StyleSubtle.Render(" — scroll output") +
-			"  " + StyleActive.Render("j/k") + StyleSubtle.Render(" — select check") +
-			"  " + StyleSubtle.Render("ESC — back to focus")
-	} else {
-		hints = "  " +
-			pHint +
-			"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
-			"  " + StyleWarning.Render("b") + StyleSubtle.Render(" — back to build") +
-			"  " + StyleActive.Render("f") + StyleSubtle.Render(" — flag task") +
-			"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
-			"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
-			"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
-			"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
-			"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
-			"  " + StyleSubtle.Render("ESC — back to focus")
-	}
-	lines = append(lines, hints)
+	lines = append(lines, reviewFooterHints(prDraftInFlight, checkState != nil))
 
 	return strings.Join(lines, "\n")
 }
 
-// reviewListPaneRowAt returns the 0-based task row index at (mouseX, mouseY) within the
-// left task-list pane, or -1 if the click is outside the pane or in the PLAN TASKS header.
-// paneTop is the Y coordinate of the first line of the pane (including the 2-line header).
-// paneLeft/paneWidth define the horizontal bounds.
+// reviewFooterHints returns the unified single-line footer hint string.
+// When checksConfigured is true, a "r rerun checks" hint is appended.
+func reviewFooterHints(prDraftInFlight, checksConfigured bool) string {
+	var pHint string
+	if prDraftInFlight {
+		pHint = StyleSubtle.Render("p — (in progress…)")
+	} else {
+		pHint = StyleActive.Render("p") + StyleSubtle.Render(" ship")
+	}
+	h := "  " + pHint +
+		"  " + StyleWarning.Render("b") + StyleSubtle.Render(" rework") +
+		"  " + StyleActive.Render("m") + StyleSubtle.Render(" approve") +
+		"  " + StyleActive.Render("f") + StyleSubtle.Render(" flag") +
+		"  " + StyleActive.Render("d") + StyleSubtle.Render(" defer") +
+		"  " + StyleActive.Render("e") + StyleSubtle.Render(" editor") +
+		"  " + StyleActive.Render("t") + StyleSubtle.Render(" terminal") +
+		"  " + StyleActive.Render("enter") + StyleSubtle.Render(" expand") +
+		"  " + StyleActive.Render("?") + StyleSubtle.Render(" spec") +
+		"  " + StyleSubtle.Render("esc back")
+	if checksConfigured {
+		h += "  " + StyleActive.Render("r") + StyleSubtle.Render(" rerun checks")
+	}
+	return h
+}
+
+// reviewListPaneRowAt returns the 0-based task card index at (mouseX, mouseY)
+// within the left task-list pane, or -1 if the click is outside the pane or
+// in the PLAN TASKS header. paneTop is the Y coordinate of the first line of
+// the pane (including the 2-line header). paneLeft/paneWidth define the
+// horizontal bounds. Each task card occupies 4 lines; the returned index is
+// the card index (one per task), not the line offset.
 func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLeft, paneWidth int) int {
-	const listHeaderLines = 2 // PLAN TASKS + blank
+	const listHeaderLines = 2 // PLAN TASKS + underline
+	const cardH = 4
 	if mouseX < paneLeft || mouseX >= paneLeft+paneWidth {
 		return -1
 	}
@@ -407,18 +412,26 @@ func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLe
 	if mouseY < taskRowStart {
 		return -1
 	}
-	rowIdx := mouseY - taskRowStart
+	cardIdx := (mouseY - taskRowStart) / cardH
 	nRows := reviewTaskCount(entry)
-	if rowIdx >= nRows {
+	if cardIdx >= nRows {
 		return -1
 	}
-	return rowIdx
+	return cardIdx
 }
 
-// renderTaskListPane renders the left-pane compact task list with icon, index, text, stat.
-// Row format: <icon> [N] <truncated text>  +X -Y
+// renderTaskListPane renders the task-card ledger.
+// Each card occupies 4 lines:
+//
+//	line 1: <icon> [N] <text>   +X -Y
+//	line 2:   <verdict_label> — <rationale>  (or  ⋯ Pending)
+//	line 3:   <top file> +X -Y  (or blank)
+//	line 4:   (blank separator)
+//
+// The selected card gets vertical-bar cursor stripes on the first line.
 func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now time.Time) []string {
 	const headerLines = 2
+	const cardH = 4
 	planTasksStyle := StyleHeading.Foreground(ColorSecondary)
 	header := []string{
 		planTasksStyle.Render("PLAN TASKS"),
@@ -451,52 +464,48 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 		}
 	}
 
-	rowsH := height - headerLines
-	if rowsH < 1 {
-		rowsH = 1
+	// How many cards fit in the available body height.
+	cardsH := (height - headerLines) / cardH
+	if cardsH < 1 {
+		cardsH = 1
 	}
-	offset := cursor - rowsH/2
+	offset := cursor - cardsH/2
 	if offset < 0 {
 		offset = 0
 	}
-	if offset+rowsH > len(rows) {
-		offset = len(rows) - rowsH
+	if offset+cardsH > len(rows) {
+		offset = len(rows) - cardsH
 		if offset < 0 {
 			offset = 0
 		}
 	}
 
-	// Selection affordance: a vertical bar in primary color on each side of the
-	// cursor row. We reserve 2 columns globally (one per side) so moving the
-	// cursor never reflows text — both selected and unselected rows have the
-	// same content budget.
 	cursorBar := StyleAccent.Render("│")
 	subtleGreen := StyleSuccess
 	subtleRed := StyleError
 
-	end := offset + rowsH
+	end := offset + cardsH
 	if end > len(rows) {
 		end = len(rows)
 	}
-	lines := make([]string, 0, headerLines+end-offset)
+	lines := make([]string, 0, headerLines+cardH*(end-offset))
 	lines = append(lines, header...)
 
 	for i := offset; i < end; i++ {
 		r := rows[i]
 		selected := i == cursor
 
-		// Icon from verdict badge.
+		// Verdict record and icon.
 		var rec *taskVerdictRecord
 		if entry.verdicts != nil {
 			rec = entry.verdicts[r.taskIndex]
 		}
-		icon, _, style := verdictBadge(rec, now)
-		// For the synthetic overview row, use a dot.
+		icon, verdictLabel, iconStyle := verdictBadge(rec, now)
 		if r.taskIndex == -1 {
 			icon = "·"
-			style = StyleSubtle
+			iconStyle = StyleSubtle
 		}
-		iconStr := style.Render(icon)
+		iconStr := iconStyle.Render(icon)
 
 		// Index label.
 		label := fmt.Sprintf("[%d]", r.taskIndex)
@@ -507,7 +516,7 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 			label = "   "
 		}
 
-		// Stat string — for verdictNoDiff, show the label as the stat.
+		// Stat string for line 1 (aggregate +X -Y).
 		statStr := ""
 		if rec != nil && rec.state == verdictNoDiff {
 			_, lbl, sty := verdictBadge(rec, now)
@@ -520,21 +529,16 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 			}
 		}
 
-		// Text: truncate to fit remaining width.
+		// Line 1: icon + label + text + stat, right-aligned.
 		iconW := ansi.StringWidth(iconStr)
 		labelW := len(label)
 		statW := ansi.StringWidth(statStr)
-		// 1 outer space + 1 border + icon + space + label + space + ... + 2 sep
-		// + stat + 1 border + 1 outer space. The +4 over the prior layout
-		// reserves columns for the cursor border on both sides.
 		overhead := 4 + iconW + 1 + labelW + 1 + 2 + statW
 		maxTextW := width - overhead
 		if maxTextW < 4 {
 			maxTextW = 4
 		}
 		textStr := truncateVisible(r.taskText, maxTextW)
-
-		// Assemble row.
 		rowText := iconStr + " " + StyleSubtle.Render(label) + " " + textStr
 		if statStr != "" {
 			usedW := iconW + 1 + labelW + 1 + ansi.StringWidth(textStr)
@@ -545,184 +549,56 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 			rowText += strings.Repeat(" ", padW) + statStr
 		}
 
+		var line1 string
 		if selected {
 			contentW := modalContentWidth(width)
 			if w := ansi.StringWidth(rowText); w < contentW {
 				rowText += strings.Repeat(" ", contentW-w)
 			}
-			lines = append(lines, " "+cursorBar+rowText+cursorBar+" ")
+			line1 = " " + cursorBar + rowText + cursorBar + " "
 		} else {
-			lines = append(lines, "  "+rowText)
+			line1 = "  " + rowText
 		}
+
+		// Line 2: verdict label — rationale (or ⋯ Pending).
+		var line2 string
+		if rec != nil && rec.state == verdictDone && rec.verdict.Rationale != "" {
+			rationale := truncateVisible(rec.verdict.Rationale, width-len(verdictLabel)-7)
+			_, _, vStyle := verdictBadge(rec, now)
+			line2 = "  " + vStyle.Render(verdictLabel) + " — " + rationale
+		} else {
+			_, lbl, lstyle := verdictBadge(rec, now)
+			line2 = "  " + lstyle.Render("⋯ "+lbl)
+		}
+
+		// Line 3: top file +X -Y, or commit count, or blank.
+		var line3 string
+		if r.group != nil && len(r.group.files) > 0 {
+			sorted := make([]git.FileStat, len(r.group.files))
+			copy(sorted, r.group.files)
+			sortFileStatsByChurn(sorted)
+			top := sorted[0]
+			fileStat := subtleGreen.Render(fmt.Sprintf("+%d", top.Insertions)) +
+				" " + subtleRed.Render(fmt.Sprintf("-%d", top.Deletions))
+			fileStatW := ansi.StringWidth(fileStat)
+			maxFileW := width - 4 - fileStatW - 2
+			if maxFileW < 4 {
+				maxFileW = 4
+			}
+			nameTrunc := truncateVisible(top.Path, maxFileW)
+			suffix := ""
+			if len(sorted) > 1 {
+				suffix = StyleSubtle.Render(fmt.Sprintf(" … %d more", len(sorted)-1))
+			}
+			line3 = "  " + StyleSubtle.Render(nameTrunc) + " " + fileStat + suffix
+		} else if r.group != nil && len(r.group.commits) > 0 {
+			line3 = "  " + StyleSubtle.Render(fmt.Sprintf("%d commit(s)", len(r.group.commits)))
+		}
+
+		lines = append(lines, line1, line2, line3, "")
 	}
 
 	return lines
-}
-
-// renderTaskDetailPane renders the right-pane detail for the cursor-selected task.
-// Sections: task heading, verdict badge, rationale, changed files, commits.
-func renderTaskDetailPane(entry *reviewDiffEntry, cursor, width, height int, now time.Time) []string {
-	if entry == nil {
-		return []string{StyleSubtle.Render("loading…")}
-	}
-
-	measure, leftPad := detailContentMeasure(width, reviewDetailMaxMeasure)
-
-	// capAndCenter caps lines to height then prepends centering padding to each
-	// non-empty line. Applied at every return point in the function.
-	capAndCenter := func(lines []string) []string {
-		capped := capLines(lines, height)
-		if leftPad > 0 {
-			pad := strings.Repeat(" ", leftPad)
-			for i, l := range capped {
-				if l != "" {
-					capped[i] = pad + l
-				}
-			}
-		}
-		return capped
-	}
-
-	// No-plan overview path.
-	if len(entry.tasks) == 0 && len(entry.groups) == 0 {
-		var lines []string
-		if entry.aggregate != nil {
-			agg := entry.aggregate
-			subtleGreen := StyleSuccess
-			subtleRed := StyleError
-			summary := fmt.Sprintf("%d files · ", agg.Files) +
-				subtleGreen.Render(fmt.Sprintf("+%d", agg.Insertions)) +
-				" " + subtleRed.Render(fmt.Sprintf("-%d", agg.Deletions))
-			lines = append(lines, summary, "")
-			sorted := make([]git.FileStat, len(entry.files))
-			copy(sorted, entry.files)
-			sortFileStatsByChurn(sorted)
-			top := sorted
-			if len(top) > 8 {
-				top = sorted[:8]
-			}
-			for _, f := range top {
-				name := truncateVisible(f.Path, measure-14)
-				stat := subtleGreen.Render(fmt.Sprintf("+%d", f.Insertions)) +
-					" " + subtleRed.Render(fmt.Sprintf("-%d", f.Deletions))
-				lines = append(lines, "  "+name+"  "+stat)
-			}
-			if len(sorted) > 8 {
-				lines = append(lines, StyleSubtle.Render(fmt.Sprintf("  … %d more files", len(sorted)-8)))
-			}
-		}
-		return capAndCenter(lines)
-	}
-
-	// Resolve selected task and group using same row order as renderTaskListPane.
-	groupByIdx := make(map[int]*taskReviewGroup, len(entry.groups))
-	for i := range entry.groups {
-		g := &entry.groups[i]
-		groupByIdx[g.taskIndex] = g
-	}
-
-	var selectedTask *agent.PlanTask
-	var group *taskReviewGroup
-	row := 0
-	for i := range entry.tasks {
-		if row == cursor {
-			t := entry.tasks[i]
-			selectedTask = &t
-			group = groupByIdx[t.Index]
-			break
-		}
-		row++
-	}
-	if selectedTask == nil {
-		if other, ok := groupByIdx[0]; ok && row == cursor {
-			group = other
-		}
-	}
-
-	var lines []string
-	maxW := measure - 2
-
-	// H2 heading style: matches colHeading2 / styleH2 in mdrender.
-	headingStyle := StyleHeading.Foreground(ColorSecondary)
-
-	// (1) Task heading with H2 color and thin underline.
-	heading := ""
-	if selectedTask != nil {
-		heading = fmt.Sprintf("Task %d: %s", selectedTask.Index, selectedTask.Text)
-	} else if group != nil {
-		heading = "Other changes"
-	}
-	if heading != "" {
-		displayHeading := truncateVisible(heading, maxW)
-		lines = append(lines, headingStyle.Render(displayHeading))
-		lines = append(lines, reviewRenderer.HeadingUnderline(2, ansi.StringWidth(displayHeading), measure))
-		lines = append(lines, "")
-	}
-
-	// (2) Verdict badge.
-	var rec *taskVerdictRecord
-	if entry.verdicts != nil && selectedTask != nil {
-		rec = entry.verdicts[selectedTask.Index]
-	} else if entry.verdicts != nil && group != nil {
-		rec = entry.verdicts[group.taskIndex]
-	}
-	icon, label, style := verdictBadge(rec, now)
-	lines = append(lines, style.Render(icon+" "+label))
-
-	// (3) Rationale rendered through mdrender for inline bold/italic/code styling.
-	if rec != nil && rec.state == verdictDone && rec.verdict.Rationale != "" {
-		lines = append(lines, "")
-		lines = append(lines, reviewRenderer.RenderLines(rec.verdict.Rationale, measure)...)
-	}
-
-	if group == nil {
-		lines = append(lines, "", StyleSubtle.Render("(no commits matched this task)"))
-		return capAndCenter(lines)
-	}
-
-	// (4) Changed files.
-	if len(group.files) > 0 {
-		lines = append(lines, "", StyleSubtle.Render("Changed:"))
-		sorted := make([]git.FileStat, len(group.files))
-		copy(sorted, group.files)
-		sortFileStatsByChurn(sorted)
-		subtleGreen := StyleSuccess
-		subtleRed := StyleError
-		const maxFiles = 8
-		top := sorted
-		if len(top) > maxFiles {
-			top = sorted[:maxFiles]
-		}
-		for _, f := range top {
-			stat := subtleGreen.Render(fmt.Sprintf("+%d", f.Insertions)) +
-				" " + subtleRed.Render(fmt.Sprintf("-%d", f.Deletions))
-			statW := ansi.StringWidth(stat)
-			nameMax := maxW - 2 - 2 - statW
-			if nameMax < 4 {
-				nameMax = 4
-			}
-			name := truncateVisible(f.Path, nameMax)
-			lines = append(lines, "  "+name+"  "+stat)
-		}
-		if len(sorted) > maxFiles {
-			lines = append(lines, StyleSubtle.Render(fmt.Sprintf("  … %d more", len(sorted)-maxFiles)))
-		}
-	}
-
-	// (5) Commits.
-	if len(group.commits) > 0 {
-		lines = append(lines, "", StyleSubtle.Render("Commits:"))
-		for _, c := range group.commits {
-			hash := c.Hash
-			if len(hash) > 7 {
-				hash = hash[:7]
-			}
-			subject := truncateVisible(c.Subject, maxW-2-8)
-			lines = append(lines, "  "+StyleSubtle.Render(hash)+" "+subject)
-		}
-	}
-
-	return capAndCenter(lines)
 }
 
 // capLines returns lines capped to height, with a trailing truncation note if needed.
@@ -844,7 +720,25 @@ func wrapText(s string, maxWidth int) []string {
 	return lines
 }
 
+// reviewLeftPaneWidth returns the task-ledger width for wide two-pane mode.
+// Returns 0 when width < 120 (narrow: stacked layout).
+func reviewLeftPaneWidth(width int) int {
+	if width < 120 {
+		return 0
+	}
+	w := width * 40 / 100
+	if w < 38 {
+		w = 38
+	}
+	if w > 52 {
+		w = 52
+	}
+	return w
+}
+
 // View renders the review panel — either the spec overlay or the main panel.
+// At width ≥ 120 the body is two-pane (task ledger left, diff right);
+// at width < 120 the body falls back to the stacked layout via renderReviewPanel.
 func (m *reviewPanelModel) View() string {
 	if m == nil || m.session == nil {
 		return ""
@@ -866,5 +760,59 @@ func (m *reviewPanelModel) View() string {
 			}
 		}
 	}
-	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, m.activeTab, checkState, m.now)
+
+	leftW := reviewLeftPaneWidth(m.width)
+	if leftW == 0 {
+		// Narrow: stacked layout.
+		return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, checkState, m.now)
+	}
+
+	// Wide: two-pane layout.
+	headerLines := renderReviewHeader(m.session, m.width, m.now)
+	checksStripLines := renderChecksStrip(checkState, m.width, m.now)
+
+	footerLineCount := 3
+	draftLineCount := 0
+	if prDraftInFlight {
+		draftLineCount = 1
+	}
+	bodyH := m.height - len(headerLines) - len(checksStripLines) - footerLineCount - draftLineCount
+	if bodyH < 4 {
+		bodyH = 4
+	}
+
+	// Right pane gets remaining width after the separator.
+	rightW := innerWidth(m.width) - leftW - 1
+	if rightW < 20 {
+		rightW = 20
+	}
+
+	var body string
+	if entry == nil {
+		body = padViewBody(StyleSubtle.Render("loading diff stats…"), innerWidth(m.width), bodyH)
+	} else {
+		leftLines := renderTaskListPane(entry, leftW, bodyH, m.taskCursor, m.now)
+		leftStr := padViewBody(strings.Join(leftLines, "\n"), leftW, bodyH)
+
+		sep := renderVerticalSeparator(bodyH)
+		rightStr := m.renderTaskDiffPane(entry, rightW, bodyH)
+
+		body = lipgloss.JoinHorizontal(lipgloss.Top, leftStr, sep, rightStr)
+	}
+
+	// Build footer.
+	hints := reviewFooterHints(prDraftInFlight, checkState != nil)
+
+	var lines []string
+	lines = append(lines, headerLines...)
+	lines = append(lines, checksStripLines...)
+	lines = append(lines, strings.Split(body, "\n")...)
+	if prDraftInFlight {
+		lines = append(lines, StyleWarning.Render(reviewSpinnerFrame(m.now)+" Pushing branch and drafting PR…"))
+	}
+	lines = append(lines, "")
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(m.width))))
+	lines = append(lines, hints)
+
+	return strings.Join(lines, "\n")
 }

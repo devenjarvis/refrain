@@ -3,31 +3,42 @@ package tui
 import (
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/config"
+	"github.com/devenjarvis/refrain/internal/diffmodel"
 	"github.com/devenjarvis/refrain/internal/github"
-)
-
-const (
-	reviewTabTasks  = 0
-	reviewTabDiff   = 1
-	reviewTabChecks = 2
+	tuidiff "github.com/devenjarvis/refrain/internal/tui/diff"
 )
 
 // reviewPanelModel owns the keyboard, mouse, and view dispatch for the review
-// panel. Per-panel state (cursor, active tab, spec overlay toggle) lives here;
-// cross-panel state (the reviewDiffCache keyed by session ID) stays on App
-// because its lifetime exceeds a single panel session.
+// panel. Per-panel state (cursor, spec overlay toggle) lives here; cross-panel
+// state (the reviewDiffCache keyed by session ID) stays on App because its
+// lifetime exceeds a single panel session.
 type reviewPanelModel struct {
 	session           *agent.Session
 	repoPath          string
 	taskCursor        int
-	activeTab         int
 	specOverlay       bool
 	specOverlayScroll int
-	checksCursor      int // cursor position in the Checks tab list
-	checksScroll      int // scroll offset for the Checks tab output pane
+	checksCursor      int // cursor within the inline checks strip
+	checksScroll      int // scroll offset for checks strip output
+
+	// parsedDiffs is a lazy cache of parsed diff models keyed by taskIndex.
+	// Populated by focusedDiffModel on first access; lives with the panel.
+	parsedDiffs map[int]*diffmodel.Model
+
+	// vp is the embedded viewport for the right (diff) pane.
+	vp viewport.Model
+	// vpFileIdx is the index of the currently shown file within the focused
+	// task's diff model. Cycled with [ and ].
+	vpFileIdx int
+	// sideBySide toggles unified vs side-by-side diff rendering.
+	sideBySide bool
+	// renderersByPath caches diff.Renderer instances keyed by file path so
+	// re-renders are cheap for revisited files.
+	renderersByPath map[string]*tuidiff.Renderer
 
 	// dashboardTopY is the screen Y offset where dashboard content begins.
 	// App pushes this in via SetDashboardTopY; handleClick reads it instead of
