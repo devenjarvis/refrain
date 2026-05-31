@@ -1034,22 +1034,37 @@ func ParsePlanSections(plan string) PlanSections {
 	}
 }
 
-// taskSubjectRE matches "[task N]" at the start of a commit subject where N is
-// a positive integer. Case-insensitive so "[Task 3]" is also accepted.
-var taskSubjectRE = regexp.MustCompile(`(?i)^\[task\s+(\d+)\]`)
+// planTaskTrailerRE matches a "Plan-Task: N" git trailer line in a commit body.
+// Multiline and case-insensitive so "plan-task: 3" and "  Plan-Task: 3  " both match.
+var planTaskTrailerRE = regexp.MustCompile(`(?im)^\s*Plan-Task:\s*(\d+)\s*$`)
+
+// parsePlanTaskIndex scans body for the first Plan-Task trailer and returns its
+// integer value. Returns 0 when no valid trailer is found or when the value is
+// not a positive integer.
+func parsePlanTaskIndex(body string) int {
+	m := planTaskTrailerRE.FindStringSubmatch(body)
+	if m == nil {
+		return 0
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
 
 // CommitGroup holds the commits associated with a single plan task (or the
-// "other" bucket for commits without a recognizable [task N] prefix).
+// "other" bucket for commits without a recognizable Plan-Task trailer).
 type CommitGroup struct {
 	// TaskIndex is 1-based and matches the PlanTask.Index it belongs to.
-	// Zero means the group is the "Other changes" bucket (no [task N] prefix
+	// Zero means the group is the "Other changes" bucket (no Plan-Task trailer
 	// and/or uncommitted working-tree changes).
 	TaskIndex int
 	Commits   []git.Commit
 }
 
-// GroupCommitsByTask partitions commits by their "[task N]" subject prefix.
-// Commits without the prefix land in a group with TaskIndex=0 ("Other
+// GroupCommitsByTask partitions commits by their "Plan-Task: N" body trailer.
+// Commits without the trailer land in a group with TaskIndex=0 ("Other
 // changes"). Within each group, commits preserve their input order (oldest
 // first). The returned slice is sorted by TaskIndex ascending, with the
 // TaskIndex=0 group appended last so it renders at the bottom of the review
@@ -1057,12 +1072,7 @@ type CommitGroup struct {
 func GroupCommitsByTask(commits []git.Commit) []CommitGroup {
 	byIndex := make(map[int]*CommitGroup)
 	for _, c := range commits {
-		idx := 0
-		if m := taskSubjectRE.FindStringSubmatch(c.Subject); m != nil {
-			if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
-				idx = n
-			}
-		}
+		idx := parsePlanTaskIndex(c.Body)
 		if byIndex[idx] == nil {
 			byIndex[idx] = &CommitGroup{TaskIndex: idx}
 		}

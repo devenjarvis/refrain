@@ -152,15 +152,78 @@ Nothing.
 	}
 }
 
+// TestParsePlanTaskIndex verifies the Plan-Task trailer parser.
+func TestParsePlanTaskIndex(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{
+			name: "bare trailer",
+			body: "Plan-Task: 3",
+			want: 3,
+		},
+		{
+			name: "indented trailer",
+			body: "  Plan-Task: 3  ",
+			want: 3,
+		},
+		{
+			name: "no trailer",
+			body: "Implements the widget.",
+			want: 0,
+		},
+		{
+			name: "multiple trailers first wins",
+			body: "Implements widget.\n\nPlan-Task: 2\nPlan-Task: 5",
+			want: 2,
+		},
+		{
+			name: "surrounding text trailer at end",
+			body: "Implements the widget.\n\nCo-authored-by: Alice <alice@example.com>\nPlan-Task: 7",
+			want: 7,
+		},
+		{
+			name: "case insensitive key",
+			body: "plan-task: 4",
+			want: 4,
+		},
+		{
+			name: "mixed case key",
+			body: "PLAN-TASK: 9",
+			want: 9,
+		},
+		{
+			name: "zero is not a valid task index",
+			body: "Plan-Task: 0",
+			want: 0,
+		},
+		{
+			name: "empty body",
+			body: "",
+			want: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parsePlanTaskIndex(tc.body)
+			if got != tc.want {
+				t.Errorf("parsePlanTaskIndex(%q) = %d, want %d", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestGroupCommitsByTask verifies that commits are bucketed correctly by
-// [task N] prefix, with the "other" bucket receiving untagged commits.
+// Plan-Task body trailer, with the "other" bucket receiving untagged commits.
 func TestGroupCommitsByTask(t *testing.T) {
 	commits := []git.Commit{
-		{Hash: "aaa", Subject: "[task 2] add widget"},
-		{Hash: "bbb", Subject: "[task 1] scaffold"},
-		{Hash: "ccc", Subject: "fixup: typo"},
-		{Hash: "ddd", Subject: "[task 2] add tests"},
-		{Hash: "eee", Subject: "[Task 3] final polish"},
+		{Hash: "aaa", Subject: "feat: add widget", Body: "Implements the widget.\n\nPlan-Task: 2"},
+		{Hash: "bbb", Subject: "feat: scaffold", Body: "Initial scaffold.\n\nPlan-Task: 1"},
+		{Hash: "ccc", Subject: "fixup: typo", Body: ""},
+		{Hash: "ddd", Subject: "test: add widget tests", Body: "Test coverage.\n\nPlan-Task: 2"},
+		{Hash: "eee", Subject: "chore: final polish", Body: "Polish.\n\nPlan-Task: 3"},
 	}
 	groups := GroupCommitsByTask(commits)
 
@@ -195,11 +258,11 @@ func TestGroupCommitsByTask(t *testing.T) {
 }
 
 // TestGroupCommitsByTask_NoOtherBucket verifies that no extra group is created
-// when every commit has a [task N] prefix.
+// when every commit has a Plan-Task trailer.
 func TestGroupCommitsByTask_NoOtherBucket(t *testing.T) {
 	commits := []git.Commit{
-		{Hash: "aaa", Subject: "[task 1] scaffold"},
-		{Hash: "bbb", Subject: "[task 1] tests"},
+		{Hash: "aaa", Subject: "feat: scaffold", Body: "Plan-Task: 1"},
+		{Hash: "bbb", Subject: "test: scaffold tests", Body: "Plan-Task: 1"},
 	}
 	groups := GroupCommitsByTask(commits)
 	for _, g := range groups {
