@@ -397,12 +397,15 @@ func reviewFooterHints(prDraftInFlight, checksConfigured bool) string {
 	return h
 }
 
-// reviewListPaneRowAt returns the 0-based task row index at (mouseX, mouseY) within the
-// left task-list pane, or -1 if the click is outside the pane or in the PLAN TASKS header.
-// paneTop is the Y coordinate of the first line of the pane (including the 2-line header).
-// paneLeft/paneWidth define the horizontal bounds.
+// reviewListPaneRowAt returns the 0-based task card index at (mouseX, mouseY)
+// within the left task-list pane, or -1 if the click is outside the pane or
+// in the PLAN TASKS header. paneTop is the Y coordinate of the first line of
+// the pane (including the 2-line header). paneLeft/paneWidth define the
+// horizontal bounds. Each task card occupies 4 lines; the returned index is
+// the card index (one per task), not the line offset.
 func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLeft, paneWidth int) int {
-	const listHeaderLines = 2 // PLAN TASKS + blank
+	const listHeaderLines = 2 // PLAN TASKS + underline
+	const cardH = 4
 	if mouseX < paneLeft || mouseX >= paneLeft+paneWidth {
 		return -1
 	}
@@ -410,12 +413,12 @@ func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLe
 	if mouseY < taskRowStart {
 		return -1
 	}
-	rowIdx := mouseY - taskRowStart
+	cardIdx := (mouseY - taskRowStart) / cardH
 	nRows := reviewTaskCount(entry)
-	if rowIdx >= nRows {
+	if cardIdx >= nRows {
 		return -1
 	}
-	return rowIdx
+	return cardIdx
 }
 
 // renderTaskListPane renders the task-card ledger.

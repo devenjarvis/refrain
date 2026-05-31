@@ -300,8 +300,8 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 }
 
 // handleClick maps a mouse-click on the review task list pane to a cursor
-// move. Mirrors the offset math in renderTaskListPane so the visual row
-// under the click becomes the new cursor.
+// move. Mirrors the layout math in renderTaskListPane and View() so the card
+// under the click becomes the new cursor position.
 func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg) {
 	if m == nil || m.session == nil {
 		return
@@ -310,29 +310,43 @@ func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg) {
 	if entry == nil {
 		return
 	}
+
+	// Compute left-pane width the same way as View() and the renderer.
+	leftPaneW := reviewLeftPaneWidth(m.width)
+	if leftPaneW == 0 {
+		// Narrow stacked mode: full width is the task ledger.
+		leftPaneW = m.width - 2
+	} else if msg.X >= leftPaneW+1 {
+		// Click is in the right (diff) pane — ignore.
+		return
+	}
+
 	headerH := len(renderReviewHeader(m.session, m.width, m.now))
-	paneTop := m.dashboardTopY + headerH
-	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, m.width-2)
+	checksH := len(renderChecksStrip(nil, m.width, m.now)) // conservative: nil if no checks
+	paneTop := m.dashboardTopY + headerH + checksH
+	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, leftPaneW)
 	if rowIdx < 0 {
 		return
 	}
+
 	footerLines := 3
-	bodyH := m.height - m.dashboardTopY - headerH - footerLines
+	bodyH := m.height - m.dashboardTopY - headerH - checksH - footerLines
 	if bodyH < 4 {
 		bodyH = 4
 	}
 	const listHeaderLines = 2
-	rowsH := bodyH - listHeaderLines
-	if rowsH < 1 {
-		rowsH = 1
+	const cardH = 4
+	cardsH := (bodyH - listHeaderLines) / cardH
+	if cardsH < 1 {
+		cardsH = 1
 	}
 	nRows := reviewTaskCount(entry)
-	offset := m.taskCursor - rowsH/2
+	offset := m.taskCursor - cardsH/2
 	if offset < 0 {
 		offset = 0
 	}
-	if offset+rowsH > nRows {
-		offset = nRows - rowsH
+	if offset+cardsH > nRows {
+		offset = nRows - cardsH
 		if offset < 0 {
 			offset = 0
 		}

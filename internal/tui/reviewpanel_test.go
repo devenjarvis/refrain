@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/config"
@@ -462,6 +463,58 @@ func TestRenderReviewPanel_UsesThemeColors(t *testing.T) {
 	}
 }
 
+// TestReviewPanel_ClickHitsLeftPaneOnly verifies that at width=140 (two-pane)
+// a click in the left pane moves the cursor but a click in the right pane
+// (x=80) leaves the cursor unchanged. At width=80 (stacked), clicks in the
+// task-ledger area move the cursor.
+func TestReviewPanel_ClickHitsLeftPaneOnly(t *testing.T) {
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	sess.SetLifecyclePhase(agent.LifecycleInReview)
+	// renderReviewHeader for this session returns 3 lines (title+prompt+divider).
+	// No tab bar → paneTop = dashboardTopY(0) + headerH(3) = 3.
+	// listHeaderLines=2 → first card at Y=5.
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "task one"},
+			{Index: 2, Text: "task two"},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictPending},
+			2: {state: verdictPending},
+		},
+	}
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+
+	// Width=140: two-pane mode. leftPaneWidth = clamp(140*40/100, 38, 52) = 52.
+	panel140 := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
+	// Move cursor to 1 so we can test a click that should return it to 0.
+	panel140.taskCursor = 1
+
+	// Click at x=10, Y=5 (first card, within left pane width=52) → cursor 0.
+	_, _ = panel140.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 10, Y: 5})
+	if panel140.TaskCursor() != 0 {
+		t.Errorf("wide: click at x=10 (left pane) should move cursor to 0, got %d", panel140.TaskCursor())
+	}
+
+	// Reset cursor.
+	panel140.taskCursor = 1
+	// Click at x=80 (right pane: x >= leftPaneWidth+1 = 53) → cursor unchanged.
+	_, _ = panel140.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 80, Y: 5})
+	if panel140.TaskCursor() != 1 {
+		t.Errorf("wide: click at x=80 (right pane) must not change cursor, got %d", panel140.TaskCursor())
+	}
+
+	// Width=80: stacked mode. Full width for task ledger. leftPaneWidth = 0.
+	panel80 := newReviewPanel(sess, "", 80, 40, app.buildReviewDeps())
+	panel80.taskCursor = 1
+	// Click at x=10, Y=5 (first card) → cursor 0.
+	_, _ = panel80.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 10, Y: 5})
+	if panel80.TaskCursor() != 0 {
+		t.Errorf("stacked: click at Y=5 should move cursor to 0, got %d", panel80.TaskCursor())
+	}
+}
+
 // TestReviewListPaneRowAt verifies the click hit-test for the left task list pane.
 func TestReviewListPaneRowAt(t *testing.T) {
 	entry := &reviewDiffEntry{
@@ -475,18 +528,20 @@ func TestReviewListPaneRowAt(t *testing.T) {
 
 	const paneTop, paneLeft, paneWidth = 4, 0, 40
 
+	// With 4-line cards: header at paneTop+0,+1; card 0 at paneTop+2..+5; card 1 at +6..+9; card 2 at +10..+13.
 	tests := []struct {
 		name    string
 		mouseX  int
 		mouseY  int
 		wantRow int
 	}{
-		{"click row 0", 5, paneTop + 2, 0},
-		{"click row 1", 5, paneTop + 3, 1},
-		{"click row 2", 5, paneTop + 4, 2},
-		{"Y below rows", 5, paneTop + 5, -1},
+		{"click card 0 line 0", 5, paneTop + 2, 0},
+		{"click card 0 line 3", 5, paneTop + 5, 0}, // still within card 0
+		{"click card 1 line 0", 5, paneTop + 6, 1},
+		{"click card 2 line 0", 5, paneTop + 10, 2},
+		{"Y below all cards", 5, paneTop + 14, -1}, // 3 cards = 12 lines, so +14 is beyond
 		{"in PLAN TASKS header", 5, paneTop, -1},
-		{"in blank header line", 5, paneTop + 1, -1},
+		{"in underline header line", 5, paneTop + 1, -1},
 		{"X past right edge", paneLeft + paneWidth, paneTop + 2, -1},
 		{"X before left edge", paneLeft - 1, paneTop + 2, -1},
 		{"Y above pane", 5, paneTop - 1, -1},
