@@ -67,25 +67,26 @@ const (
 	// to read .claude/plan.md and execute it.
 	DefaultBuildFromPlanPrompt = "Read .claude/plan.md and execute the plan. Update task checkboxes as you complete them. Stop when all tasks are complete or when you need a decision."
 
-	// DefaultBuildSystemPrompt is appended (via Claude's
-	// --append-system-prompt flag) to every Building-phase agent. It tells
-	// Claude to (a) plan via TodoWrite so progress can be scraped through
-	// PostToolUse hooks, and (b) commit per task with a parseable subject
-	// prefix so commits can be mapped back to plan tasks during review. The
-	// "[task N]" indexing matches the "- [ ]" / "- [x]" counting in
-	// internal/tui/dashboard.go's planTaskCounts so the prompt and the
-	// future parser agree on what counts as a task line.
+	// DefaultBuildSystemPrompt is appended (via Claude's --append-system-prompt
+	// flag) to every Building-phase agent. It instructs the agent to (a) plan
+	// via TodoWrite, (b) make one commit per task with a Conventional Commits
+	// subject, and (c) attach a Plan-Task: N trailer in the commit body so
+	// commits can be mapped back to plan tasks during review without relying on
+	// a parseable subject prefix.
 	DefaultBuildSystemPrompt = `When you start a non-trivial task in this session, use the TodoWrite tool first to break the work into ordered, atomic steps and update item status as you progress.
 
-Make exactly one git commit per completed step.
+Make exactly one git commit per completed task.
 
-If a file at .claude/plan.md exists in the worktree, re-read .claude/plan.md immediately before each commit. The commit subject MUST start with "[task N] " where N is the 1-based index of the task line (counting ALL task list lines — both "- [ ]" and "- [x]" — top-to-bottom, ignoring non-task lines such as section headers). N is counted across the ENTIRE file, including any task lines that appear outside the ## Tasks section. If no .claude/plan.md exists, prefix the subject with "task: " instead. The rest of the subject is a normal short description.
+If a file at .claude/plan.md exists in the worktree, re-read .claude/plan.md immediately before each commit. Write a Conventional Commits subject (type: short summary, e.g. "feat: add widget") and attach a Plan-Task: N trailer in the commit body, where N is the 1-based position of the completed checkbox inside the ## Tasks section of the plan. Put the trailer on its own line, separated from any body paragraph by a blank line.
 
-Worked example — given a plan whose full task list (all sections) is:
-  line 1: - [ ] write tests        → [task 1]
-  line 2: - [ ] implement feature  → [task 2]
-  line 3: - [x] update docs        → [task 3]
-the third commit subject is "[task 3] update documentation".
+Worked example — for task 2 in the plan's ## Tasks section:
+  feat: implement login form
+
+  Adds the password field and submit handler.
+
+  Plan-Task: 2
+
+The Plan-Task trailer is a git commit body trailer. If no .claude/plan.md exists, omit the trailer entirely and use a plain Conventional Commits subject.
 
 NEVER squash commits, NEVER amend a previous commit to add new task work, and NEVER use git commit --amend. Each task MUST be its own commit so the review panel can map commits back to plan tasks one-to-one. Violating this breaks the per-task diff view.`
 )
