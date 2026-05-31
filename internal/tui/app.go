@@ -604,6 +604,8 @@ func (a *App) openNewSession(returnTo ViewMode) tea.Cmd {
 	a.newSession.repoName = a.activeRepoDisplayName()
 	a.newSession.baseBranch, _ = git.BaseBranch(a.activeRepo)
 	a.newSession.SetSize(a.width, a.height-statusBarHeight)
+	resolved := a.resolvedCache[a.activeRepo]
+	a.newSession.SetDefaults(resolved)
 	return a.newSession.Open(returnTo)
 }
 

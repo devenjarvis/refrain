@@ -4853,6 +4853,53 @@ func TestNewApp_PendingOverridesInitialized(t *testing.T) {
 	}
 }
 
+func TestOpenNewSession_SeedsOverrideDefaultsFromResolved(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "t@t.com"},
+		{"git", "config", "user.name", "T"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git setup %v: %v\n%s", args, err, out)
+		}
+	}
+
+	planModel := "claude-haiku-4-5-20251001"
+	agentModel := "claude-sonnet-4-6"
+	trueVal := true
+	resolved := config.Resolve(nil, &config.RepoSettings{
+		PlanModel:         &planModel,
+		AgentModel:        &agentModel,
+		BypassPermissions: &trueVal,
+	})
+
+	app := NewApp()
+	app.width = 140
+	app.height = 40
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	mgr := newFakeManager(dir)
+	app.managers[dir] = mgr
+
+	app.openNewSession(ViewDashboard)
+
+	got := app.newSession.overrideDefaults
+	if got.PlanModel != "claude-haiku-4-5-20251001" {
+		t.Errorf("overrideDefaults.PlanModel = %q, want \"claude-haiku-4-5-20251001\"", got.PlanModel)
+	}
+	if got.AgentModel != "claude-sonnet-4-6" {
+		t.Errorf("overrideDefaults.AgentModel = %q, want \"claude-sonnet-4-6\"", got.AgentModel)
+	}
+	if got.BypassPermissions == nil || !*got.BypassPermissions {
+		t.Error("overrideDefaults.BypassPermissions should be non-nil true")
+	}
+}
+
 // TestReviewPanel_EnterOpensDiffViewer verifies that pressing enter on a task
 // with a non-empty rawDiff transitions to ViewDiff with the review modal preserved.
 func TestReviewPanel_EnterOpensDiffViewer(t *testing.T) {
