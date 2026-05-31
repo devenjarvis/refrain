@@ -206,10 +206,11 @@ func TestSessionRepoProp_ReviseCwdMatchesWorktreePath(t *testing.T) {
 // and all worktree paths are mutually distinct.
 func TestSessionRepoProp_MultipleSessionsDistinctWorktreesSameRepo(t *testing.T) {
 	setRapidChecks(t, 20)
-	repo := setupTestRepoForProp()
-	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
 	rapid.Check(t, func(t *rapid.T) {
+		repo := setupTestRepoForProp()
+		defer func() { _ = os.RemoveAll(repo) }()
+
 		mgr := NewManager(repo, defaultTestSettings())
 		defer mgr.Shutdown()
 

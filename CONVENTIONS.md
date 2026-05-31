@@ -49,6 +49,7 @@ cmd/  ──────────────►  internal/tui/  ────
 - `cmd/` is the **only** place concrete types are wired together (construct the real `Manager`, inject it into the `App`). Keep wiring out of constructors that tests need to call.
 - No import cycles. If two packages need each other, the shared thing belongs in a third package or behind an interface defined by the consumer.
 - A domain package must compile and be testable without a terminal.
+- These dependency rules are mechanically enforced by `.go-arch-lint.yml`; changing them requires editing that file and is reviewed in PRs. Adding a new `internal/tui/foo/` sub-package also requires a new component entry there.
 
 ---
 
@@ -212,6 +213,7 @@ Run before every commit / in every PR:
 - [ ] `go vet ./...` clean.
 - [ ] `gofmt -w .` applied.
 - [ ] `golangci-lint run` clean.
+- [ ] `go-arch-lint check` clean (enforces §2 layering rules).
 - [ ] Changelog fragment added under `changelog.d/` (`### Added` / `### Fixed` / …).
 - [ ] No new field added to a model without a clear single owner (§6).
 - [ ] No new message handled in more than one place (§4).

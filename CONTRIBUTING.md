@@ -33,6 +33,7 @@ go test ./...               # run all tests
 go test -race ./...         # run with race detector
 go vet ./...                # static analysis
 golangci-lint run           # lint (config in .golangci.yml)
+go-arch-lint check          # architecture (config in .go-arch-lint.yml)
 gofmt -w .                  # format all Go files
 ```
 

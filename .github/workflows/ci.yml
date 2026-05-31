@@ -38,6 +38,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Arch lint
+        run: |
+          go install github.com/fe3dback/go-arch-lint@v1.15.0
+          go-arch-lint check
+
       - name: Test
         run: go test -race -timeout 120s ./...
 
