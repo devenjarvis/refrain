@@ -143,22 +143,45 @@ func (m planEditorModel) View() string {
 	lines = append(lines, m.renderHeader())
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", max(1, innerWidth(m.doc.width)))))
 
-	if status := m.renderStatusLine(); status != "" {
-		lines = append(lines, status)
+	statusLine := m.renderStatusLine()
+	if statusLine != "" {
+		lines = append(lines, statusLine)
+	}
+	statusLines := 0
+	if statusLine != "" {
+		statusLines = 1
 	}
 
+	const footerLineCount = 2 // divider + hints
+	bodyH := m.doc.height - 2 - statusLines - footerLineCount
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
+	var body string
 	switch m.mode {
 	case planEditorModeEdit:
-		lines = append(lines, m.doc.CenteredBlock(m.doc.textarea.View()))
+		body = m.doc.CenteredBlock(m.doc.textarea.View())
 	case planEditorModeReviseInput:
-		lines = append(lines, m.renderBody())
-		lines = append(lines, "")
-		lines = append(lines, StyleActive.Render("revise:")+" "+m.reviseInput.View())
+		// Reserve 2 rows (blank + revise: input) for the input affordance so the
+		// plan preview doesn't push the revise: line below the footer.
+		previewH := bodyH - 2
+		if previewH < 1 {
+			previewH = 1
+		}
+		rawPreview := m.renderBody()
+		previewLines := strings.Split(rawPreview, "\n")
+		if len(previewLines) > previewH {
+			previewLines = previewLines[:previewH]
+		}
+		body = strings.Join(previewLines, "\n") + "\n\n" + StyleActive.Render("revise:")+" "+m.reviseInput.View()
 	case planEditorModeQuestion:
-		lines = append(lines, m.renderQuestionBody())
+		body = m.renderQuestionBody()
 	default:
-		lines = append(lines, m.renderBody())
+		body = m.renderBody()
 	}
+	body = fillHeight(body, m.doc.width, bodyH)
+	lines = append(lines, body)
 
 	lines = append(lines, m.renderFooter())
 	return strings.Join(lines, "\n")

@@ -1208,3 +1208,50 @@ func TestPlanEditor_ClampCursor(t *testing.T) {
 		t.Errorf("clampCursor with empty sections: got %d, want 0", editor2.sectionCursor)
 	}
 }
+
+func TestPlanEditor_View_FooterOnLastRow(t *testing.T) {
+	const h = 30
+	assertFooter := func(t *testing.T, editor planEditorModel) {
+		t.Helper()
+		view := editor.View()
+		lines := strings.Split(view, "\n")
+		if len(lines) != h {
+			t.Errorf("View() returned %d lines, want %d", len(lines), h)
+		}
+		last := testutil.StripANSI(lines[len(lines)-1])
+		if !strings.Contains(last, "esc") {
+			t.Errorf("last line %q does not contain 'esc' hint", last)
+		}
+	}
+
+	t.Run("empty plan", func(t *testing.T) {
+		sess, _ := newEditorTestSession(t)
+		// no plan written — renderBody returns the placeholder string
+		editor := newPlanEditor(sess, "", 80, h)
+		assertFooter(t, editor)
+	})
+
+	t.Run("short plan", func(t *testing.T) {
+		sess, _ := newEditorTestSession(t)
+		if err := sess.WritePlan("# Goal\nDo X\n"); err != nil {
+			t.Fatal(err)
+		}
+		editor := newPlanEditor(sess, "", 80, h)
+		assertFooter(t, editor)
+	})
+
+	t.Run("full plan fills bodyH", func(t *testing.T) {
+		sess, _ := newEditorTestSession(t)
+		// Build a plan long enough to fill all body rows.
+		var sb strings.Builder
+		sb.WriteString("# Goal\nDo X\n\n")
+		for i := 0; i < 50; i++ {
+			sb.WriteString("- item line\n")
+		}
+		if err := sess.WritePlan(sb.String()); err != nil {
+			t.Fatal(err)
+		}
+		editor := newPlanEditor(sess, "", 80, h)
+		assertFooter(t, editor)
+	})
+}
