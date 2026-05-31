@@ -175,10 +175,12 @@ func (m newSessionModel) View() string {
 		textareaCol := lipgloss.NewStyle().Width(tw).Render(m.textarea.View())
 		sidebar := m.renderSidebar()
 		body := lipgloss.JoinHorizontal(lipgloss.Top, textareaCol, "  ", sidebar)
-		return lipgloss.JoinVertical(lipgloss.Left, header, "", title, "", body)
+		out := lipgloss.JoinVertical(lipgloss.Left, header, "", title, "", body)
+		return fillHeight(out, m.width, m.height)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", title, "", m.textarea.View())
+	out := lipgloss.JoinVertical(lipgloss.Left, header, "", title, "", m.textarea.View())
+	return fillHeight(out, m.width, m.height)
 }
 
 func (m *newSessionModel) showSidebar() bool {

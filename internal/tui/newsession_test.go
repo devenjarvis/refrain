@@ -192,6 +192,28 @@ func TestNewSession_CtrlJInsertsNewline(t *testing.T) {
 	}
 }
 
+func TestNewSession_View_FillsTerminalHeight(t *testing.T) {
+	cases := []struct {
+		name   string
+		w, h   int
+	}{
+		{"wide tall", 120, 40},
+		{"narrow shorter", 90, 24},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newNewSessionModel()
+			m.SetSize(tc.w, tc.h)
+			m.Open(ViewDashboard)
+			view := m.View()
+			got := strings.Count(view, "\n") + 1
+			if got != tc.h {
+				t.Errorf("SetSize(%d,%d): View() has %d lines, want %d", tc.w, tc.h, got, tc.h)
+			}
+		})
+	}
+}
+
 func TestNewSession_ShiftEnterInsertsNewline(t *testing.T) {
 	m := newNewSessionModel()
 	m.SetSize(120, 40)
