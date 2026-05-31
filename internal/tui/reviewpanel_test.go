@@ -1402,8 +1402,8 @@ func TestReviewRedesign_LegacyStringsRemoved(t *testing.T) {
 	if !strings.Contains(stripped, "PLAN TASKS") {
 		t.Error("panel must contain 'PLAN TASKS' header in the task ledger")
 	}
-	if !strings.Contains(stripped, "CHECKS") {
-		t.Error("panel must contain 'CHECKS' as the inline checks strip header")
+	if !strings.Contains(stripped, "Checks") {
+		t.Error("panel must contain 'Checks' as the inline checks strip header")
 	}
 	if !strings.Contains(stripped, "enter expand") {
 		t.Error("footer must contain 'enter expand' hint")
@@ -1532,6 +1532,85 @@ func TestRenderChecksTab_OutputPane(t *testing.T) {
 
 	if !strings.Contains(out, "PASS: all 42 tests") {
 		t.Errorf("output pane must contain check output; got:\n%s", out)
+	}
+}
+
+// TestRenderChecksStrip_AllPassOneLine verifies that when all checks have
+// passed, renderChecksStrip returns exactly one summary line containing
+// "Checks", a pass count with ✓, and a duration suffix.
+func TestRenderChecksStrip_AllPassOneLine(t *testing.T) {
+	cs := &checksTabState{
+		checks: []config.ValidationCheck{
+			{Name: "Tests", Command: "go test ./..."},
+			{Name: "Lint", Command: "golangci-lint run"},
+		},
+		results: []validationCheckResult{
+			{state: checkPassed, duration: 2 * 1e9},
+			{state: checkPassed, duration: 1 * 1e9},
+		},
+	}
+
+	lines := renderChecksStrip(cs, 120, time.Now())
+
+	if len(lines) != 1 {
+		t.Fatalf("all-pass strip must be exactly 1 line, got %d: %v", len(lines), lines)
+	}
+	stripped := ansi.Strip(lines[0])
+	if !strings.Contains(stripped, "Checks") {
+		t.Errorf("summary line must contain 'Checks'; got: %q", stripped)
+	}
+	if !strings.Contains(stripped, "✓") {
+		t.Errorf("summary line must contain '✓'; got: %q", stripped)
+	}
+	if !strings.Contains(stripped, "2") {
+		t.Errorf("summary line must contain check count '2'; got: %q", stripped)
+	}
+	if !strings.Contains(stripped, "s") {
+		t.Errorf("summary line must contain a duration suffix 's'; got: %q", stripped)
+	}
+}
+
+// TestRenderChecksStrip_FailureExpandsWithTail verifies that a failed check
+// expands the strip to a summary + the last 4 lines of the failed output.
+func TestRenderChecksStrip_FailureExpandsWithTail(t *testing.T) {
+	cs := &checksTabState{
+		checks: []config.ValidationCheck{
+			{Name: "Tests", Command: "go test ./..."},
+		},
+		results: []validationCheckResult{
+			{
+				state:  checkFailed,
+				output: "line1\nline2\nline3\nline4\nFAIL: x\n",
+			},
+		},
+	}
+
+	lines := renderChecksStrip(cs, 120, time.Now())
+
+	out := strings.Join(lines, "\n")
+	stripped := ansi.Strip(out)
+
+	if !strings.Contains(stripped, "Checks") {
+		t.Errorf("summary line must contain 'Checks'; got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "Tests") {
+		t.Errorf("summary line must contain the failed check name 'Tests'; got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "line2") {
+		t.Errorf("strip must contain 'line2' (tail line); got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "line3") {
+		t.Errorf("strip must contain 'line3' (tail line); got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "line4") {
+		t.Errorf("strip must contain 'line4' (tail line); got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "FAIL: x") {
+		t.Errorf("strip must contain 'FAIL: x' (last output line); got:\n%s", stripped)
+	}
+	// line1 is beyond the last 4 lines (output has 5 non-empty lines).
+	if strings.Contains(stripped, "line1") {
+		t.Errorf("strip must only show last 4 output lines; 'line1' should be omitted; got:\n%s", stripped)
 	}
 }
 

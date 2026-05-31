@@ -174,6 +174,79 @@ func renderChecksTab(cs *checksTabState, width, height int, now time.Time) []str
 	return lines
 }
 
+// tailLines returns the last n non-empty lines from s (split on "\n"),
+// trimming a trailing empty element from strings that end with "\n".
+func tailLines(s string, n int) []string {
+	all := strings.Split(s, "\n")
+	// Trim trailing empty element produced by a trailing newline.
+	if len(all) > 0 && all[len(all)-1] == "" {
+		all = all[:len(all)-1]
+	}
+	if len(all) <= n {
+		return all
+	}
+	return all[len(all)-n:]
+}
+
+// renderChecksStrip renders the compact inline checks strip.
+// When cs is nil or has no checks, returns an empty slice (strip is omitted).
+// When all results are checkPassed, returns a single summary line.
+// When any result is checkFailed/checkError, returns a 6-line expanded form:
+// 1 summary, 4 tail lines of the first failed check's output, 1 divider.
+func renderChecksStrip(cs *checksTabState, width int, now time.Time) []string {
+	if cs == nil || len(cs.checks) == 0 {
+		return nil
+	}
+
+	var passCount, failCount int
+	var firstFailed *validationCheckResult
+	var firstFailedName string
+	var totalDuration time.Duration
+	for i, result := range cs.results {
+		switch result.state {
+		case checkPassed:
+			passCount++
+			totalDuration += result.duration
+		case checkFailed, checkError:
+			failCount++
+			if firstFailed == nil {
+				r := result
+				firstFailed = &r
+				if i < len(cs.checks) {
+					firstFailedName = cs.checks[i].Name
+				}
+			}
+			totalDuration += result.duration
+		}
+	}
+
+	passStr := StyleSuccess.Render(fmt.Sprintf("%d✓", passCount))
+
+	if failCount == 0 {
+		dur := totalDuration.Round(time.Second)
+		summary := fmt.Sprintf("  Checks  %s  ran in %s", passStr, dur)
+		return []string{summary}
+	}
+
+	// Expanded: summary + 4 tail output lines + divider.
+	failStr := StyleError.Render(fmt.Sprintf("%d✗", failCount))
+	nameStr := StyleSubtle.Render("❯ " + firstFailedName)
+	summary := fmt.Sprintf("  Checks  %s %s  %s", passStr, failStr, nameStr)
+
+	tail := tailLines(firstFailed.output, 4)
+	var lines []string
+	lines = append(lines, summary)
+	for _, l := range tail {
+		lines = append(lines, "  "+l)
+	}
+	// Pad to exactly 4 tail lines if there are fewer.
+	for len(lines) < 5 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
+	return lines
+}
+
 // renderReviewHeader returns the 4-line collapsed header:
 // [0] REVIEW › <name> [age], [1] prompt line 1, [2] prompt line 2 (with …), [3] divider.
 // For short prompts that fit in one line, returns 3 lines: [0] title, [1] prompt, [2] divider.
@@ -264,13 +337,16 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	// Header (3–4 lines depending on prompt length).
 	headerLines := renderReviewHeader(sess, width, now)
 
+	// Checks strip: 0–6 lines depending on check state.
+	checksStripLines := renderChecksStrip(checkState, width, now)
+
 	// Footer: blank + divider + hints = 3 lines; +1 when draft in flight.
 	footerLineCount := 3
 	draftLineCount := 0
 	if prDraftInFlight {
 		draftLineCount = 1
 	}
-	bodyH := height - len(headerLines) - footerLineCount - draftLineCount
+	bodyH := height - len(headerLines) - len(checksStripLines) - footerLineCount - draftLineCount
 	if bodyH < 4 {
 		bodyH = 4
 	}
@@ -302,6 +378,7 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 	// Assemble full panel.
 	var lines []string
 	lines = append(lines, headerLines...)
+	lines = append(lines, checksStripLines...)
 	lines = append(lines, bodyLines...)
 
 	// In-flight PR draft status line.
