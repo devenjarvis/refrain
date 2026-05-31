@@ -147,8 +147,8 @@ func (f *fakeManager) KillSession(sessionID string) error {
 
 func (f *fakeManager) ResumeSession(_ state.SessionState, _ agent.Config) error { return nil }
 
-func (f *fakeManager) StartDraft(_, _ string) error              { return nil }
-func (f *fakeManager) RevisePlan(_, _ string) error              { return nil }
+func (f *fakeManager) StartDraft(_ string, _ string, _ ...agent.DraftOption) error  { return nil }
+func (f *fakeManager) RevisePlan(_ string, _ string, _ ...agent.DraftOption) error { return nil }
 func (f *fakeManager) SetPlanDrafter(_ agent.PlanDrafter)        {}
 func (f *fakeManager) ReviewerAgent() agent.ReviewerAgent        { return nil }
 func (f *fakeManager) ReconcileExternalBranchRename(_, _ string) {}

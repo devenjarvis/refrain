@@ -1252,3 +1252,135 @@ func TestCreateSession_PrefersCachedOriginRef_WhenFetchFails(t *testing.T) {
 		t.Errorf("worktree HEAD = %s, want %s (cached origin/main); got local main SHA instead", gotSHA, wantSHA)
 	}
 }
+
+func TestManager_StartDraft_ModelOverride_PassesToDrafter(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	stub := &stubPlanDrafter{
+		draftFn: func(ctx context.Context, req DraftRequest) (string, error) {
+			return "# Goal\nDo X\n\n## Tasks\n- [ ] step\n", nil
+		},
+	}
+	mgr.SetPlanDrafter(stub)
+
+	cfg := Config{Task: "test", Rows: 24, Cols: 80}
+	sess, _, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+		return exec.Command("bash", "-c", "sleep 5")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.StartDraft(sess.ID, "add dark mode", WithPlanModel("claude-opus-4-8")); err != nil {
+		t.Fatalf("StartDraft: %v", err)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		return !sess.IsDrafting()
+	})
+
+	stub.mu.Lock()
+	drafted := stub.drafted
+	stub.mu.Unlock()
+
+	if len(drafted) == 0 {
+		t.Fatal("drafter was never called")
+	}
+	if got := drafted[0].Model; got != "claude-opus-4-8" {
+		t.Errorf("DraftRequest.Model = %q, want \"claude-opus-4-8\"", got)
+	}
+}
+
+func TestManager_StartDraft_NoOpts_ModelIsEmpty(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	stub := &stubPlanDrafter{
+		draftFn: func(ctx context.Context, req DraftRequest) (string, error) {
+			return "# Goal\nDo X\n\n## Tasks\n- [ ] step\n", nil
+		},
+	}
+	mgr.SetPlanDrafter(stub)
+
+	cfg := Config{Task: "test", Rows: 24, Cols: 80}
+	sess, _, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+		return exec.Command("bash", "-c", "sleep 5")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.StartDraft(sess.ID, "add dark mode"); err != nil {
+		t.Fatalf("StartDraft: %v", err)
+	}
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		return !sess.IsDrafting()
+	})
+
+	stub.mu.Lock()
+	drafted := stub.drafted
+	stub.mu.Unlock()
+
+	if len(drafted) == 0 {
+		t.Fatal("drafter was never called")
+	}
+	if got := drafted[0].Model; got != "" {
+		t.Errorf("DraftRequest.Model = %q, want \"\" (no override, drafter uses its own model)", got)
+	}
+}
+
+func TestManager_RevisePlan_ModelOverride_PassesToDrafter(t *testing.T) {
+	repo := setupTestRepo(t)
+	mgr := NewManager(repo, defaultTestSettings())
+	defer mgr.Shutdown()
+
+	const initialPlan = "# Goal\nDo X\n\n## Tasks\n- [ ] step\n"
+	stub := &stubPlanDrafter{
+		draftFn: func(ctx context.Context, req DraftRequest) (string, error) {
+			return initialPlan, nil
+		},
+		reviseFn: func(ctx context.Context, req ReviseRequest) (string, error) {
+			return initialPlan, nil
+		},
+	}
+	mgr.SetPlanDrafter(stub)
+
+	cfg := Config{Task: "test", Rows: 24, Cols: 80}
+	sess, _, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+		return exec.Command("bash", "-c", "sleep 5")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First draft to get a plan on disk.
+	if err := mgr.StartDraft(sess.ID, "add dark mode"); err != nil {
+		t.Fatalf("StartDraft: %v", err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool {
+		return !sess.IsDrafting() && sess.HasPlan()
+	})
+
+	// Now revise with a model override.
+	if err := mgr.RevisePlan(sess.ID, "split tasks", WithPlanModel("claude-opus-4-8")); err != nil {
+		t.Fatalf("RevisePlan: %v", err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool {
+		return !sess.IsRevising()
+	})
+
+	stub.mu.Lock()
+	revised := stub.revised
+	stub.mu.Unlock()
+
+	if len(revised) == 0 {
+		t.Fatal("revise drafter was never called")
+	}
+	if got := revised[0].Model; got != "claude-opus-4-8" {
+		t.Errorf("ReviseRequest.Model = %q, want \"claude-opus-4-8\"", got)
+	}
+}

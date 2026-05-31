@@ -42,8 +42,8 @@ type SessionManager interface {
 	ResumeSession(ss state.SessionState, cfg agent.Config) error
 
 	// Planning subprocess control
-	StartDraft(sessionID, prompt string) error
-	RevisePlan(sessionID, critique string) error
+	StartDraft(sessionID, prompt string, opts ...agent.DraftOption) error
+	RevisePlan(sessionID, critique string, opts ...agent.DraftOption) error
 	SetPlanDrafter(p agent.PlanDrafter)
 
 	// Review subprocess
