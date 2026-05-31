@@ -218,6 +218,12 @@ type App struct {
 	closingAgents   map[string]bool
 	closingSessions map[string]bool
 
+	// pendingOverrides stores per-session overrides set in the new-session form
+	// for planning-path sessions. Keyed by session ID; entries are added in
+	// submitPromptModal (planning path only) and deleted in approvePlanAndSpawn,
+	// handlePlanEditorAbandon, and revise/retry cleanup paths.
+	pendingOverrides map[string]sessionOverrides
+
 	// Pipeline mouse click tracking for double-click detection.
 	lastPipelineClick    time.Time
 	lastPipelineClickSec focusSection
@@ -323,26 +329,27 @@ func (a *App) closeModal() {
 
 func NewApp() App {
 	return App{
-		view:            ViewDashboard,
-		debugDumpPath:   os.Getenv("REFRAIN_E2E_DEBUG_DUMP"),
-		dashboard:       newDashboardModel(),
-		cursor:          NewFocusedCursor(),
-		keys:            DefaultKeyMap(),
-		wellness:        newWellnessState(),
-		managerFactory:  DefaultManagerFactory,
-		managers:        make(map[string]SessionManager),
-		repoSettings:    make(map[string]*config.RepoSettings),
-		resolvedCache:   make(map[string]config.ResolvedSettings),
-		lastKnownStatus: make(map[string]agent.Status),
-		reviewDiffCache: make(map[string]*reviewDiffEntry),
-		validationRuns:  make(map[string]*validationRunState),
-		prCache:         make(map[string]*prCacheEntry),
-		prPollStates:    make(map[string]*prSessionState),
-		closingAgents:   make(map[string]bool),
-		closingSessions: make(map[string]bool),
-		feedbackTriage:  make(map[string]map[string]*feedbackTriageEntry),
-		newSession:      newNewSessionModel(),
-		prComposeModal:  newPRComposeModal(),
+		view:             ViewDashboard,
+		debugDumpPath:    os.Getenv("REFRAIN_E2E_DEBUG_DUMP"),
+		dashboard:        newDashboardModel(),
+		cursor:           NewFocusedCursor(),
+		keys:             DefaultKeyMap(),
+		wellness:         newWellnessState(),
+		managerFactory:   DefaultManagerFactory,
+		managers:         make(map[string]SessionManager),
+		repoSettings:     make(map[string]*config.RepoSettings),
+		resolvedCache:    make(map[string]config.ResolvedSettings),
+		lastKnownStatus:  make(map[string]agent.Status),
+		reviewDiffCache:  make(map[string]*reviewDiffEntry),
+		validationRuns:   make(map[string]*validationRunState),
+		prCache:          make(map[string]*prCacheEntry),
+		prPollStates:     make(map[string]*prSessionState),
+		closingAgents:    make(map[string]bool),
+		closingSessions:  make(map[string]bool),
+		feedbackTriage:   make(map[string]map[string]*feedbackTriageEntry),
+		pendingOverrides: make(map[string]sessionOverrides),
+		newSession:       newNewSessionModel(),
+		prComposeModal:   newPRComposeModal(),
 	}
 }
 
@@ -597,6 +604,8 @@ func (a *App) openNewSession(returnTo ViewMode) tea.Cmd {
 	a.newSession.repoName = a.activeRepoDisplayName()
 	a.newSession.baseBranch, _ = git.BaseBranch(a.activeRepo)
 	a.newSession.SetSize(a.width, a.height-statusBarHeight)
+	resolved := a.resolvedCache[a.activeRepo]
+	a.newSession.SetDefaults(resolved)
 	return a.newSession.Open(returnTo)
 }
 

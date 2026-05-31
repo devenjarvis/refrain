@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -588,5 +589,140 @@ func TestRunDraftWithRetry_TerminalClaudeNotFoundShortCircuits(t *testing.T) {
 	}
 	if stub.calls != 1 {
 		t.Errorf("stub calls = %d, want 1 (no retry on terminal error)", stub.calls)
+	}
+}
+
+// writeArgsDumpingClaude writes a fake claude that dumps each argv element on
+// its own line to argsFile, then prints stdout. Used to assert which --model
+// flag was forwarded to the subprocess.
+func writeArgsDumpingClaude(t *testing.T, dir, argsFile, stdout string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake claude uses /bin/sh; skip on windows")
+	}
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"printf '%s\\n' \"$@\" > " + shellSingleQuote(argsFile) + "\n" +
+		"printf %s " + shellSingleQuote(stdout) + "\n"
+	path := filepath.Join(dir, "claude")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write args-dumping claude: %v", err)
+	}
+}
+
+// containsPairLines checks that lines[i] == key and lines[i+1] == val for
+// some i. Used with the output of writeArgsDumpingClaude.
+func containsPairLines(lines []string, key, val string) bool {
+	for i := 0; i < len(lines)-1; i++ {
+		if lines[i] == key && lines[i+1] == val {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDefaultPlanDrafter_Draft_UsesRequestModel(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args.txt")
+	writeArgsDumpingClaude(t, dir, argsFile, "# Goal\nstub")
+	withPATH(t, dir)
+
+	d := DefaultPlanDrafter("default-model")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := d.Draft(ctx, DraftRequest{UserPrompt: "add dark mode", Model: "override-model"}); err != nil {
+		t.Fatalf("Draft: %v", err)
+	}
+
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if !containsPairLines(lines, "--model", "override-model") {
+		t.Errorf("subprocess args missing --model override-model; args:\n%s", got)
+	}
+	if containsPairLines(lines, "--model", "default-model") {
+		t.Errorf("subprocess should NOT use default-model when req.Model is set; args:\n%s", got)
+	}
+}
+
+func TestDefaultPlanDrafter_Draft_FallsBackToDrafterModelWhenRequestModelEmpty(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args.txt")
+	writeArgsDumpingClaude(t, dir, argsFile, "# Goal\nstub")
+	withPATH(t, dir)
+
+	d := DefaultPlanDrafter("default-model")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := d.Draft(ctx, DraftRequest{UserPrompt: "add dark mode"}); err != nil {
+		t.Fatalf("Draft: %v", err)
+	}
+
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if !containsPairLines(lines, "--model", "default-model") {
+		t.Errorf("subprocess args missing --model default-model when req.Model empty; args:\n%s", got)
+	}
+}
+
+func TestDefaultPlanDrafter_Revise_UsesRequestModel(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args.txt")
+	writeArgsDumpingClaude(t, dir, argsFile, "# Goal\nstub")
+	withPATH(t, dir)
+
+	d := DefaultPlanDrafter("default-model")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := d.Revise(ctx, ReviseRequest{
+		CurrentPlan: "# Goal\nold plan\n",
+		Critique:    "split tasks",
+		Model:       "override-model",
+	}); err != nil {
+		t.Fatalf("Revise: %v", err)
+	}
+
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if !containsPairLines(lines, "--model", "override-model") {
+		t.Errorf("subprocess args missing --model override-model; args:\n%s", got)
+	}
+}
+
+func TestDefaultPlanDrafter_Revise_FallsBackToDrafterModelWhenRequestModelEmpty(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args.txt")
+	writeArgsDumpingClaude(t, dir, argsFile, "# Goal\nstub")
+	withPATH(t, dir)
+
+	d := DefaultPlanDrafter("default-model")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := d.Revise(ctx, ReviseRequest{
+		CurrentPlan: "# Goal\nold plan\n",
+		Critique:    "split tasks",
+	}); err != nil {
+		t.Fatalf("Revise: %v", err)
+	}
+
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	if !containsPairLines(lines, "--model", "default-model") {
+		t.Errorf("subprocess args missing --model default-model when req.Model empty; args:\n%s", got)
 	}
 }

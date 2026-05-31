@@ -33,6 +33,27 @@ func (b *blockingDrafter) Revise(_ context.Context, _ agent.ReviseRequest) (stri
 	return "", errors.New("test: blocking drafter released")
 }
 
+// recordingReviser is a PlanDrafter that sends the ReviseRequest.Model it
+// receives to a channel so tests can assert the model override was threaded
+// through. Draft is a no-op stub; only Revise recording matters here.
+type recordingReviser struct {
+	ch   chan string
+	plan string
+}
+
+func (r *recordingReviser) Draft(_ context.Context, _ agent.DraftRequest) (string, error) {
+	return "# Goal\n\nstub plan\n", nil
+}
+
+func (r *recordingReviser) Revise(_ context.Context, req agent.ReviseRequest) (string, error) {
+	r.ch <- req.Model
+	p := r.plan
+	if p == "" {
+		p = "# Goal\n\nrevised plan\n"
+	}
+	return p, nil
+}
+
 func requireClaude(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("claude"); err != nil {
@@ -4137,7 +4158,7 @@ func TestNewSessionFlow_SubmitReturnsToDashboard(t *testing.T) {
 	app.newSession.returnTo = ViewDashboard
 
 	// Planning path (skipPlanning=false) should return to dashboard.
-	model, _ := app.Update(promptModalSubmitMsg{prompt: "add dark mode", skipPlanning: false})
+	model, _ := app.Update(promptModalSubmitMsg{prompt: "add dark mode", skipPlanning: false, overrides: sessionOverrides{}})
 	if p, ok := model.(*App); ok {
 		app = *p
 	} else {
@@ -4245,7 +4266,7 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 	}
 	app.resolvedCache[dir] = resolved
 
-	model, _ := app.Update(promptModalSubmitMsg{prompt: "write the feature", skipPlanning: false})
+	model, _ := app.Update(promptModalSubmitMsg{prompt: "write the feature", skipPlanning: false, overrides: sessionOverrides{}})
 	if p, ok := model.(*App); ok {
 		app = *p
 	} else {
@@ -4490,7 +4511,7 @@ func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 	sessionsBefore1 := len(mgr1.ListSessions())
 	sessionsBefore2 := len(mgr2.ListSessions())
 
-	model, _ = app.Update(promptModalSubmitMsg{prompt: "test", skipPlanning: false})
+	model, _ = app.Update(promptModalSubmitMsg{prompt: "test", skipPlanning: false, overrides: sessionOverrides{}})
 	// submitPromptModal is on *App so the returned tea.Model is *App, not App.
 	if p, ok := model.(*App); ok {
 		app = *p
@@ -4840,6 +4861,302 @@ func TestNewApp_InitsFeedbackTriage(t *testing.T) {
 	}
 	if len(app.feedbackTriage) != 0 {
 		t.Errorf("feedbackTriage should be empty on init, got len=%d", len(app.feedbackTriage))
+	}
+}
+
+func setupSubmitModalApp(t *testing.T, resolved config.ResolvedSettings) (App, *fakeManager) {
+	t.Helper()
+	const dir = "/fake/repo"
+	mgr := newFakeManager(dir)
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	return app, mgr
+}
+
+func TestSubmitPromptModal_SkipPath_AppliesAgentModelOverride(t *testing.T) {
+	resolved := config.ResolvedSettings{AgentModel: "claude-sonnet-4-6"}
+	app, mgr := setupSubmitModalApp(t, resolved)
+
+	_, cmd := app.Update(promptModalSubmitMsg{
+		prompt:       "add dark mode",
+		skipPlanning: true,
+		overrides:    sessionOverrides{AgentModel: "claude-opus-4-8"},
+	})
+	if cmd == nil {
+		t.Fatal("expected cmd from skip-path submit")
+	}
+	cmd() // executes mgr.CreateSession, recording the cfg
+
+	if got := mgr.lastCreateSessionCfg.AgentModel; got != "claude-opus-4-8" {
+		t.Errorf("CreateSession cfg.AgentModel = %q, want \"claude-opus-4-8\"", got)
+	}
+}
+
+func TestSubmitPromptModal_SkipPath_BypassPermissionsOverride(t *testing.T) {
+	resolved := config.ResolvedSettings{BypassPermissions: false}
+	app, mgr := setupSubmitModalApp(t, resolved)
+
+	trueVal := true
+	_, cmd := app.Update(promptModalSubmitMsg{
+		prompt:       "add dark mode",
+		skipPlanning: true,
+		overrides:    sessionOverrides{BypassPermissions: &trueVal},
+	})
+	if cmd == nil {
+		t.Fatal("expected cmd from skip-path submit")
+	}
+	cmd()
+
+	if got := mgr.lastCreateSessionCfg.BypassPermissions; got != true {
+		t.Errorf("CreateSession cfg.BypassPermissions = %v, want true", got)
+	}
+}
+
+func TestSubmitPromptModal_SkipPath_NoOverride_UsesResolved(t *testing.T) {
+	resolved := config.ResolvedSettings{AgentModel: "claude-sonnet-4-6"}
+	app, mgr := setupSubmitModalApp(t, resolved)
+
+	_, cmd := app.Update(promptModalSubmitMsg{
+		prompt:       "add dark mode",
+		skipPlanning: true,
+		overrides:    sessionOverrides{}, // no override
+	})
+	if cmd == nil {
+		t.Fatal("expected cmd")
+	}
+	cmd()
+
+	if got := mgr.lastCreateSessionCfg.AgentModel; got != "claude-sonnet-4-6" {
+		t.Errorf("CreateSession cfg.AgentModel = %q, want \"claude-sonnet-4-6\" (resolved)", got)
+	}
+}
+
+func TestSubmitPromptModal_PlanningPath_StoresPendingOverrides(t *testing.T) {
+	resolved := config.ResolvedSettings{}
+	app, _ := setupSubmitModalApp(t, resolved)
+
+	over := sessionOverrides{PlanModel: "claude-opus-4-8", AgentModel: "claude-sonnet-4-6"}
+	model2, _ := app.Update(promptModalSubmitMsg{
+		prompt:       "add dark mode",
+		skipPlanning: false,
+		overrides:    over,
+	})
+	var appAfter App
+	switch v := model2.(type) {
+	case App:
+		appAfter = v
+	case *App:
+		appAfter = *v
+	default:
+		t.Fatalf("Update returned unexpected type %T", model2)
+	}
+
+	// The fake planning session has ID "fake-plan-sess".
+	got, ok := appAfter.pendingOverrides["fake-plan-sess"]
+	if !ok {
+		t.Fatalf("pendingOverrides missing entry for planning session; map = %v", appAfter.pendingOverrides)
+	}
+	if got.PlanModel != "claude-opus-4-8" {
+		t.Errorf("pendingOverrides.PlanModel = %q, want \"claude-opus-4-8\"", got.PlanModel)
+	}
+	if got.AgentModel != "claude-sonnet-4-6" {
+		t.Errorf("pendingOverrides.AgentModel = %q, want \"claude-sonnet-4-6\"", got.AgentModel)
+	}
+}
+
+func TestApprovePlanAndSpawn_AppliesAgentModelOverride(t *testing.T) {
+	const dir = "/fake/repo"
+	sess := agent.NewSessionForTest("sess-id", "branch")
+	mgr := newFakeManager(dir, sess)
+	resolved := config.ResolvedSettings{AgentModel: "claude-sonnet-4-6"}
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	app.pendingOverrides[sess.ID] = sessionOverrides{AgentModel: "claude-opus-4-8"}
+
+	_, cmd := app.Update(planEditorApproveMsg{sessionID: sess.ID, repoPath: dir})
+	if cmd != nil {
+		cmd() // executes mgr.AddAgent, recording the cfg
+	}
+
+	if got := mgr.lastAddAgentCfg.AgentModel; got != "claude-opus-4-8" {
+		t.Errorf("AddAgent cfg.AgentModel = %q, want \"claude-opus-4-8\"", got)
+	}
+	if _, stillPresent := app.pendingOverrides[sess.ID]; stillPresent {
+		t.Error("pendingOverrides entry should be deleted after approvePlanAndSpawn")
+	}
+}
+
+func TestApprovePlanAndSpawn_NoOverride_UsesResolvedDefault(t *testing.T) {
+	const dir = "/fake/repo"
+	sess := agent.NewSessionForTest("sess-id", "branch")
+	mgr := newFakeManager(dir, sess)
+	resolved := config.ResolvedSettings{AgentModel: "claude-sonnet-4-6"}
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.dashboard.width = 120
+	app.dashboard.height = 39
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	// No pendingOverrides entry for sess.ID.
+
+	_, cmd := app.Update(planEditorApproveMsg{sessionID: sess.ID, repoPath: dir})
+	if cmd != nil {
+		cmd()
+	}
+
+	if got := mgr.lastAddAgentCfg.AgentModel; got != "claude-sonnet-4-6" {
+		t.Errorf("AddAgent cfg.AgentModel = %q, want \"claude-sonnet-4-6\" (resolved)", got)
+	}
+}
+
+func TestHandlePlanEditorAbandon_ClearsPendingOverrides(t *testing.T) {
+	const dir = "/fake/repo"
+	mgr := newFakeManager(dir)
+	app := NewApp()
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.pendingOverrides["sess-id"] = sessionOverrides{PlanModel: "claude-opus-4-8"}
+
+	model, cmd := app.Update(planEditorAbandonMsg{sessionID: "sess-id", repoPath: dir})
+	if cmd != nil {
+		cmd()
+	}
+	var appAfter App
+	switch v := model.(type) {
+	case App:
+		appAfter = v
+	case *App:
+		appAfter = *v
+	default:
+		t.Fatalf("unexpected type %T", model)
+	}
+	if _, present := appAfter.pendingOverrides["sess-id"]; present {
+		t.Error("pendingOverrides entry should be deleted on abandon")
+	}
+}
+
+// TestHandlePlanEditorRevise_PassesPlanModelOverride verifies that
+// handlePlanEditorRevise forwards the PlanModel stored in pendingOverrides to
+// mgr.RevisePlan via WithPlanModel, so the correct model is used for revision.
+func TestHandlePlanEditorRevise_PassesPlanModelOverride(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "t@t.com"},
+		{"git", "config", "user.name", "T"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("setup %v: %v\n%s", args, err, out)
+		}
+	}
+
+	ch := make(chan string, 1)
+	recorder := &recordingReviser{ch: ch}
+
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+	mgr.SetPlanDrafter(recorder)
+
+	sess, err := mgr.CreateSessionForPlanning(agent.Config{AgentProgram: "bash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Write a non-empty plan so RevisePlan's ReadPlan check passes.
+	if err := sess.WritePlan("# Goal\n\noriginal plan\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.managers[dir] = mgr
+	app.activeRepo = dir
+	app.pendingOverrides[sess.ID] = sessionOverrides{PlanModel: "claude-opus-4-8"}
+
+	app.Update(planEditorReviseMsg{sessionID: sess.ID, repoPath: dir, critique: "add more tests"})
+
+	select {
+	case gotModel := <-ch:
+		if gotModel != "claude-opus-4-8" {
+			t.Errorf("ReviseRequest.Model = %q, want \"claude-opus-4-8\"", gotModel)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: recordingReviser.Revise was not called within 5s")
+	}
+}
+
+func TestNewApp_PendingOverridesInitialized(t *testing.T) {
+	app := NewApp()
+	if app.pendingOverrides == nil {
+		t.Error("pendingOverrides should be initialized, got nil")
+	}
+	if len(app.pendingOverrides) != 0 {
+		t.Errorf("pendingOverrides should be empty on init, got len=%d", len(app.pendingOverrides))
+	}
+}
+
+func TestOpenNewSession_SeedsOverrideDefaultsFromResolved(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "t@t.com"},
+		{"git", "config", "user.name", "T"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git setup %v: %v\n%s", args, err, out)
+		}
+	}
+
+	planModel := "claude-haiku-4-5-20251001"
+	agentModel := "claude-sonnet-4-6"
+	trueVal := true
+	resolved := config.Resolve(nil, &config.RepoSettings{
+		PlanModel:         &planModel,
+		AgentModel:        &agentModel,
+		BypassPermissions: &trueVal,
+	})
+
+	app := NewApp()
+	app.width = 140
+	app.height = 40
+	app.activeRepo = dir
+	app.resolvedCache[dir] = resolved
+	mgr := newFakeManager(dir)
+	app.managers[dir] = mgr
+
+	app.openNewSession(ViewDashboard)
+
+	got := app.newSession.overrideDefaults
+	if got.PlanModel != "claude-haiku-4-5-20251001" {
+		t.Errorf("overrideDefaults.PlanModel = %q, want \"claude-haiku-4-5-20251001\"", got.PlanModel)
+	}
+	if got.AgentModel != "claude-sonnet-4-6" {
+		t.Errorf("overrideDefaults.AgentModel = %q, want \"claude-sonnet-4-6\"", got.AgentModel)
+	}
+	if got.BypassPermissions == nil || !*got.BypassPermissions {
+		t.Error("overrideDefaults.BypassPermissions should be non-nil true")
 	}
 }
 

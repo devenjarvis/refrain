@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 func TestNewSession_OpenSetsActiveAndFocusesTextarea(t *testing.T) {
@@ -60,8 +62,20 @@ func TestNewSession_View_WideTerminal_RendersSidebar(t *testing.T) {
 	if !strings.Contains(view, "main") {
 		t.Error("wide view should contain base branch")
 	}
-	if !strings.Contains(view, "EXAMPLES") {
-		t.Error("wide view (>=110) should contain sidebar with EXAMPLES")
+	if !strings.Contains(view, "OVERRIDES") {
+		t.Error("wide view (>=110) should contain sidebar with OVERRIDES")
+	}
+	if strings.Contains(view, "EXAMPLES") {
+		t.Error("wide view should NOT contain EXAMPLES (replaced by OVERRIDES)")
+	}
+	if !strings.Contains(view, "Plan Model") {
+		t.Error("wide view OVERRIDES block should contain 'Plan Model'")
+	}
+	if !strings.Contains(view, "Agent Model") {
+		t.Error("wide view OVERRIDES block should contain 'Agent Model'")
+	}
+	if !strings.Contains(view, "Bypass Permissions") {
+		t.Error("wide view OVERRIDES block should contain 'Bypass Permissions'")
 	}
 	if !strings.Contains(view, "Plan") || !strings.Contains(view, "Build") ||
 		!strings.Contains(view, "Review") || !strings.Contains(view, "Ship") {
@@ -78,8 +92,34 @@ func TestNewSession_View_NarrowTerminal_OmitsSidebar(t *testing.T) {
 
 	view := m.View()
 
+	if strings.Contains(view, "OVERRIDES") {
+		t.Error("narrow view (<110) should NOT contain OVERRIDES sidebar")
+	}
 	if strings.Contains(view, "EXAMPLES") {
 		t.Error("narrow view (<110) should NOT contain EXAMPLES sidebar")
+	}
+}
+
+func TestNewSession_View_WideTerminal_SeedsOverridesFromDefaults(t *testing.T) {
+	m := newNewSessionModel()
+	m.SetSize(140, 40)
+	m.SetDefaults(config.ResolvedSettings{
+		PlanModel:         "claude-opus-4-8",
+		AgentModel:        "claude-sonnet-4-6",
+		BypassPermissions: true,
+	})
+	m.Open(ViewDashboard)
+
+	view := m.View()
+
+	if !strings.Contains(view, "claude-opus-4-8") {
+		t.Error("view should contain seeded PlanModel value")
+	}
+	if !strings.Contains(view, "claude-sonnet-4-6") {
+		t.Error("view should contain seeded AgentModel value")
+	}
+	if !strings.Contains(view, "[x]") {
+		t.Error("view should show bypass permissions as enabled [x]")
 	}
 }
 
@@ -230,5 +270,214 @@ func TestNewSession_ShiftEnterInsertsNewline(t *testing.T) {
 	}
 	if !m.active {
 		t.Fatal("shift+enter must not close the model")
+	}
+}
+
+func openModelWithDefaults() newSessionModel {
+	m := newNewSessionModel()
+	m.SetSize(140, 40)
+	m.SetDefaults(config.ResolvedSettings{
+		PlanModel:  config.KnownModels[0],
+		AgentModel: config.KnownAgentModels[0],
+	})
+	m.Open(ViewDashboard)
+	return m
+}
+
+func TestNewSession_Tab_MovesFocusFromTextareaToOverrides(t *testing.T) {
+	m := openModelWithDefaults()
+	if m.overrideFocus != -1 {
+		t.Fatalf("initial overrideFocus = %d, want -1 (textarea)", m.overrideFocus)
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	if m.overrideFocus != 0 {
+		t.Errorf("after one tab: overrideFocus = %d, want 0", m.overrideFocus)
+	}
+	if m.textarea.Focused() {
+		t.Error("textarea should be blurred when overrideFocus >= 0")
+	}
+}
+
+func TestNewSession_TabWalksOverrideFields(t *testing.T) {
+	m := openModelWithDefaults()
+	n := len(m.overrideFields)
+	for i := 0; i < n; i++ {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+		if m.overrideFocus != i {
+			t.Errorf("after %d tabs: overrideFocus = %d, want %d", i+1, m.overrideFocus, i)
+		}
+	}
+	// One more tab past the last field wraps back to textarea.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	if m.overrideFocus != -1 {
+		t.Errorf("tab past last field: overrideFocus = %d, want -1 (textarea)", m.overrideFocus)
+	}
+	if !m.textarea.Focused() {
+		t.Error("textarea should be focused when overrideFocus == -1")
+	}
+}
+
+func TestNewSession_ShiftTabReverses(t *testing.T) {
+	m := openModelWithDefaults()
+	// Start at textarea (overrideFocus=-1), shift+tab wraps to last field.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift, Text: "shift+tab"})
+	n := len(m.overrideFields)
+	if m.overrideFocus != n-1 {
+		t.Errorf("shift+tab from textarea: overrideFocus = %d, want %d (last field)", m.overrideFocus, n-1)
+	}
+	// shift+tab from last field goes to second-to-last.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift, Text: "shift+tab"})
+	if m.overrideFocus != n-2 {
+		t.Errorf("shift+tab from last: overrideFocus = %d, want %d", m.overrideFocus, n-2)
+	}
+}
+
+func TestNewSession_LeftRight_CyclesSelectOption(t *testing.T) {
+	m := openModelWithDefaults()
+	// Tab to Plan Model (index 0, a select field).
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	if m.overrideFocus != 0 {
+		t.Fatalf("overrideFocus = %d, want 0", m.overrideFocus)
+	}
+	initial := m.overrideFields[0].selected
+	// Right should advance selection.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight, Text: "right"})
+	want := (initial + 1) % len(m.overrideFields[0].options)
+	if m.overrideFields[0].selected != want {
+		t.Errorf("after right: selected = %d, want %d", m.overrideFields[0].selected, want)
+	}
+	// Left should retreat selection.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Text: "left"})
+	if m.overrideFields[0].selected != initial {
+		t.Errorf("after left: selected = %d, want %d (initial)", m.overrideFields[0].selected, initial)
+	}
+}
+
+func TestNewSession_Space_TogglesBypass(t *testing.T) {
+	m := openModelWithDefaults()
+	// Tab to last field (Bypass Permissions, a toggle).
+	n := len(m.overrideFields)
+	for i := 0; i < n; i++ {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	}
+	if m.overrideFocus != n-1 {
+		t.Fatalf("expected focus on last field (%d), got %d", n-1, m.overrideFocus)
+	}
+	before := m.overrideFields[n-1].toggleValue
+	m, _ = m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	if m.overrideFields[n-1].toggleValue == before {
+		t.Error("space on toggle field should flip toggleValue")
+	}
+}
+
+func TestNewSession_EnterOnOverrideField_DoesNotSubmit(t *testing.T) {
+	m := openModelWithDefaults()
+	m.textarea.SetValue("my goal")
+	// Move focus to first override field.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	// Press enter — should NOT emit submit.
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	if cmd != nil {
+		msg := cmd()
+		if _, ok := msg.(promptModalSubmitMsg); ok {
+			t.Fatal("enter on override field should NOT emit promptModalSubmitMsg")
+		}
+	}
+	if !m.active {
+		t.Error("model should remain active; enter on override field is not a submit")
+	}
+}
+
+func TestNewSession_EnterOnSelectField_CyclesSelection(t *testing.T) {
+	m := openModelWithDefaults()
+	// Tab to Plan Model (select field, index 0).
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	before := m.overrideFields[0].selected
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	want := (before + 1) % len(m.overrideFields[0].options)
+	if m.overrideFields[0].selected != want {
+		t.Errorf("enter on select: selected = %d, want %d", m.overrideFields[0].selected, want)
+	}
+}
+
+func TestNewSession_SubmitCarriesOverrides_PlanModel(t *testing.T) {
+	m := newNewSessionModel()
+	m.SetSize(140, 40)
+	m.SetDefaults(config.ResolvedSettings{
+		PlanModel:  config.KnownModels[0],
+		AgentModel: config.KnownAgentModels[0],
+	})
+	m.Open(ViewDashboard)
+	m.textarea.SetValue("my goal")
+
+	// Tab to Plan Model, cycle right to select a different value.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight, Text: "right"})
+	wantPlan := config.KnownModels[1]
+
+	// Tab back to textarea and submit.
+	for m.overrideFocus != -1 {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	}
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	_ = m
+	if cmd == nil {
+		t.Fatal("expected cmd on enter")
+	}
+	got, ok := cmd().(promptModalSubmitMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want promptModalSubmitMsg", cmd())
+	}
+	if got.overrides.PlanModel != wantPlan {
+		t.Errorf("overrides.PlanModel = %q, want %q", got.overrides.PlanModel, wantPlan)
+	}
+}
+
+func TestNewSession_SubmitCarriesOverrides_DefaultsTreatedAsNoOverride(t *testing.T) {
+	m := newNewSessionModel()
+	m.SetSize(140, 40)
+	// Defaults match the first option in each list (no change).
+	m.SetDefaults(config.ResolvedSettings{
+		PlanModel:  config.KnownModels[0],
+		AgentModel: config.KnownAgentModels[0],
+	})
+	m.Open(ViewDashboard)
+	m.textarea.SetValue("my goal")
+
+	// Submit without changing anything.
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	_ = m
+	if cmd == nil {
+		t.Fatal("expected cmd on enter")
+	}
+	got, ok := cmd().(promptModalSubmitMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want promptModalSubmitMsg", cmd())
+	}
+	if got.overrides.PlanModel != "" {
+		t.Errorf("overrides.PlanModel = %q, want \"\" (no override when equal to default)", got.overrides.PlanModel)
+	}
+	if got.overrides.AgentModel != "" {
+		t.Errorf("overrides.AgentModel = %q, want \"\" (no override when equal to default)", got.overrides.AgentModel)
+	}
+	if got.overrides.BypassPermissions != nil {
+		t.Errorf("overrides.BypassPermissions = %v, want nil (no override when equal to default)", got.overrides.BypassPermissions)
+	}
+}
+
+func TestNewSession_EscCancelsFromOverrideField(t *testing.T) {
+	m := openModelWithDefaults()
+	// Move focus to override.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	// Esc should cancel.
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd == nil {
+		t.Fatal("esc from override field should emit cancel cmd")
+	}
+	if _, ok := cmd().(promptModalCancelMsg); !ok {
+		t.Fatal("esc from override field should emit promptModalCancelMsg")
+	}
+	if m.active {
+		t.Error("model should deactivate on esc")
 	}
 }

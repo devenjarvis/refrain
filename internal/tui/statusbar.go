@@ -106,6 +106,7 @@ var (
 		{"⏎", "draft plan"},
 		{"ctrl+⏎", "run now"},
 		{"ctrl+j", "newline"},
+		{"tab", "overrides"},
 		{"esc", "cancel"},
 	}
 )

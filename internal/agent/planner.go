@@ -48,6 +48,7 @@ type PlanDrafter interface {
 // multiple repos are registered.
 type DraftRequest struct {
 	UserPrompt     string
+	Model          string
 	QuestionSocket string
 	Cwd            string
 }
@@ -60,6 +61,7 @@ type ReviseRequest struct {
 	CurrentPlan string
 	Critique    string
 	Cwd         string
+	Model       string
 }
 
 // planDraftPrompt frames each Draft call. The eight fixed sections (Goal /
@@ -190,7 +192,11 @@ func (d *defaultPlanDrafter) Draft(ctx context.Context, req DraftRequest) (strin
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrClaudeNotFound, err)
 	}
-	return runClaudePlanner(ctx, claudePath, d.model, planDraftPrompt+prompt, req.QuestionSocket, req.Cwd)
+	model := req.Model
+	if model == "" {
+		model = d.model
+	}
+	return runClaudePlanner(ctx, claudePath, model, planDraftPrompt+prompt, req.QuestionSocket, req.Cwd)
 }
 
 func (d *defaultPlanDrafter) Revise(ctx context.Context, req ReviseRequest) (string, error) {
@@ -206,11 +212,15 @@ func (d *defaultPlanDrafter) Revise(ctx context.Context, req ReviseRequest) (str
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrClaudeNotFound, err)
 	}
+	model := req.Model
+	if model == "" {
+		model = d.model
+	}
 	instruction := planRevisePrompt + current + "\n\nCRITIQUE:\n" + critique + "\n"
 	// Revise does not surface ask_user — the user is already iterating on a
 	// concrete plan with the editor's revise input, so an interactive prompt
 	// would just compete for attention. Pass an empty socket path.
-	return runClaudePlanner(ctx, claudePath, d.model, instruction, "", req.Cwd)
+	return runClaudePlanner(ctx, claudePath, model, instruction, "", req.Cwd)
 }
 
 // plannerQuestionMCPName is the MCP-server key under which the planner

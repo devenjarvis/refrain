@@ -28,6 +28,13 @@ type fakeManager struct {
 	killAgentCalls   map[string]int
 	shutdownCalls    int
 	updateSettings   []config.ResolvedSettings
+
+	// Recorded configs for assertion in override tests.
+	lastCreateSessionCfg            agent.Config
+	lastCreateSessionForPlanningCfg agent.Config
+	lastAddAgentCfg                 agent.Config
+	// nextPlanningSession, when non-nil, is returned by CreateSessionForPlanning.
+	nextPlanningSession *agent.Session
 }
 
 // Compile-time guarantee: keep fakeManager in sync with the SessionManager
@@ -111,8 +118,11 @@ func (f *fakeManager) FindAgentAndSession(agentID string) (*agent.Agent, *agent.
 func (f *fakeManager) Events() <-chan agent.Event                     { return f.events }
 func (f *fakeManager) PlannerQuestions() <-chan agent.PlannerQuestion { return f.plannerQuestions }
 
-func (f *fakeManager) CreateSession(_ agent.Config) (*agent.Session, *agent.Agent, error) {
-	return nil, nil, nil
+func (f *fakeManager) CreateSession(cfg agent.Config) (*agent.Session, *agent.Agent, error) {
+	f.lastCreateSessionCfg = cfg
+	sess := agent.NewSessionForTest("fake-sess", "fake-branch")
+	ag := sess.AddTestAgent("fake-ag", false, agent.StatusIdle)
+	return sess, ag, nil
 }
 
 func (f *fakeManager) CreateSessionWithCommand(_ agent.Config, _ func(string) *exec.Cmd) (*agent.Session, *agent.Agent, error) {
@@ -123,11 +133,22 @@ func (f *fakeManager) CreateSessionOnBranch(_, _ string, _ agent.Config) (*agent
 	return nil, nil, nil
 }
 
-func (f *fakeManager) CreateSessionForPlanning(_ agent.Config) (*agent.Session, error) {
-	return nil, nil
+func (f *fakeManager) CreateSessionForPlanning(cfg agent.Config) (*agent.Session, error) {
+	f.lastCreateSessionForPlanningCfg = cfg
+	if f.nextPlanningSession != nil {
+		return f.nextPlanningSession, nil
+	}
+	// Return a minimal session so callers can access sess.ID without panicking.
+	return agent.NewSessionForTest("fake-plan-sess", "fake-branch"), nil
 }
 
-func (f *fakeManager) AddAgent(_ string, _ agent.Config) (*agent.Agent, error) {
+func (f *fakeManager) AddAgent(_ string, cfg agent.Config) (*agent.Agent, error) {
+	f.lastAddAgentCfg = cfg
+	// Return a minimal agent so approvePlanAndSpawn doesn't nil-deref on ag.ID.
+	if len(f.sessions) > 0 {
+		ag := f.sessions[0].AddTestAgent("fake-ag", false, agent.StatusIdle)
+		return ag, nil
+	}
 	return nil, nil
 }
 
@@ -147,11 +168,11 @@ func (f *fakeManager) KillSession(sessionID string) error {
 
 func (f *fakeManager) ResumeSession(_ state.SessionState, _ agent.Config) error { return nil }
 
-func (f *fakeManager) StartDraft(_, _ string) error              { return nil }
-func (f *fakeManager) RevisePlan(_, _ string) error              { return nil }
-func (f *fakeManager) SetPlanDrafter(_ agent.PlanDrafter)        {}
-func (f *fakeManager) ReviewerAgent() agent.ReviewerAgent        { return nil }
-func (f *fakeManager) ReconcileExternalBranchRename(_, _ string) {}
+func (f *fakeManager) StartDraft(_ string, _ string, _ ...agent.DraftOption) error { return nil }
+func (f *fakeManager) RevisePlan(_ string, _ string, _ ...agent.DraftOption) error { return nil }
+func (f *fakeManager) SetPlanDrafter(_ agent.PlanDrafter)                          {}
+func (f *fakeManager) ReviewerAgent() agent.ReviewerAgent                          { return nil }
+func (f *fakeManager) ReconcileExternalBranchRename(_, _ string)                   {}
 
 func (f *fakeManager) UpdateSettings(s config.ResolvedSettings) {
 	f.updateSettings = append(f.updateSettings, s)

@@ -546,6 +546,22 @@ var ErrDraftInFlight = errors.New("draft already in flight for session")
 // manager has no plan drafter (e.g. a test set it to nil to disable).
 var ErrPlanDrafterNotConfigured = errors.New("plan drafter not configured")
 
+// draftOptions holds optional per-call parameters for StartDraft / RevisePlan.
+type draftOptions struct {
+	model string
+}
+
+// DraftOption is a functional option for StartDraft and RevisePlan.
+type DraftOption func(*draftOptions)
+
+// WithPlanModel returns a DraftOption that overrides the model used for this
+// single Draft or Revise call. When set, the value is forwarded into
+// DraftRequest.Model / ReviseRequest.Model so the drafter uses it instead of
+// its stored model. Does NOT mutate the manager's stored planDrafter.
+func WithPlanModel(model string) DraftOption {
+	return func(o *draftOptions) { o.model = model }
+}
+
 // PlannerQuestions returns a channel that emits one PlannerQuestion per
 // `ask_user` tool call raised by any in-flight draft. The channel stays
 // open across the manager's lifetime and is closed by Shutdown / Detach.
@@ -571,7 +587,7 @@ func (m *Manager) PlannerQuestions() <-chan PlannerQuestion { return m.plannerQu
 // leaks a listener. If the server fails to bind (rare — typically the macOS
 // 104-byte sun_path limit), drafting still proceeds with ask_user disabled
 // rather than failing the whole flow.
-func (m *Manager) StartDraft(sessionID, prompt string) error {
+func (m *Manager) StartDraft(sessionID, prompt string, opts ...DraftOption) error {
 	m.mu.RLock()
 	sess := m.sessions[sessionID]
 	drafter := m.planDrafter
@@ -585,6 +601,11 @@ func (m *Manager) StartDraft(sessionID, prompt string) error {
 	}
 	if !IsActionablePrompt(prompt) {
 		return fmt.Errorf("prompt is empty or non-actionable")
+	}
+
+	var o draftOptions
+	for _, opt := range opts {
+		opt(&o)
 	}
 
 	// No wall-clock timeout: Sonnet drafting can legitimately take minutes on
@@ -605,7 +626,7 @@ func (m *Manager) StartDraft(sessionID, prompt string) error {
 	qServer, qSocket := m.startPlannerQuestionServer(sess.ID)
 
 	m.watchers.Add(1)
-	go m.runDraft(ctx, sess, drafter, prompt, qServer, qSocket)
+	go m.runDraft(ctx, sess, drafter, prompt, qServer, qSocket, o.model)
 	return nil
 }
 
@@ -690,7 +711,7 @@ func plannerQuestionSocketPath(repoPath, sessionID string) string {
 // qServer is the per-draft planner.Server (may be nil if startup failed);
 // it is closed after the drafter returns so a wedged ask_user handler
 // drains promptly.
-func (m *Manager) runDraft(ctx context.Context, sess *Session, drafter PlanDrafter, prompt string, qServer *planner.Server, qSocket string) {
+func (m *Manager) runDraft(ctx context.Context, sess *Session, drafter PlanDrafter, prompt string, qServer *planner.Server, qSocket string, model string) {
 	defer m.watchers.Done()
 	defer sess.finishDraft()
 	defer func() {
@@ -710,7 +731,7 @@ func (m *Manager) runDraft(ctx context.Context, sess *Session, drafter PlanDraft
 		}
 	}()
 
-	body, err := runDraftWithRetry(ctx, drafter, DraftRequest{UserPrompt: prompt, QuestionSocket: qSocket, Cwd: sess.Worktree.Path}, m.done, func(cur, max int) {
+	body, err := runDraftWithRetry(ctx, drafter, DraftRequest{UserPrompt: prompt, Model: model, QuestionSocket: qSocket, Cwd: sess.Worktree.Path}, m.done, func(cur, max int) {
 		sess.SetDraftAttempt(cur, max)
 	})
 
@@ -767,7 +788,7 @@ var ErrNoPlanToRevise = errors.New("no plan to revise")
 // via the EventStatusChanged the runner emits. On failure (drafter error,
 // empty output, write error), the prior plan is left in place and
 // ReviseError is set so the editor can render the failure inline.
-func (m *Manager) RevisePlan(sessionID, critique string) error {
+func (m *Manager) RevisePlan(sessionID, critique string, opts ...DraftOption) error {
 	m.mu.RLock()
 	sess := m.sessions[sessionID]
 	drafter := m.planDrafter
@@ -781,6 +802,11 @@ func (m *Manager) RevisePlan(sessionID, critique string) error {
 	}
 	if strings.TrimSpace(critique) == "" {
 		return ErrEmptyCritique
+	}
+
+	var o draftOptions
+	for _, opt := range opts {
+		opt(&o)
 	}
 
 	current, err := sess.ReadPlan()
@@ -813,7 +839,7 @@ func (m *Manager) RevisePlan(sessionID, critique string) error {
 	m.emit(Event{Type: EventStatusChanged, SessionID: sessionID})
 
 	m.watchers.Add(1)
-	go m.runRevise(ctx, sess, drafter, current, critique)
+	go m.runRevise(ctx, sess, drafter, current, critique, o.model)
 	return nil
 }
 
@@ -823,7 +849,7 @@ func (m *Manager) RevisePlan(sessionID, critique string) error {
 // EventStatusChanged so the UI repaints. On failure the prior plan is left
 // untouched and ReviseError is set; the user can retry via `r` or undo via
 // `u` (which restores the snapshot we wrote above).
-func (m *Manager) runRevise(ctx context.Context, sess *Session, drafter PlanDrafter, current, critique string) {
+func (m *Manager) runRevise(ctx context.Context, sess *Session, drafter PlanDrafter, current, critique, model string) {
 	defer m.watchers.Done()
 	defer sess.finishRevise()
 
@@ -838,7 +864,7 @@ func (m *Manager) runRevise(ctx context.Context, sess *Session, drafter PlanDraf
 		}
 	}()
 
-	body, err := drafter.Revise(ctx, ReviseRequest{CurrentPlan: current, Critique: critique, Cwd: sess.Worktree.Path})
+	body, err := drafter.Revise(ctx, ReviseRequest{CurrentPlan: current, Critique: critique, Cwd: sess.Worktree.Path, Model: model})
 
 	m.mu.RLock()
 	_, stillOpen := m.sessions[sess.ID]
