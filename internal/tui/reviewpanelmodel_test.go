@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -589,34 +590,6 @@ func TestReviewPanelModel_ClickSetsTaskCursor(t *testing.T) {
 	}
 }
 
-func TestReviewPanelModel_FormerScrollKeys_AreNoOp(t *testing.T) {
-	// pgdown / pgup / ctrl+d / ctrl+u are now unbound no-ops (the inline
-	// viewport was removed). g / G are still unbound. None may change the
-	// cursor or close the panel.
-	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	app := reviewTestApp()
-	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
-
-	keys := []tea.KeyPressMsg{
-		{Code: tea.KeyPgDown},
-		{Code: tea.KeyPgUp},
-		{Code: 'd', Mod: tea.ModCtrl},
-		{Code: 'u', Mod: tea.ModCtrl},
-		{Code: 'g', Text: "g"},
-		{Code: 'G', Text: "G"},
-	}
-	for _, k := range keys {
-		_, cmd := panel.Update(k)
-		if cmd != nil {
-			t.Errorf("formerly-scroll key %v produced cmd %T, want nil", k, cmd())
-		}
-	}
-	if panel.TaskCursor() != 0 {
-		t.Errorf("taskCursor = %d after keys, want 0", panel.TaskCursor())
-	}
-}
-
 func TestReviewPanelModel_QKey_NoPlan_DoesNotOpenSpec(t *testing.T) {
 	// ? toggles the spec overlay but only when the session has a plan.
 	sess := agent.NewSessionForTest("s1", "fix-auth")
@@ -897,6 +870,89 @@ func TestReviewPanel_DiffCacheReusesParse(t *testing.T) {
 	}
 	if m2 == m1a {
 		t.Error("different task must return a different *diffmodel.Model pointer")
+	}
+}
+
+// TestReviewPanel_ScrollKeysRouteToViewport verifies that pgdown/pgup/ctrl+d/ctrl+u
+// scroll the embedded diff viewport and that g/G jump to top/bottom.
+func TestReviewPanel_ScrollKeysRouteToViewport(t *testing.T) {
+	// Build a multi-page rawDiff with a valid hunk header.
+	// @@ -1 +1,61 @@ : 1 old line, 61 new lines (1 context + 60 added).
+	var diffLines []string
+	diffLines = append(diffLines, "diff --git a/a.go b/a.go")
+	diffLines = append(diffLines, "index 000..111 100644")
+	diffLines = append(diffLines, "--- a/a.go")
+	diffLines = append(diffLines, "+++ b/a.go")
+	diffLines = append(diffLines, "@@ -1 +1,61 @@")
+	diffLines = append(diffLines, " package main")
+	for i := range 60 {
+		diffLines = append(diffLines, fmt.Sprintf("+// line %d", i))
+	}
+	rawDiff := strings.Join(diffLines, "\n") + "\n"
+
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{{Index: 1, Text: "task one"}},
+		groups: []taskReviewGroup{{taskIndex: 1, rawDiff: rawDiff}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
+
+	// Prime the viewport by calling View() first.
+	_ = panel.View()
+	before := panel.vp.YOffset()
+
+	// pgdown should scroll down.
+	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if panel.vp.YOffset() <= before {
+		t.Errorf("pgdown: YOffset did not increase; before=%d after=%d", before, panel.vp.YOffset())
+	}
+
+	// g should jump to top.
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	if panel.vp.YOffset() != 0 {
+		t.Errorf("g: expected YOffset=0 (top), got %d", panel.vp.YOffset())
+	}
+
+	// G should jump to bottom (YOffset > 0 for a multi-page diff).
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	if panel.vp.YOffset() == 0 {
+		t.Errorf("G: expected YOffset > 0 (bottom), got %d", panel.vp.YOffset())
+	}
+
+	// pgup should scroll back toward top.
+	bottomOffset := panel.vp.YOffset()
+	_, _ = panel.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if panel.vp.YOffset() >= bottomOffset {
+		t.Errorf("pgup: YOffset did not decrease; before=%d after=%d", bottomOffset, panel.vp.YOffset())
+	}
+}
+
+// TestReviewPanel_SideBySideToggle verifies that pressing 's' flips the
+// sideBySide flag and changes the rendered right-pane output.
+func TestReviewPanel_SideBySideToggle(t *testing.T) {
+	rawDiff := "diff --git a/a.go b/a.go\nindex 000..111 100644\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n package main\n+// marker\n"
+	sess := agent.NewSessionForTest("s1", "fix-auth")
+	entry := &reviewDiffEntry{
+		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
+		groups:   []taskReviewGroup{{taskIndex: 1, rawDiff: rawDiff}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
+	}
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
+
+	before := panel.sideBySide
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if panel.sideBySide == before {
+		t.Error("'s' must toggle the sideBySide flag")
+	}
+	// Toggle again should restore.
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if panel.sideBySide != before {
+		t.Error("second 's' must restore sideBySide to original value")
 	}
 }
 

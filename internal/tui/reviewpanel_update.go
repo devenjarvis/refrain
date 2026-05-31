@@ -192,8 +192,48 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 			return m, m.deps.TriggerValidationRerun(m.session.ID, m.repoPath, worktreePath, checks)
 		}
 		return m, nil
-	case "pgdown", "pgup":
-		// Scroll keys will route to the embedded diff viewport in a later task.
+	case "pgdown":
+		m.vp.PageDown()
+		return m, nil
+	case "pgup":
+		m.vp.PageUp()
+		return m, nil
+	case "ctrl+d":
+		m.vp.HalfPageDown()
+		return m, nil
+	case "ctrl+u":
+		m.vp.HalfPageUp()
+		return m, nil
+	case "g":
+		m.vp.GotoTop()
+		return m, nil
+	case "G":
+		m.vp.GotoBottom()
+		return m, nil
+	case "s":
+		m.sideBySide = !m.sideBySide
+		// Invalidate the renderer cache so the diff is re-rendered at the next View().
+		m.renderersByPath = nil
+		return m, nil
+	case "[":
+		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
+		if dm, _, ok := m.focusedDiffModel(entry); ok && dm != nil {
+			if m.vpFileIdx > 0 {
+				m.vpFileIdx--
+				m.vp.GotoTop()
+				m.renderersByPath = nil
+			}
+		}
+		return m, nil
+	case "]":
+		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
+		if dm, _, ok := m.focusedDiffModel(entry); ok && dm != nil {
+			if m.vpFileIdx < len(dm.Files)-1 {
+				m.vpFileIdx++
+				m.vp.GotoTop()
+				m.renderersByPath = nil
+			}
+		}
 		return m, nil
 	case "f":
 		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
