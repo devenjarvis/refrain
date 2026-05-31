@@ -222,7 +222,7 @@ func renderChecksStrip(cs *checksTabState, width int, now time.Time) []string {
 	summary := fmt.Sprintf("  Checks  %s %s  %s", passStr, failStr, nameStr)
 
 	tail := tailLines(firstFailed.output, 4)
-	var lines []string
+	lines := make([]string, 0, 6)
 	lines = append(lines, summary)
 	for _, l := range tail {
 		lines = append(lines, "  "+l)
@@ -601,7 +601,6 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 
 	return lines
 }
-
 
 // capLines returns lines capped to height, with a trailing truncation note if needed.
 func capLines(lines []string, height int) []string {

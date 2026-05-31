@@ -1623,4 +1623,3 @@ func TestRenderChecksStrip_FailureExpandsWithTail(t *testing.T) {
 		t.Errorf("strip must only show last 4 output lines; 'line1' should be omitted; got:\n%s", stripped)
 	}
 }
-

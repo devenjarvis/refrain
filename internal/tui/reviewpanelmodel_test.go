@@ -910,7 +910,7 @@ func TestReviewPanel_DiffCacheReusesParse(t *testing.T) {
 func TestReviewPanel_ScrollKeysRouteToViewport(t *testing.T) {
 	// Build a multi-page rawDiff with a valid hunk header.
 	// @@ -1 +1,61 @@ : 1 old line, 61 new lines (1 context + 60 added).
-	var diffLines []string
+	diffLines := make([]string, 0, 66)
 	diffLines = append(diffLines, "diff --git a/a.go b/a.go")
 	diffLines = append(diffLines, "index 000..111 100644")
 	diffLines = append(diffLines, "--- a/a.go")
@@ -924,8 +924,8 @@ func TestReviewPanel_ScrollKeysRouteToViewport(t *testing.T) {
 
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	entry := &reviewDiffEntry{
-		tasks: []agent.PlanTask{{Index: 1, Text: "task one"}},
-		groups: []taskReviewGroup{{taskIndex: 1, rawDiff: rawDiff}},
+		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
+		groups:   []taskReviewGroup{{taskIndex: 1, rawDiff: rawDiff}},
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 	app := reviewTestApp()
