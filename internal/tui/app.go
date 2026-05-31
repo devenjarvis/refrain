@@ -449,8 +449,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handlePlanEditorRevise(msg)
 	case planEditorRetryMsg:
 		return a.handlePlanEditorRetry(msg)
-	case planEditorRestoreMsg:
-		return a.handlePlanEditorRestore(msg)
 	case planEditorApproveMsg:
 		return a.approvePlanAndSpawn(msg)
 	case promptModalCancelMsg:
@@ -500,7 +498,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewRepoPicker:
 		return a.updateRepoPicker(msg)
 	case ViewNewSession:
-		return a.updateNewSession(msg)
+		// Trivial forward to the new-session model; inlined here rather than
+		// kept as a one-line method (§1: App.Update is the router).
+		var cmd tea.Cmd
+		a.newSession, cmd = a.newSession.Update(msg)
+		return a, cmd
 	}
 
 	return a, nil
@@ -536,11 +538,6 @@ func (a *App) addRepo(path string) tea.Cmd {
 	a.clampCursor()
 	return nil
 }
-
-// returnFromConfigForm closes the repo config form and returns to the repo
-// picker if one was pending, or back to the dashboard list otherwise.
-
-// initRepoConfigForm creates a config form for the given repo and enters config focus.
 
 // resizeAgentForDashboard resizes a specific agent to the dashboard preview dimensions.
 func (a *App) resizeAgentForDashboard(ag *agent.Agent) {
@@ -601,13 +598,6 @@ func (a *App) openNewSession(returnTo ViewMode) tea.Cmd {
 	a.newSession.baseBranch, _ = git.BaseBranch(a.activeRepo)
 	a.newSession.SetSize(a.width, a.height-statusBarHeight)
 	return a.newSession.Open(returnTo)
-}
-
-// updateNewSession routes messages to the new-session model while in ViewNewSession.
-func (a App) updateNewSession(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	a.newSession, cmd = a.newSession.Update(msg)
-	return a, cmd
 }
 
 // focusLaunchTermHeight returns the terminal height for the focusLaunch view,

@@ -44,13 +44,6 @@ type planEditorCloseMsg struct {
 	sessionID string
 }
 
-// planEditorRestoreMsg is emitted on `u` in scroll mode to restore the
-// previous plan from .claude/plan.prev.md (single-step undo). The App
-// handler delegates to Session.RestorePrevPlan and reloads the editor.
-type planEditorRestoreMsg struct {
-	sessionID string
-}
-
 // planEditorSavedMsg is emitted when ctrl+s completes; the App typically
 // just clears any pending error state.
 type planEditorSavedMsg struct {
@@ -230,15 +223,16 @@ func (m *planEditorModel) updateScroll(msg tea.KeyPressMsg) tea.Cmd {
 		if m.revising || m.sess == nil {
 			return nil
 		}
-		// Surface a friendly inline message instead of routing through the
-		// App when there's nothing to undo — saves a round-trip and keeps
-		// the no-op key press from looking broken.
+		// Single-step undo is purely session-local (the editor holds sess),
+		// so it runs inline rather than round-tripping a message through the
+		// App. The HasPrevPlan guard keeps the no-op key press from looking
+		// broken with a friendly inline message.
 		if !m.sess.HasPrevPlan() {
 			m.errMsg = "nothing to undo"
 			return nil
 		}
-		sessID := m.sess.ID
-		return func() tea.Msg { return planEditorRestoreMsg{sessionID: sessID} }
+		m.restorePrevPlan()
+		return nil
 	case "a":
 		if m.revising || m.drafting || m.sess == nil {
 			return nil
@@ -336,6 +330,21 @@ func (m *planEditorModel) updateReviseInput(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.reviseInput.Blur()
 		m.mode = planEditorModeScroll
+		// Persist any unsaved textarea edits before revising so the drafter
+		// sees what the user is actually looking at, not the last-saved
+		// version. On write error, surface it inline and abort the revise —
+		// otherwise the drafter would revise the wrong plan and overwrite the
+		// user's edits with the result. The editor owns this save (it holds
+		// sess), so App's revise handler is left as pure manager-routing.
+		if m.dirty && m.sess != nil {
+			val := m.doc.Value()
+			if err := m.sess.WritePlan(val); err != nil {
+				m.errMsg = "save plan: " + err.Error()
+				return nil
+			}
+			m.plan = val
+			m.dirty = false
+		}
 		sessID := m.sess.ID
 		repoPath := m.repoPath
 		return func() tea.Msg {
@@ -345,6 +354,25 @@ func (m *planEditorModel) updateReviseInput(msg tea.KeyPressMsg) tea.Cmd {
 	var cmd tea.Cmd
 	m.reviseInput, cmd = m.reviseInput.Update(msg)
 	return cmd
+}
+
+// restorePrevPlan performs a single-step undo: restore plan.prev.md → plan.md
+// and reload the editor. Session-local, so the editor owns it directly instead
+// of routing through the App. Callers guard HasPrevPlan first; the !restored
+// branch is a race fallback (snapshot vanished between check and restore).
+func (m *planEditorModel) restorePrevPlan() {
+	if m.sess == nil {
+		return
+	}
+	_, restored, err := m.sess.RestorePrevPlan()
+	switch {
+	case err != nil:
+		m.errMsg = "undo: " + err.Error()
+	case !restored:
+		m.errMsg = "nothing to undo"
+	default:
+		m.Reload()
+	}
 }
 
 func (m *planEditorModel) emitApprove() tea.Cmd {

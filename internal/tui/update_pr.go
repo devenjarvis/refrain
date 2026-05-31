@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/git"
 	"github.com/devenjarvis/refrain/internal/github"
 )
@@ -292,7 +293,7 @@ outer:
 			}
 
 			// Determine adaptive polling interval.
-			interval := a.prPollInterval(repo.Path, sess.ID, ps)
+			interval := prPollInterval(now, ps.burstUntil, a.prCache[key], ps.lastRemoteSHA)
 			if now.Sub(ps.lastPoll) < interval {
 				// Push detection runs for every session — including those with a
 				// cached PR — so new commits, force-pushes, and rewrites get
@@ -329,7 +330,7 @@ outer:
 			ps.inFlight = true
 			a.prPollsInFlight++
 			fetchThreads := sess.LifecyclePhase() == agent.LifecycleShipping
-			cachedPRNumber := a.cachedPRNumberForFallback(repo.Path, sess)
+			cachedPRNumber := cachedPRNumberForFallback(sess, a.prCache[key])
 			cmds = append(cmds, a.refreshPRStatusForSession(sess.ID, sess.Branch(), repo.Path, sess.Worktree.Path, fetchThreads, cachedPRNumber))
 		}
 	}
@@ -338,30 +339,32 @@ outer:
 
 // cachedPRNumberForFallback returns the cached PR number for a Shipping session
 // so the poll cmd can call resolveMergedFallback when the open-only lookup
-// returns nil. Returns 0 for non-Shipping sessions, preserving today's
-// 2-consecutive-nil eviction behaviour for Building/Reviewing sessions.
-func (a *App) cachedPRNumberForFallback(repoPath string, sess *agent.Session) int {
+// returns nil. entry is the session's prCache entry (nil-safe). Returns 0 for
+// non-Shipping sessions, preserving today's 2-consecutive-nil eviction
+// behaviour for Building/Reviewing sessions.
+func cachedPRNumberForFallback(sess *agent.Session, entry *prCacheEntry) int {
 	if sess.LifecyclePhase() != agent.LifecycleShipping {
 		return 0
 	}
-	entry := a.prCache[cacheKey(repoPath, sess.ID)]
 	if entry == nil || entry.pr == nil {
 		return 0
 	}
 	return entry.pr.Number
 }
 
-// prPollInterval returns the adaptive polling interval for a session.
-func (a *App) prPollInterval(repoPath, sessionID string, ps *prSessionState) time.Duration {
+// prPollInterval returns the adaptive polling interval for a session given the
+// current time, the session's burst deadline, its cached PR entry (nil-safe),
+// and the last remote SHA observed by push detection. Pure: takes everything it
+// reads as arguments so it is testable without an App.
+func prPollInterval(now, burstUntil time.Time, entry *prCacheEntry, lastRemoteSHA string) time.Duration {
 	// Event-driven burst (branch rename, new push): poll aggressively for a
 	// short window so state transitions become visible within ~2s.
-	if ps != nil && time.Now().Before(ps.burstUntil) {
+	if now.Before(burstUntil) {
 		return PRPollDuringBurst
 	}
-	entry := a.prCache[cacheKey(repoPath, sessionID)]
 	// No PR found yet but branch may have been pushed.
 	if entry == nil || entry.pr == nil {
-		if ps.lastRemoteSHA != "" {
+		if lastRemoteSHA != "" {
 			return PRPollAfterPush // branch pushed, waiting for PR
 		}
 		return PRPollStable // stable, no activity
@@ -547,38 +550,45 @@ func entryThreads(entry *prCacheEntry) []github.ReviewThread {
 	return entry.threads
 }
 
-// mergePRCmdFor returns the shipping panel's MergePRCmd dep. mergePRCmdWithMode
-// reads only reference-typed App state (ghClient, prCache, resolvedCache) and
-// builds an async cmd without mutating App scalars, so capturing a value copy
-// of App at construction is safe (those maps/pointer are shared, not copied).
-func (a App) mergePRCmdFor() func(sessionID, repoPath string, force bool) tea.Cmd {
+// mergePRCmdFor returns the shipping panel's MergePRCmd dep. It closes over the
+// shared GitHub client, PR cache, and resolved-settings map (reference-typed
+// App fields) rather than a value copy of App, mirroring buildReviewDeps /
+// buildShippingDeps. Capturing the maps/pointer keeps the returned factory live
+// across the App value-copies that flow through Update, and avoids pinning a
+// whole stale App (including frozen scalars) for the panel's lifetime.
+func (a *App) mergePRCmdFor() func(sessionID, repoPath string, force bool) tea.Cmd {
+	ghClient := a.ghClient
+	prCache := a.prCache
+	resolved := a.resolvedCache
 	return func(sessionID, repoPath string, force bool) tea.Cmd {
-		return a.mergePRCmdWithMode(sessionID, repoPath, force)
+		return mergePRCmdWithMode(ghClient, prCache, resolved, sessionID, repoPath, force)
 	}
 }
 
-func (a *App) mergePRCmdWithMode(sessionID, repoPath string, force bool) tea.Cmd {
-	if repoPath == "" {
-		repoPath = a.activeRepo
-	}
-	ghClient := a.ghClient
-	if ghClient == nil {
-		return func() tea.Msg {
-			return mergePRMsg{sessionID: sessionID, repoPath: repoPath, err: fmt.Errorf("GitHub client not available")}
-		}
-	}
-	entry := a.prCache[cacheKey(repoPath, sessionID)]
-	if entry == nil || entry.pr == nil {
-		return func() tea.Msg {
-			return mergePRMsg{sessionID: sessionID, repoPath: repoPath, err: fmt.Errorf("no PR cached")}
-		}
-	}
+// mergePRCmdWithMode builds the async merge Cmd for the cached PR of
+// (repoPath, sessionID). The shipping panel always supplies a non-empty,
+// repo-pinned repoPath, so this reads only the passed references — no App.
+func mergePRCmdWithMode(ghClient *github.Client, prCache map[string]*prCacheEntry, resolved map[string]config.ResolvedSettings, sessionID, repoPath string, force bool) tea.Cmd {
+	// Precondition: the shipping panel always supplies its pinned, non-empty
+	// repoPath. Guarding up front (rather than after the cache lookup) keeps the
+	// check live instead of dead behind the nil-entry branch below.
 	if repoPath == "" {
 		return func() tea.Msg {
 			return mergePRMsg{sessionID: sessionID, repoPath: repoPath, err: fmt.Errorf("session repo not found")}
 		}
 	}
-	method := a.resolvedCache[repoPath].MergeMethod
+	if ghClient == nil {
+		return func() tea.Msg {
+			return mergePRMsg{sessionID: sessionID, repoPath: repoPath, err: fmt.Errorf("GitHub client not available")}
+		}
+	}
+	entry := prCache[cacheKey(repoPath, sessionID)]
+	if entry == nil || entry.pr == nil {
+		return func() tea.Msg {
+			return mergePRMsg{sessionID: sessionID, repoPath: repoPath, err: fmt.Errorf("no PR cached")}
+		}
+	}
+	method := resolved[repoPath].MergeMethod
 	switch method {
 	case "merge", "squash", "rebase":
 	case "":

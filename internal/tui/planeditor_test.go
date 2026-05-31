@@ -797,6 +797,37 @@ func TestPlanEditor_U_NothingToUndo_ShowsInlineError(t *testing.T) {
 	}
 }
 
+// TestPlanEditor_U_RestoresPrevPlanInline verifies the editor owns single-step
+// undo: pressing `u` restores plan.prev.md → plan.md and reloads in-place,
+// without routing a planEditorRestoreMsg through the App.
+func TestPlanEditor_U_RestoresPrevPlanInline(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	if err := sess.WritePlan("# Goal\nNew plan\n"); err != nil {
+		t.Fatal(err)
+	}
+	// Seed a previous-plan snapshot so `u` has something to restore.
+	if err := os.WriteFile(sess.PrevPlanPath(), []byte("# Goal\nOld plan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !sess.HasPrevPlan() {
+		t.Fatal("test prereq: HasPrevPlan should be true after seeding snapshot")
+	}
+	editor := newPlanEditor(sess, "", 80, 20)
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
+	if cmd != nil {
+		t.Error("restore should be handled inline (no App round-trip), got a cmd")
+	}
+	if editor.errMsg != "" {
+		t.Errorf("unexpected errMsg after restore: %q", editor.errMsg)
+	}
+	if !strings.Contains(editor.plan, "Old plan") {
+		t.Errorf("editor.plan after restore = %q, want it to contain 'Old plan'", editor.plan)
+	}
+	if sess.HasPrevPlan() {
+		t.Error("snapshot should be consumed after a single-step undo")
+	}
+}
+
 func TestPlanEditor_DraftingState_BlocksAllExceptEscAndQ(t *testing.T) {
 	sess, _ := newEditorTestSession(t)
 	if err := sess.WritePlan("# Goal\nDo X\n"); err != nil {
@@ -831,6 +862,41 @@ func TestPlanEditor_DraftingState_BlocksAllExceptEscAndQ(t *testing.T) {
 	}
 	if editor.errMsg != "" {
 		t.Errorf("errMsg set during drafting: %q", editor.errMsg)
+	}
+}
+
+// TestPlanEditor_Revise_PersistsDirtyEditsBeforeEmitting verifies the editor
+// saves unsaved textarea edits to disk before emitting planEditorReviseMsg, so
+// the drafter revises what the user sees. This save moved out of the App's
+// revise handler (now pure manager-routing) and into the editor.
+func TestPlanEditor_Revise_PersistsDirtyEditsBeforeEmitting(t *testing.T) {
+	sess, _ := newEditorTestSession(t)
+	if err := sess.WritePlan("# Goal\nOriginal\n"); err != nil {
+		t.Fatal(err)
+	}
+	editor := newPlanEditor(sess, "", 80, 30)
+	// Simulate an unsaved edit left in the textarea before revising.
+	editor.doc.SetValue("# Goal\nEdited but unsaved\n")
+	editor.dirty = true
+
+	editor, _ = editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	editor.reviseInput.SetValue("make it better")
+	editor, cmd := editor.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	if cmd == nil {
+		t.Fatal("expected revise cmd")
+	}
+	if _, ok := cmd().(planEditorReviseMsg); !ok {
+		t.Fatal("expected planEditorReviseMsg from dirty revise submit")
+	}
+	if editor.dirty {
+		t.Error("dirty should be cleared after save-before-revise")
+	}
+	onDisk, err := sess.ReadPlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(onDisk, "Edited but unsaved") {
+		t.Errorf("plan on disk = %q, want the unsaved edit persisted before revise", onDisk)
 	}
 }
 

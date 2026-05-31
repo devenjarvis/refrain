@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/devenjarvis/refrain/internal/config"
 )
 
 // fieldKind distinguishes toggle fields from text input fields.
@@ -302,4 +303,39 @@ func optionIndex(options []string, value string) int {
 		}
 	}
 	return 0
+}
+
+// refreshChecksActionHint walks the form's fields and updates the "Validation
+// Checks" action row's right-aligned hint so it reflects the current count.
+// A no-op when the form (receiver) is nil or doesn't contain that row — the
+// form owns its own field state, so the refresh lives here rather than in a
+// free function reaching into f.fields from outside (§3).
+func (f *configForm) refreshChecksActionHint(checks []config.ValidationCheck) {
+	if f == nil {
+		return
+	}
+	hint := repoChecksHint(filterValidationChecks(checks))
+	for i := range f.fields {
+		if f.fields[i].kind == fieldAction && f.fields[i].label == "Validation Checks" {
+			f.fields[i].actionHint = hint
+			return
+		}
+	}
+}
+
+// filterValidationChecks drops rows whose Name or Command is empty after
+// trimming. Empty rows arise when a user pressed `a` to add a check and then
+// abandoned it; treating them as "never added" is friendlier than refusing to
+// save the form.
+func filterValidationChecks(in []config.ValidationCheck) []config.ValidationCheck {
+	out := make([]config.ValidationCheck, 0, len(in))
+	for _, c := range in {
+		name := strings.TrimSpace(c.Name)
+		cmd := strings.TrimSpace(c.Command)
+		if name == "" || cmd == "" {
+			continue
+		}
+		out = append(out, config.ValidationCheck{Name: name, Command: cmd})
+	}
+	return out
 }
