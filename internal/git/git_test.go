@@ -416,6 +416,71 @@ func TestUpdateBaseBranch_NoRemote(t *testing.T) {
 	}
 }
 
+func TestHasRemoteBranch(t *testing.T) {
+	t.Run("exists after clone", func(t *testing.T) {
+		work, _ := initTestRepoWithRemote(t)
+		if !git.HasRemoteBranch(work, "main") {
+			t.Error("HasRemoteBranch(work, \"main\") = false, want true")
+		}
+	})
+
+	t.Run("never fetched branch", func(t *testing.T) {
+		work, _ := initTestRepoWithRemote(t)
+		if git.HasRemoteBranch(work, "never-existed") {
+			t.Error("HasRemoteBranch(work, \"never-existed\") = true, want false")
+		}
+	})
+
+	t.Run("no origin remote", func(t *testing.T) {
+		repo := initTestRepo(t)
+		if git.HasRemoteBranch(repo, "main") {
+			t.Error("HasRemoteBranch(repo, \"main\") = true for repo with no remote, want false")
+		}
+	})
+
+	t.Run("branch with slash on origin", func(t *testing.T) {
+		work, bare := initTestRepoWithRemote(t)
+		// Create and push a branch with a slash in its name via a sibling clone.
+		tmp := t.TempDir()
+		for _, args := range [][]string{
+			{"git", "clone", bare, "."},
+			{"git", "config", "user.email", "test@test.com"},
+			{"git", "config", "user.name", "Test"},
+			{"git", "config", "commit.gpgsign", "false"},
+			{"git", "checkout", "-b", "feature/sub"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = tmp
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("setup tmp %v: %v\n%s", args, err, out)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(tmp, "sub.txt"), []byte("sub\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{
+			{"git", "add", "."},
+			{"git", "commit", "-m", "feature/sub commit"},
+			{"git", "push", "origin", "feature/sub"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = tmp
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("push tmp %v: %v\n%s", args, err, out)
+			}
+		}
+		// Fetch into work so refs/remotes/origin/feature/sub exists locally.
+		cmd := exec.Command("git", "fetch", "origin", "feature/sub")
+		cmd.Dir = work
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fetch feature/sub: %v\n%s", err, out)
+		}
+		if !git.HasRemoteBranch(work, "feature/sub") {
+			t.Error("HasRemoteBranch(work, \"feature/sub\") = false, want true")
+		}
+	})
+}
+
 func TestAttachWorktree(t *testing.T) {
 	repo := initTestRepo(t)
 

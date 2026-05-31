@@ -1217,13 +1217,15 @@ func (m *Manager) createSessionWorktree(cfg Config) (*Session, error) {
 		}
 	}
 
-	// Best-effort: update base branch from remote so the worktree
-	// starts from the latest code. If offline, fall back to local HEAD.
+	// Cut the worktree from origin/<baseBranch> whenever the remote ref exists
+	// locally — falling back to local HEAD would inherit whatever branch the
+	// user happens to have checked out in the main worktree.
+	// Best-effort fetch + fast-forward local ref so a subsequent diff
+	// against baseBranch is fresh; ignore the error.
+	_ = git.UpdateBaseBranch(m.repoPath, baseBranch)
 	startPoint := ""
-	if baseBranch != "" {
-		if err := git.UpdateBaseBranch(m.repoPath, baseBranch); err == nil {
-			startPoint = "origin/" + baseBranch
-		}
+	if baseBranch != "" && git.HasRemoteBranch(m.repoPath, baseBranch) {
+		startPoint = "origin/" + baseBranch
 	}
 
 	wt, err := git.CreateWorktree(m.repoPath, name, config.ExpandBranchPrefix(settings.BranchPrefix), settings.WorktreeDir, baseBranch, startPoint)

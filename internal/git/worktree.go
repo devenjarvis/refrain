@@ -109,6 +109,12 @@ func UpdateBaseBranch(repoPath, branch string) error {
 	return nil
 }
 
+// HasRemoteBranch reports whether refs/remotes/origin/<branch> resolves locally.
+func HasRemoteBranch(repoPath, branch string) bool {
+	_, err := runGit(repoPath, "rev-parse", "--verify", "refs/remotes/origin/"+branch)
+	return err == nil
+}
+
 // CreateWorktree creates a new git worktree for the named agent.
 // branchPrefix and worktreeDir control naming and placement; pass empty
 // strings to use defaults ("refrain/" and ".refrain/worktrees").
