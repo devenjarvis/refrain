@@ -77,11 +77,17 @@ func (m *reviewPanelModel) Update(msg tea.Msg) (PanelModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.SetSize(msg.Width, msg.Height-1)
+		m.syncDiffPane()
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.MouseClickMsg:
+		before := m.taskCursor
 		m.handleClick(msg)
+		if m.taskCursor != before {
+			m.vpFileIdx = 0
+			m.syncDiffPane()
+		}
 		return m, nil
 	}
 	return m, nil
@@ -163,12 +169,16 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 			maxIdx := reviewTaskCount(entry) - 1
 			if m.taskCursor < maxIdx {
 				m.taskCursor++
+				m.vpFileIdx = 0
+				m.syncDiffPane()
 			}
 		}
 		return m, nil
 	case "k", "up":
 		if m.taskCursor > 0 {
 			m.taskCursor--
+			m.vpFileIdx = 0
+			m.syncDiffPane()
 		}
 		return m, nil
 	case "r":
@@ -213,8 +223,8 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 		return m, nil
 	case "s":
 		m.sideBySide = !m.sideBySide
-		// Invalidate the renderer cache so the diff is re-rendered at the next View().
 		m.renderersByPath = nil
+		m.syncDiffPane()
 		return m, nil
 	case "[":
 		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
@@ -223,6 +233,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 				m.vpFileIdx--
 				m.vp.GotoTop()
 				m.renderersByPath = nil
+				m.syncDiffPane()
 			}
 		}
 		return m, nil
@@ -233,6 +244,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 				m.vpFileIdx++
 				m.vp.GotoTop()
 				m.renderersByPath = nil
+				m.syncDiffPane()
 			}
 		}
 		return m, nil
@@ -322,7 +334,19 @@ func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg) {
 	}
 
 	headerH := len(renderReviewHeader(m.session, m.width, m.now))
-	checksH := len(renderChecksStrip(nil, m.width, m.now)) // conservative: nil if no checks
+	// Compute checksH from actual run state so click coordinates match the render.
+	var checksCS *checksTabState
+	if m.deps.ValidationRuns != nil {
+		if run := m.deps.ValidationRuns(m.repoPath, m.session.ID); run != nil {
+			checksCS = &checksTabState{
+				checks:  run.checks,
+				results: run.results,
+				cursor:  m.checksCursor,
+				scroll:  m.checksScroll,
+			}
+		}
+	}
+	checksH := len(renderChecksStrip(checksCS, m.width, m.now))
 	paneTop := m.dashboardTopY + headerH + checksH
 	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, leftPaneW)
 	if rowIdx < 0 {

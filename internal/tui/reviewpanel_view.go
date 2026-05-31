@@ -792,9 +792,6 @@ func (m *reviewPanelModel) View() string {
 	if entry == nil {
 		body = padViewBody(StyleSubtle.Render("loading diff stats…"), innerWidth(m.width), bodyH)
 	} else {
-		// Refresh viewport with current focused task's diff.
-		m.refreshDiffPane(entry, rightW, bodyH-1) // bodyH-1: 1 line for file header
-
 		leftLines := renderTaskListPane(entry, leftW, bodyH, m.taskCursor, m.now)
 		leftStr := padViewBody(strings.Join(leftLines, "\n"), leftW, bodyH)
 

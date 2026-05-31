@@ -932,8 +932,8 @@ func TestReviewPanel_ScrollKeysRouteToViewport(t *testing.T) {
 	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
 	panel := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
 
-	// Prime the viewport by calling View() first.
-	_ = panel.View()
+	// Prime the viewport by dispatching a WindowSizeMsg, which calls syncDiffPane().
+	_, _ = panel.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
 	before := panel.vp.YOffset()
 
 	// pgdown should scroll down.

@@ -284,6 +284,9 @@ func TestRenderReviewPanel_RightPaneShowsFocusedTaskDiff(t *testing.T) {
 	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
 	panel := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
 
+	// Prime the viewport via WindowSizeMsg (triggers syncDiffPane for cursor=0).
+	_, _ = panel.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+
 	// cursor=0 → task 1 diff in right pane.
 	out0 := ansi.Strip(panel.View())
 	if !strings.Contains(out0, "MARKER_TASK_1") {
@@ -293,8 +296,8 @@ func TestRenderReviewPanel_RightPaneShowsFocusedTaskDiff(t *testing.T) {
 		t.Errorf("cursor=0: right pane must NOT show MARKER_TASK_2; got:\n%s", out0)
 	}
 
-	// cursor=1 → task 2 diff in right pane.
-	panel.taskCursor = 1
+	// cursor=1 → task 2 diff in right pane (j key triggers syncDiffPane).
+	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	out1 := ansi.Strip(panel.View())
 	if !strings.Contains(out1, "MARKER_TASK_2") {
 		t.Errorf("cursor=1: right pane must show MARKER_TASK_2; got:\n%s", out1)
