@@ -1,12 +1,12 @@
 package tui
 
 import (
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/config"
 )
 
+// returnFromConfigForm closes the repo config form and returns to the repo
+// picker if one was pending, or back to the dashboard list otherwise.
 func (a App) returnFromConfigForm() (tea.Model, tea.Cmd) {
 	if a.repoPickerPendingFromConfig {
 		a.repoPickerPendingFromConfig = false
@@ -27,18 +27,7 @@ func (a App) returnFromConfigForm() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-func (a App) updateDiff(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
-	case diffCloseMsg:
-		a.view = ViewDashboard
-		return a, nil
-	}
-
-	var cmd tea.Cmd
-	a.diff, cmd = a.diff.Update(msg)
-	return a, cmd
-}
-
+// initRepoConfigForm creates a config form for the given repo and enters config focus.
 func (a *App) initRepoConfigForm(repoPath string) {
 	rs := a.repoSettings[repoPath]
 	if rs == nil {
@@ -145,23 +134,6 @@ func (a App) extractRepoSettings() *config.RepoSettings {
 	return s
 }
 
-// filterValidationChecks drops rows whose Name or Command is empty after
-// trimming. Empty rows arise when a user pressed `a` to add a check and then
-// abandoned it; treating them as "never added" is friendlier than refusing to
-// save the form.
-func filterValidationChecks(in []config.ValidationCheck) []config.ValidationCheck {
-	out := make([]config.ValidationCheck, 0, len(in))
-	for _, c := range in {
-		name := strings.TrimSpace(c.Name)
-		cmd := strings.TrimSpace(c.Command)
-		if name == "" || cmd == "" {
-			continue
-		}
-		out = append(out, config.ValidationCheck{Name: name, Command: cmd})
-	}
-	return out
-}
-
 // initRepoChecksEditor switches the panel from the repo config form to the
 // validation-checks sub-editor. The current pendingChecks list is handed to
 // the editor as its working buffer; on save it's copied back, on cancel it's
@@ -188,7 +160,7 @@ func (a App) updateRepoChecks(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
 	case repoChecksSaveMsg:
 		a.pendingChecks = append([]config.ValidationCheck(nil), m.Checks...)
-		refreshChecksActionHint(a.modals.Config(), a.pendingChecks)
+		a.modals.Config().refreshChecksActionHint(a.pendingChecks)
 		a.closeRepoChecksEditor()
 		return a, nil
 	case repoChecksCancelMsg:
@@ -201,57 +173,4 @@ func (a App) updateRepoChecks(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 	return a, nil
-}
-
-// refreshChecksActionHint walks the form's fields and updates the "Validation
-// Checks" action row's right-aligned hint so it reflects the current count.
-// A no-op when the form is nil or doesn't contain that row.
-func refreshChecksActionHint(form *configForm, checks []config.ValidationCheck) {
-	if form == nil {
-		return
-	}
-	hint := repoChecksHint(filterValidationChecks(checks))
-	for i := range form.fields {
-		if form.fields[i].kind == fieldAction && form.fields[i].label == "Validation Checks" {
-			form.fields[i].actionHint = hint
-			return
-		}
-	}
-}
-
-func (a App) updateGlobalConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case globalConfigSaveMsg:
-		// Persist global settings.
-		if err := config.SaveGlobalSettings(msg.settings); err != nil {
-			a.setError(err.Error())
-			a.view = ViewDashboard
-			return a, nil
-		}
-		a.globalSettings = msg.settings
-		// Rebuild resolved cache and push to all managers.
-		for repoPath, rs := range a.repoSettings {
-			a.resolvedCache[repoPath] = config.Resolve(a.globalSettings, rs)
-			if mgr := a.managers[repoPath]; mgr != nil {
-				mgr.UpdateSettings(a.resolvedCache[repoPath])
-			}
-		}
-		newResolved := config.Resolve(a.globalSettings, nil)
-		if newResolved.SidebarWidth != a.dashboard.sidebarWidth {
-			a.dashboard.sidebarWidth = newResolved.SidebarWidth
-			a.resizeAllForDashboard()
-		}
-		// Refresh wellness settings from updated global config.
-		a.wellness.focusSessionMinutes = newResolved.FocusSessionMinutes
-		a.wellness.focusBreakMinutes = newResolved.FocusBreakMinutes
-		a.view = ViewDashboard
-		return a, nil
-	case globalConfigCancelMsg:
-		a.view = ViewDashboard
-		return a, nil
-	}
-
-	var cmd tea.Cmd
-	a.globalConfig, cmd = a.globalConfig.Update(msg)
-	return a, cmd
 }

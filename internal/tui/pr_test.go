@@ -15,20 +15,84 @@ import (
 // TestPrPollInterval_BurstOverridesBaseline verifies the burst window shortens
 // the poll interval to 2s regardless of the adaptive baseline.
 func TestPrPollInterval_BurstOverridesBaseline(t *testing.T) {
-	a := NewApp()
-	ps := &prSessionState{burstUntil: time.Now().Add(30 * time.Second)}
-	a.prPollStates["s1"] = ps
-	if got := a.prPollInterval("/repo", "s1", ps); got != 2*time.Second {
+	now := time.Now()
+	if got := prPollInterval(now, now.Add(30*time.Second), nil, ""); got != 2*time.Second {
 		t.Fatalf("burst interval = %v, want 2s", got)
 	}
 }
 
 func TestPrPollInterval_ExpiredBurstFallsBackToBaseline(t *testing.T) {
-	a := NewApp()
-	ps := &prSessionState{burstUntil: time.Now().Add(-5 * time.Second)}
-	a.prPollStates["s1"] = ps
-	if got := a.prPollInterval("/repo", "s1", ps); got != 30*time.Second {
+	now := time.Now()
+	if got := prPollInterval(now, now.Add(-5*time.Second), nil, ""); got != 30*time.Second {
 		t.Fatalf("expired burst should use 30s baseline, got %v", got)
+	}
+}
+
+// TestPrPollInterval_Matrix exercises the adaptive interval across the
+// burst → CI-pending → after-push → stable progression. Since prPollInterval
+// is a pure free function, each case is a direct call with explicit inputs.
+func TestPrPollInterval_Matrix(t *testing.T) {
+	now := time.Now()
+	pendingChecks := &prCacheEntry{
+		pr:     &github.PRState{Number: 1},
+		checks: &github.CheckStatus{State: "pending"},
+	}
+	successChecks := &prCacheEntry{
+		pr:     &github.PRState{Number: 1},
+		checks: &github.CheckStatus{State: "success"},
+	}
+	noChecks := &prCacheEntry{pr: &github.PRState{Number: 1}}
+
+	cases := []struct {
+		name          string
+		burstUntil    time.Time
+		entry         *prCacheEntry
+		lastRemoteSHA string
+		want          time.Duration
+	}{
+		{"burst wins over pending PR", now.Add(30 * time.Second), pendingChecks, "abc", PRPollDuringBurst},
+		{"no entry, no push → stable", time.Time{}, nil, "", PRPollStable},
+		{"no entry, pushed → after-push", time.Time{}, nil, "abc", PRPollAfterPush},
+		{"entry with nil pr, pushed → after-push", time.Time{}, &prCacheEntry{}, "abc", PRPollAfterPush},
+		{"PR with pending CI → CI-pending", time.Time{}, pendingChecks, "abc", PRPollCIPending},
+		{"PR with success CI → stable", time.Time{}, successChecks, "abc", PRPollStable},
+		{"PR with no checks → stable", time.Time{}, noChecks, "abc", PRPollStable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := prPollInterval(now, tc.burstUntil, tc.entry, tc.lastRemoteSHA); got != tc.want {
+				t.Fatalf("prPollInterval = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCachedPRNumberForFallback covers the Shipping-gated fallback-number
+// extraction: only Shipping sessions with a cached open PR yield a number.
+func TestCachedPRNumberForFallback(t *testing.T) {
+	shipping := agent.NewSessionForTest("s1", "shipping")
+	shipping.SetLifecyclePhase(agent.LifecycleShipping)
+	building := agent.NewSessionForTest("s2", "building")
+	building.SetLifecyclePhase(agent.LifecycleInProgress)
+	withPR := &prCacheEntry{pr: &github.PRState{Number: 42}}
+
+	cases := []struct {
+		name  string
+		sess  *agent.Session
+		entry *prCacheEntry
+		want  int
+	}{
+		{"shipping with cached PR", shipping, withPR, 42},
+		{"shipping, nil entry", shipping, nil, 0},
+		{"shipping, entry without pr", shipping, &prCacheEntry{}, 0},
+		{"non-shipping with cached PR", building, withPR, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cachedPRNumberForFallback(tc.sess, tc.entry); got != tc.want {
+				t.Fatalf("cachedPRNumberForFallback = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 

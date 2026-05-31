@@ -5220,10 +5220,10 @@ func TestPollAllSessions_PassesCachedPRNumberForShippingOnly(t *testing.T) {
 	app.prCache[cacheKey(dir, shipping.ID)] = &prCacheEntry{pr: &github.PRState{Number: 42}}
 	app.prCache[cacheKey(dir, building.ID)] = &prCacheEntry{pr: &github.PRState{Number: 99}}
 
-	if got := app.cachedPRNumberForFallback(dir, shipping); got != 42 {
+	if got := cachedPRNumberForFallback(shipping, app.prCache[cacheKey(dir, shipping.ID)]); got != 42 {
 		t.Errorf("Shipping session: got %d, want 42", got)
 	}
-	if got := app.cachedPRNumberForFallback(dir, building); got != 0 {
+	if got := cachedPRNumberForFallback(building, app.prCache[cacheKey(dir, building.ID)]); got != 0 {
 		t.Errorf("InProgress session: got %d, want 0", got)
 	}
 }

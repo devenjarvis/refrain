@@ -142,20 +142,9 @@ func (a App) handlePlanEditorAbandon(msg planEditorAbandonMsg) (tea.Model, tea.C
 }
 
 func (a App) handlePlanEditorRevise(msg planEditorReviseMsg) (tea.Model, tea.Cmd) {
-	// Persist any unsaved textarea edits before revising so the drafter
-	// sees what the user is actually looking at, not the last-saved
-	// version. WritePlan errors flow up as an inline editor error and
-	// we abort the revise — otherwise the model would revise the wrong
-	// plan and overwrite the user's edits with the result.
-	if a.modals.PlanEditor() != nil && a.modals.PlanEditor().dirty && a.modals.PlanEditor().sess != nil {
-		val := a.modals.PlanEditor().doc.Value()
-		if err := a.modals.PlanEditor().sess.WritePlan(val); err != nil {
-			a.modals.PlanEditor().SetError("save plan: " + err.Error())
-			return a, nil
-		}
-		a.modals.PlanEditor().plan = val
-		a.modals.PlanEditor().dirty = false
-	}
+	// Pure manager-routing: the editor has already persisted any unsaved
+	// textarea edits before emitting planEditorReviseMsg (see updateReviseInput),
+	// so this just resolves the repo and dispatches mgr.RevisePlan.
 	repoPath := msg.repoPath
 	if repoPath == "" && a.modals.PlanEditor() != nil {
 		repoPath = a.modals.PlanEditor().repoPath
@@ -229,28 +218,6 @@ func (a App) handlePlanEditorRetry(msg planEditorRetryMsg) (tea.Model, tea.Cmd) 
 	if a.modals.PlanEditor() != nil && a.modals.PlanEditor().sess != nil &&
 		a.modals.PlanEditor().sess.ID == msg.sessionID {
 		a.modals.PlanEditor().SetDrafting(true)
-	}
-	return a, nil
-}
-
-func (a App) handlePlanEditorRestore(msg planEditorRestoreMsg) (tea.Model, tea.Cmd) {
-	// Single-step undo: restore plan.prev.md → plan.md and reload the
-	// editor. No-op when no snapshot exists.
-	if a.modals.PlanEditor() == nil || a.modals.PlanEditor().sess == nil {
-		return a, nil
-	}
-	sess := a.modals.PlanEditor().sess
-	if sess.ID != msg.sessionID {
-		return a, nil
-	}
-	_, restored, err := sess.RestorePrevPlan()
-	switch {
-	case err != nil:
-		a.modals.PlanEditor().SetError("undo: " + err.Error())
-	case !restored:
-		a.modals.PlanEditor().SetError("nothing to undo")
-	default:
-		a.modals.PlanEditor().Reload()
 	}
 	return a, nil
 }
