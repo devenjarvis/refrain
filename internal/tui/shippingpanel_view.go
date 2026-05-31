@@ -46,6 +46,8 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	if entry == nil || entry.pr == nil {
 		lines = append(lines, StyleSubtle.Render("  fetching PR status…"))
 		lines = append(lines, "")
+		body := fillHeight(strings.Join(lines, "\n"), width, height-2)
+		lines = strings.Split(body, "\n")
 		lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 		lines = append(lines, shippingHints(false))
 		return strings.Join(lines, "\n")
@@ -149,10 +151,8 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	}
 
 	// ── Footer ────────────────────────────────────────────────────────────────
-	used := len(lines) + 2 // +2 for separator + hints
-	if remaining := height - used; remaining > 0 {
-		lines = append(lines, strings.Repeat("\n", remaining-1))
-	}
+	body := fillHeight(strings.Join(lines, "\n"), width, height-2)
+	lines = strings.Split(body, "\n")
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
 	lines = append(lines, shippingHints(isMergeReady(entry)))
 

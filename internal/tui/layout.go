@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/devenjarvis/refrain/internal/config"
+import (
+	"github.com/charmbracelet/lipgloss"
+	"github.com/devenjarvis/refrain/internal/config"
+)
 
 // Layout primitives. Per CONVENTIONS.md §5, width/height arithmetic lives here
 // so a border/sidebar/chrome change is a one-line edit, not a multi-file grep.
@@ -51,6 +54,13 @@ func modalContentWidth(w int) int {
 // border columns.
 func previewTermWidth(total, sidebar int) int {
 	return total - sidebar - separatorWidth - 2*borderWidth
+}
+
+// fillHeight pads content with blank rows at the bottom so the result is exactly
+// height rows of width cells, used by views whose footer must pin to the bottom
+// even when body is short.
+func fillHeight(content string, width, height int) string {
+	return lipgloss.Place(width, height, lipgloss.Left, lipgloss.Top, content)
 }
 
 // columnStrategy parameterizes the left pane of a two-column split.

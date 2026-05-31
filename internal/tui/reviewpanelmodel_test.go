@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/github"
@@ -885,4 +887,69 @@ func writePlanForTest(planDir string, sess *agent.Session, content string) error
 func restoreOpenURL() func() {
 	orig := openURL
 	return func() { openURL = orig }
+}
+
+// TestReviewPanel_View_FooterOnLastRow verifies that renderReviewPanel always
+// returns exactly height rows with the ESC hint on the last row.
+func TestReviewPanel_View_FooterOnLastRow(t *testing.T) {
+	const w, h = 120, 40
+	assertFooter := func(t *testing.T, view string) {
+		t.Helper()
+		n := strings.Count(view, "\n") + 1
+		if n != h {
+			t.Errorf("View() returned %d lines, want %d", n, h)
+		}
+		lines := strings.Split(view, "\n")
+		last := ansi.Strip(lines[len(lines)-1])
+		if !strings.Contains(last, "ESC") {
+			t.Errorf("last line %q does not contain 'ESC' hint", last)
+		}
+	}
+
+	t.Run("loading (entry nil)", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s1", "fix-auth")
+		app := reviewTestApp()
+		panel := newReviewPanel(sess, "", w, h, app.buildReviewDeps())
+		// reviewDiffCache is empty → ReviewCache returns nil
+		assertFooter(t, panel.View())
+	})
+
+	t.Run("entry with empty tasks and groups", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s2", "fix-auth")
+		app := reviewTestApp()
+		// entry present but no tasks/groups → overview path
+		app.reviewDiffCache[cacheKey("", sess.ID)] = &reviewDiffEntry{}
+		panel := newReviewPanel(sess, "", w, h, app.buildReviewDeps())
+		assertFooter(t, panel.View())
+	})
+
+	t.Run("checks tab with nil checkState", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s3", "fix-auth")
+		app := reviewTestApp()
+		panel := newReviewPanel(sess, "", w, h, app.buildReviewDeps())
+		panel.activeTab = reviewTabChecks
+		// validationRuns is nil → checkState is nil → placeholder tab
+		assertFooter(t, panel.View())
+	})
+
+	t.Run("tasks tab with entry", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s4", "fix-auth")
+		app := reviewTestApp()
+		app.reviewDiffCache[cacheKey("", sess.ID)] = &reviewDiffEntry{
+			tasks: []agent.PlanTask{
+				{Index: 1, Text: "task one"},
+				{Index: 2, Text: "task two"},
+			},
+		}
+		panel := newReviewPanel(sess, "", w, h, app.buildReviewDeps())
+		assertFooter(t, panel.View())
+	})
+
+	t.Run("draft PR in flight", func(t *testing.T) {
+		sess := agent.NewSessionForTest("s5", "fix-auth")
+		app := reviewTestApp()
+		panel := newReviewPanel(sess, "", w, h, app.buildReviewDeps())
+		panel.drafting = true
+		assertFooter(t, panel.View())
+	})
 }

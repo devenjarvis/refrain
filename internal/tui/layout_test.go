@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestInnerWidth(t *testing.T) {
 	cases := []struct {
@@ -62,6 +65,32 @@ func TestPreviewTermWidth(t *testing.T) {
 	// total - sidebar - separator(1) - 2*border(2) = total - sidebar - 3.
 	if got := previewTermWidth(100, 30); got != 67 {
 		t.Errorf("previewTermWidth(100, 30) = %d, want 67", got)
+	}
+}
+
+func TestFillHeight(t *testing.T) {
+	lineCount := func(s string) int {
+		return strings.Count(s, "\n") + 1
+	}
+	cases := []struct {
+		name    string
+		content string
+		width   int
+		height  int
+		want    int
+	}{
+		{"short content padded to height", "line1\nline2\nline3", 80, 10, 10},
+		{"exact fit unchanged", "line1\nline2\nline3", 80, 3, 3},
+		{"zero height is a no-op for 1-line content", "line1", 80, 0, 1},
+		{"zero width does not panic", "line1\nline2", 0, 5, 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fillHeight(tc.content, tc.width, tc.height)
+			if n := lineCount(got); n != tc.want {
+				t.Errorf("fillHeight(%q, %d, %d): got %d lines, want %d\ngot=%q", tc.content, tc.width, tc.height, n, tc.want, got)
+			}
+		})
 	}
 }
 

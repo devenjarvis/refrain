@@ -343,6 +343,11 @@ func renderReviewPanel(sess *agent.Session, entry *reviewDiffEntry, width, heigh
 		bodyLines = append(bodyLines, renderTaskDetailPane(entry, cursor, paneW, detailH, now)...)
 	}
 
+	// Pad body to exactly bodyH rows so the footer always pins to the bottom
+	// regardless of how many items each tab body renders.
+	paddedBody := fillHeight(strings.Join(bodyLines, "\n"), width, bodyH)
+	bodyLines = strings.Split(paddedBody, "\n")
+
 	// Assemble full panel.
 	var lines []string
 	lines = append(lines, headerLines...)
