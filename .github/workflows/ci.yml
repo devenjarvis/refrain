@@ -47,10 +47,8 @@ jobs:
           version: v2.1
           install-mode: goinstall
 
-      - name: Check formatting (gofumpt)
-        run: |
-          go install mvdan.cc/gofumpt@latest
-          test -z "$(gofumpt -l .)"
+      - name: Check formatting (gofmt)
+        run: test -z "$(gofmt -l .)"
 
   e2e:
     runs-on: ubuntu-latest

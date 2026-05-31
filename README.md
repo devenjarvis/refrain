@@ -196,7 +196,7 @@ go build -o refrain .         # build
 go test -race ./...         # run unit tests with the race detector (required before committing)
 go vet ./...                # static analysis
 golangci-lint run           # lint (config in .golangci.yml)
-gofumpt -w .                # format
+gofmt -w .                  # format
 ./refrain doctor              # validate environment + hook pipeline round-trip
 ```
 

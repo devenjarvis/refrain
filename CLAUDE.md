@@ -16,7 +16,7 @@ go test ./...               # unit tests
 go test -race ./...         # with race detector (required before commit)
 go vet ./...                # static analysis
 golangci-lint run           # lint (uses .golangci.yml)
-gofumpt -w .                # format all Go files
+gofmt -w .                  # format all Go files
 ./refrain doctor              # validate environment + hook pipeline round-trip
 ```
 
