@@ -862,7 +862,25 @@ func wrapText(s string, maxWidth int) []string {
 	return lines
 }
 
+// reviewLeftPaneWidth returns the task-ledger width for wide two-pane mode.
+// Returns 0 when width < 120 (narrow: stacked layout).
+func reviewLeftPaneWidth(width int) int {
+	if width < 120 {
+		return 0
+	}
+	w := width * 40 / 100
+	if w < 38 {
+		w = 38
+	}
+	if w > 52 {
+		w = 52
+	}
+	return w
+}
+
 // View renders the review panel — either the spec overlay or the main panel.
+// At width ≥ 120 the body is two-pane (task ledger left, diff right);
+// at width < 120 the body falls back to the stacked layout via renderReviewPanel.
 func (m *reviewPanelModel) View() string {
 	if m == nil || m.session == nil {
 		return ""
@@ -884,5 +902,78 @@ func (m *reviewPanelModel) View() string {
 			}
 		}
 	}
-	return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, checkState, m.now)
+
+	leftW := reviewLeftPaneWidth(m.width)
+	if leftW == 0 {
+		// Narrow: stacked layout.
+		return renderReviewPanel(m.session, entry, m.width, m.height, m.taskCursor, prDraftInFlight, checkState, m.now)
+	}
+
+	// Wide: two-pane layout.
+	headerLines := renderReviewHeader(m.session, m.width, m.now)
+	checksStripLines := renderChecksStrip(checkState, m.width, m.now)
+
+	footerLineCount := 3
+	draftLineCount := 0
+	if prDraftInFlight {
+		draftLineCount = 1
+	}
+	bodyH := m.height - len(headerLines) - len(checksStripLines) - footerLineCount - draftLineCount
+	if bodyH < 4 {
+		bodyH = 4
+	}
+
+	// Right pane gets remaining width after the separator.
+	rightW := innerWidth(m.width) - leftW - 1
+	if rightW < 20 {
+		rightW = 20
+	}
+
+	var body string
+	if entry == nil {
+		body = padViewBody(StyleSubtle.Render("loading diff stats…"), innerWidth(m.width), bodyH)
+	} else {
+		// Refresh viewport with current focused task's diff.
+		m.refreshDiffPane(entry, rightW, bodyH-1) // bodyH-1: 1 line for file header
+
+		leftLines := renderTaskListPane(entry, leftW, bodyH, m.taskCursor, m.now)
+		leftStr := padViewBody(strings.Join(leftLines, "\n"), leftW, bodyH)
+
+		sep := renderVerticalSeparator(bodyH)
+		rightStr := m.renderTaskDiffPane(entry, rightW, bodyH)
+
+		body = lipgloss.JoinHorizontal(lipgloss.Top, leftStr, sep, rightStr)
+	}
+
+	// Build footer.
+	var pHint string
+	if prDraftInFlight {
+		pHint = StyleSubtle.Render("p — (in progress…)")
+	} else {
+		pHint = StyleActive.Render("p") + StyleSubtle.Render(" — create or open PR")
+	}
+	hints := "  " +
+		pHint +
+		"  " + StyleActive.Render("t") + StyleSubtle.Render(" — open agent terminal") +
+		"  " + StyleWarning.Render("b") + StyleSubtle.Render(" — back to build") +
+		"  " + StyleActive.Render("f") + StyleSubtle.Render(" — flag task") +
+		"  " + StyleActive.Render("c") + StyleSubtle.Render(" — mark complete") +
+		"  " + StyleActive.Render("e") + StyleSubtle.Render(" — open in editor") +
+		"  " + StyleActive.Render("d") + StyleSubtle.Render(" — defer") +
+		"  " + StyleActive.Render("enter") + StyleSubtle.Render(" — open task diff") +
+		"  " + StyleActive.Render("?") + StyleSubtle.Render(" — spec") +
+		"  " + StyleSubtle.Render("ESC — back to focus")
+
+	var lines []string
+	lines = append(lines, headerLines...)
+	lines = append(lines, checksStripLines...)
+	lines = append(lines, strings.Split(body, "\n")...)
+	if prDraftInFlight {
+		lines = append(lines, StyleWarning.Render(reviewSpinnerFrame(m.now)+" Pushing branch and drafting PR…"))
+	}
+	lines = append(lines, "")
+	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(m.width))))
+	lines = append(lines, hints)
+
+	return strings.Join(lines, "\n")
 }

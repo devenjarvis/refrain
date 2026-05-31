@@ -236,6 +236,56 @@ func TestRenderTaskDetailPane_ShowsFilesAndCommits(t *testing.T) {
 	}
 }
 
+// TestRenderReviewPanel_RightPaneShowsFocusedTaskDiff verifies that the right
+// pane in wide mode shows the diff for the cursor-selected task and swaps
+// when the cursor moves.
+func TestRenderReviewPanel_RightPaneShowsFocusedTaskDiff(t *testing.T) {
+	rawDiff1 := "diff --git a/a.go b/a.go\nindex 000..111 100644\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n package main\n+// MARKER_TASK_1\n"
+	rawDiff2 := "diff --git a/b.go b/b.go\nindex 000..222 100644\n--- a/b.go\n+++ b/b.go\n@@ -1 +1,2 @@\n package main\n+// MARKER_TASK_2\n"
+
+	sess := agent.NewSessionForTest("sess-rightpane", "fix-auth")
+	sess.SetOriginalPrompt("Fix auth")
+	sess.MarkDone()
+
+	entry := &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "task one"},
+			{Index: 2, Text: "task two"},
+		},
+		groups: []taskReviewGroup{
+			{taskIndex: 1, rawDiff: rawDiff1},
+			{taskIndex: 2, rawDiff: rawDiff2},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictPending},
+			2: {state: verdictPending},
+		},
+	}
+
+	app := reviewTestApp()
+	app.reviewDiffCache[cacheKey("", sess.ID)] = entry
+	panel := newReviewPanel(sess, "", 140, 40, app.buildReviewDeps())
+
+	// cursor=0 → task 1 diff in right pane.
+	out0 := ansi.Strip(panel.View())
+	if !strings.Contains(out0, "MARKER_TASK_1") {
+		t.Errorf("cursor=0: right pane must show MARKER_TASK_1; got:\n%s", out0)
+	}
+	if strings.Contains(out0, "MARKER_TASK_2") {
+		t.Errorf("cursor=0: right pane must NOT show MARKER_TASK_2; got:\n%s", out0)
+	}
+
+	// cursor=1 → task 2 diff in right pane.
+	panel.taskCursor = 1
+	out1 := ansi.Strip(panel.View())
+	if !strings.Contains(out1, "MARKER_TASK_2") {
+		t.Errorf("cursor=1: right pane must show MARKER_TASK_2; got:\n%s", out1)
+	}
+	if strings.Contains(out1, "MARKER_TASK_1") {
+		t.Errorf("cursor=1: right pane must NOT show MARKER_TASK_1; got:\n%s", out1)
+	}
+}
+
 // TestRenderReviewPanel_TwoPaneLayout verifies that wide rendering composes both
 // panes side-by-side: left pane task list and right pane task detail.
 func TestRenderReviewPanel_TwoPaneLayout(t *testing.T) {

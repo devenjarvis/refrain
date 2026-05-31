@@ -3,11 +3,13 @@ package tui
 import (
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/config"
 	"github.com/devenjarvis/refrain/internal/diffmodel"
 	"github.com/devenjarvis/refrain/internal/github"
+	tuidiff "github.com/devenjarvis/refrain/internal/tui/diff"
 )
 
 // reviewPanelModel owns the keyboard, mouse, and view dispatch for the review
@@ -26,6 +28,17 @@ type reviewPanelModel struct {
 	// parsedDiffs is a lazy cache of parsed diff models keyed by taskIndex.
 	// Populated by focusedDiffModel on first access; lives with the panel.
 	parsedDiffs map[int]*diffmodel.Model
+
+	// vp is the embedded viewport for the right (diff) pane.
+	vp viewport.Model
+	// vpFileIdx is the index of the currently shown file within the focused
+	// task's diff model. Cycled with [ and ].
+	vpFileIdx int
+	// sideBySide toggles unified vs side-by-side diff rendering.
+	sideBySide bool
+	// renderersByPath caches diff.Renderer instances keyed by file path so
+	// re-renders are cheap for revisited files.
+	renderersByPath map[string]*tuidiff.Renderer
 
 	// dashboardTopY is the screen Y offset where dashboard content begins.
 	// App pushes this in via SetDashboardTopY; handleClick reads it instead of
