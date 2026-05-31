@@ -1254,4 +1254,26 @@ func TestPlanEditor_View_FooterOnLastRow(t *testing.T) {
 		editor := newPlanEditor(sess, "", 80, h)
 		assertFooter(t, editor)
 	})
+
+	t.Run("edit mode", func(t *testing.T) {
+		sess, _ := newEditorTestSession(t)
+		_ = sess.WritePlan("# Goal\nDo X\n")
+		editor := newPlanEditor(sess, "", 80, h)
+		editor, _ = editor.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+		if editor.mode != planEditorModeEdit {
+			t.Fatalf("mode = %v, want edit", editor.mode)
+		}
+		assertFooter(t, editor)
+	})
+
+	t.Run("revise input mode", func(t *testing.T) {
+		sess, _ := newEditorTestSession(t)
+		_ = sess.WritePlan("# Goal\nDo X\n")
+		editor := newPlanEditor(sess, "", 80, h)
+		editor, _ = editor.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+		if editor.mode != planEditorModeReviseInput {
+			t.Fatalf("mode = %v, want reviseInput", editor.mode)
+		}
+		assertFooter(t, editor)
+	})
 }
