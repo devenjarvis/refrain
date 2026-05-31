@@ -9,25 +9,18 @@ import (
 	"github.com/devenjarvis/refrain/internal/github"
 )
 
-const (
-	reviewTabTasks  = 0
-	reviewTabDiff   = 1
-	reviewTabChecks = 2
-)
-
 // reviewPanelModel owns the keyboard, mouse, and view dispatch for the review
-// panel. Per-panel state (cursor, active tab, spec overlay toggle) lives here;
-// cross-panel state (the reviewDiffCache keyed by session ID) stays on App
-// because its lifetime exceeds a single panel session.
+// panel. Per-panel state (cursor, spec overlay toggle) lives here; cross-panel
+// state (the reviewDiffCache keyed by session ID) stays on App because its
+// lifetime exceeds a single panel session.
 type reviewPanelModel struct {
 	session           *agent.Session
 	repoPath          string
 	taskCursor        int
-	activeTab         int
 	specOverlay       bool
 	specOverlayScroll int
-	checksCursor      int // cursor position in the Checks tab list
-	checksScroll      int // scroll offset for the Checks tab output pane
+	checksCursor      int // cursor within the inline checks strip
+	checksScroll      int // scroll offset for checks strip output
 
 	// dashboardTopY is the screen Y offset where dashboard content begins.
 	// App pushes this in via SetDashboardTopY; handleClick reads it instead of

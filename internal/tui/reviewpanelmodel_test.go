@@ -57,90 +57,77 @@ func cmdSetsError(t *testing.T, cmd tea.Cmd) string {
 	return ""
 }
 
-// TestReviewPanelModel_TabSwitching verifies 1–3 and tab/shift+tab change activeTab.
-func TestReviewPanelModel_TabSwitching(t *testing.T) {
+// TestReviewPanel_NoTabKeys verifies that the former tab-switch keys (1, 2, 3,
+// tab, shift+tab) are no longer bound. Each key must leave the rendered view
+// unchanged and emit no panelCloseMsg.
+func TestReviewPanel_NoTabKeys(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	app := reviewTestApp()
-	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
-
-	press := func(msg tea.KeyPressMsg) {
-		t.Helper()
-		_, _ = panel.Update(msg)
+	// Seed a diff entry so the Tasks-tab body is non-empty — this ensures that
+	// switching to Diff/Checks tab produces a visibly different View() output,
+	// making the "view unchanged" assertion fail before the refactor.
+	app.reviewDiffCache[cacheKey("", sess.ID)] = &reviewDiffEntry{
+		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
+		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
 
-	// Numeric keys jump directly.
-	press(keyRune('2'))
-	if panel.activeTab != reviewTabDiff {
-		t.Errorf("'2': activeTab=%d, want %d (Diff)", panel.activeTab, reviewTabDiff)
+	keys := []tea.KeyPressMsg{
+		{Code: '2', Text: "2"},
+		{Code: '3', Text: "3"},
+		{Code: tea.KeyTab},
+		{Code: tea.KeyTab, Mod: tea.ModShift},
 	}
-	press(keyRune('3'))
-	if panel.activeTab != reviewTabChecks {
-		t.Errorf("'3': activeTab=%d, want %d (Checks)", panel.activeTab, reviewTabChecks)
-	}
-	press(keyRune('1'))
-	if panel.activeTab != reviewTabTasks {
-		t.Errorf("'1': activeTab=%d, want %d (Tasks)", panel.activeTab, reviewTabTasks)
-	}
-
-	// tab increments with wrap.
-	press(keyNamed(tea.KeyTab))
-	if panel.activeTab != reviewTabDiff {
-		t.Errorf("tab: activeTab=%d, want %d (Diff)", panel.activeTab, reviewTabDiff)
-	}
-	press(keyNamed(tea.KeyTab))
-	press(keyNamed(tea.KeyTab)) // wraps from Checks back to Tasks
-	if panel.activeTab != reviewTabTasks {
-		t.Errorf("tab wrap: activeTab=%d, want %d (Tasks)", panel.activeTab, reviewTabTasks)
-	}
-
-	// shift+tab decrements with wrap (from Tasks wraps to Checks).
-	press(keyShiftNamed(tea.KeyTab))
-	if panel.activeTab != reviewTabChecks {
-		t.Errorf("shift+tab from Tasks: activeTab=%d, want %d (Checks)", panel.activeTab, reviewTabChecks)
+	for _, k := range keys {
+		// Fresh panel for each key so prior key presses don't interfere.
+		panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
+		viewBefore := panel.View()
+		_, cmd := panel.Update(k)
+		if cmd != nil {
+			msgs := runCmdAll(t, cmd)
+			if _, found := findMsg[panelCloseMsg](msgs); found {
+				t.Errorf("key %v emitted panelCloseMsg, want no-op", k)
+			}
+		}
+		if panel.View() != viewBefore {
+			t.Errorf("key %v changed panel view, want no-op (tab keys must be unbound)", k)
+		}
 	}
 }
 
-// TestReviewPanelModel_ChecksTab_JKMovesCursor verifies j/k navigate the checks list.
+// TestReviewPanelModel_ChecksTab_JKMovesCursor verifies j/k navigate the task list.
+// (Checks tab no longer exists; j/k always move the task cursor.)
 func TestReviewPanelModel_ChecksTab_JKMovesCursor(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
 
 	app := reviewTestApp()
-	app.validationRuns[cacheKey("", sess.ID)] = &validationRunState{
-		runID: 1,
-		checks: []config.ValidationCheck{
-			{Name: "A", Command: "echo a"},
-			{Name: "B", Command: "echo b"},
-			{Name: "C", Command: "echo c"},
-		},
-		results: []validationCheckResult{
-			{state: checkRunning},
-			{state: checkRunning},
-			{state: checkRunning},
+	app.reviewDiffCache[cacheKey("", sess.ID)] = &reviewDiffEntry{
+		tasks: []agent.PlanTask{
+			{Index: 1, Text: "A"},
+			{Index: 2, Text: "B"},
+			{Index: 3, Text: "C"},
 		},
 	}
 	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
-	// Switch to Checks tab.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: '3', Text: "3"})
-
 	// Press j twice.
 	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	if panel.checksCursor != 1 {
-		t.Errorf("after j: checksCursor = %d, want 1", panel.checksCursor)
+	if panel.taskCursor != 1 {
+		t.Errorf("after j: taskCursor = %d, want 1", panel.taskCursor)
 	}
 	_, _ = panel.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	if panel.checksCursor != 2 {
-		t.Errorf("after j j: checksCursor = %d, want 2", panel.checksCursor)
+	if panel.taskCursor != 2 {
+		t.Errorf("after j j: taskCursor = %d, want 2", panel.taskCursor)
 	}
 	// Press k.
 	_, _ = panel.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	if panel.checksCursor != 1 {
-		t.Errorf("after k: checksCursor = %d, want 1", panel.checksCursor)
+	if panel.taskCursor != 1 {
+		t.Errorf("after k: taskCursor = %d, want 1", panel.taskCursor)
 	}
 }
 
-// TestReviewPanelModel_ChecksTab_RKeyTriggersRerun verifies r starts a new run.
+// TestReviewPanelModel_ChecksTab_RKeyTriggersRerun verifies r starts a new run
+// regardless of which section is active (there are no tabs anymore).
 func TestReviewPanelModel_ChecksTab_RKeyTriggersRerun(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
@@ -158,14 +145,11 @@ func TestReviewPanelModel_ChecksTab_RKeyTriggersRerun(t *testing.T) {
 	}
 	panel := newReviewPanel(sess, "/repo", 120, 40, app.buildReviewDeps())
 
-	// Switch to Checks tab.
-	_, _ = panel.Update(tea.KeyPressMsg{Code: '3', Text: "3"})
-
 	priorRunID := app.validationRuns[cacheKey("/repo", sess.ID)].runID
 
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if cmd == nil {
-		t.Fatal("r on Checks tab must return a non-nil cmd")
+		t.Fatal("r must return a non-nil cmd when checks are configured")
 	}
 
 	if app.validationRuns[cacheKey("/repo", sess.ID)].runID <= priorRunID {
@@ -246,17 +230,6 @@ func TestReviewPanelModel_ChecksFieldsZeroValue(t *testing.T) {
 	}
 	if panel.checksScroll != 0 {
 		t.Errorf("checksScroll = %d, want 0", panel.checksScroll)
-	}
-}
-
-// TestReviewPanelModel_DefaultTab confirms that newReviewPanel initialises
-// activeTab to 0 (Tasks tab). Zero-value initialisation covers this, but the
-// test pins the contract so a future refactor can't silently break it.
-func TestReviewPanelModel_DefaultTab(t *testing.T) {
-	app := reviewTestApp()
-	panel := newReviewPanel(nil, "", 80, 40, app.buildReviewDeps())
-	if panel.activeTab != 0 {
-		t.Errorf("activeTab = %d, want 0 (Tasks)", panel.activeTab)
 	}
 }
 
@@ -579,17 +552,14 @@ func TestReviewPanelModel_SpaceIsNoOp(t *testing.T) {
 	}
 }
 
-// TestReviewPanelModel_ClickWithTabBarOffset verifies that a mouse click on the
-// task list pane accounts for the 2-line tab bar inserted between the header
-// and the pane body. Without the +2 offset the click lands 2 rows too high,
-// causing the cursor to land on the wrong task or be ignored as out-of-bounds.
-func TestReviewPanelModel_ClickWithTabBarOffset(t *testing.T) {
+// TestReviewPanelModel_ClickSetsTaskCursor verifies that a mouse click on the
+// task list pane moves the task cursor to the correct row.
+// Panel width 120; dashboardTopY defaults to 0.
+// renderReviewHeader returns 3 lines for this session (title+prompt+divider) → headerH=3.
+// No tab bar → paneTop=3; listHeaderLines=2 → first task row at Y=5.
+func TestReviewPanelModel_ClickSetsTaskCursor(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
 	sess.SetLifecyclePhase(agent.LifecycleInReview)
-	// Panel width 120; dashboardTopY defaults to 0.
-	// renderReviewHeader returns 3 lines for this session (title+prompt+divider) → headerH=3.
-	// Tab bar adds 2 lines → paneTop should be 5.
-	// listHeaderLines=2 → first task row at Y=7.
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{
 			{Index: 1, Text: "task one"},
@@ -610,12 +580,12 @@ func TestReviewPanelModel_ClickWithTabBarOffset(t *testing.T) {
 		t.Fatalf("precondition: cursor should be 1 after j, got %d", panel.TaskCursor())
 	}
 
-	// Click at the first task row: Y=7 (headerH=3 + tabBarH=2 + listHeaderLines=2).
-	click := tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 7}
+	// Click at the first task row: Y=5 (headerH=3 + no tabBar + listHeaderLines=2).
+	click := tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 5}
 	_, _ = panel.Update(click)
 
 	if panel.TaskCursor() != 0 {
-		t.Errorf("click at Y=7 should move cursor to row 0, got %d (tab bar offset missing?)", panel.TaskCursor())
+		t.Errorf("click at Y=5 should move cursor to row 0, got %d", panel.TaskCursor())
 	}
 }
 

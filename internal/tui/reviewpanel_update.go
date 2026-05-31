@@ -90,24 +90,6 @@ func (m *reviewPanelModel) Update(msg tea.Msg) (PanelModel, tea.Cmd) {
 // handleKey is the per-key dispatch extracted from app.go's monolithic
 // Update. Spec overlay intercepts all keys while active.
 func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) {
-	// Tab-switching keys work even while spec overlay is open.
-	switch msg.String() {
-	case "1":
-		m.activeTab = reviewTabTasks
-		return m, nil
-	case "2":
-		m.activeTab = reviewTabDiff
-		return m, nil
-	case "3":
-		m.activeTab = reviewTabChecks
-		return m, nil
-	case "tab":
-		m.activeTab = (m.activeTab + 1) % 3
-		return m, nil
-	case "shift+tab":
-		m.activeTab = (m.activeTab + 2) % 3
-		return m, nil
-	}
 
 	if m.specOverlay {
 		switch msg.String() {
@@ -176,39 +158,20 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 	case "e":
 		return m, reviewOpenIDECmd(m.session, m.repoPath, m.deps.Resolved)
 	case "j", "down":
-		switch m.activeTab {
-		case reviewTabTasks:
-			if entry := m.deps.ReviewCache(m.repoPath, m.session.ID); entry != nil {
-				maxIdx := reviewTaskCount(entry) - 1
-				if m.taskCursor < maxIdx {
-					m.taskCursor++
-				}
-			}
-		case reviewTabChecks:
-			if m.deps.ValidationRuns != nil {
-				if run := m.deps.ValidationRuns(m.repoPath, m.session.ID); run != nil {
-					maxIdx := len(run.results) - 1
-					if m.checksCursor < maxIdx {
-						m.checksCursor++
-					}
-				}
+		if entry := m.deps.ReviewCache(m.repoPath, m.session.ID); entry != nil {
+			maxIdx := reviewTaskCount(entry) - 1
+			if m.taskCursor < maxIdx {
+				m.taskCursor++
 			}
 		}
 		return m, nil
 	case "k", "up":
-		switch m.activeTab {
-		case reviewTabTasks:
-			if m.taskCursor > 0 {
-				m.taskCursor--
-			}
-		case reviewTabChecks:
-			if m.checksCursor > 0 {
-				m.checksCursor--
-			}
+		if m.taskCursor > 0 {
+			m.taskCursor--
 		}
 		return m, nil
 	case "r":
-		if m.activeTab == reviewTabChecks && m.deps.TriggerValidationRerun != nil {
+		if m.deps.TriggerValidationRerun != nil {
 			var run *validationRunState
 			if m.deps.ValidationRuns != nil {
 				run = m.deps.ValidationRuns(m.repoPath, m.session.ID)
@@ -229,18 +192,8 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 			return m, m.deps.TriggerValidationRerun(m.session.ID, m.repoPath, worktreePath, checks)
 		}
 		return m, nil
-	case "pgdown":
-		if m.activeTab == reviewTabChecks {
-			m.checksScroll += m.height - 4
-		}
-		return m, nil
-	case "pgup":
-		if m.activeTab == reviewTabChecks {
-			m.checksScroll -= m.height - 4
-			if m.checksScroll < 0 {
-				m.checksScroll = 0
-			}
-		}
+	case "pgdown", "pgup":
+		// Scroll keys will route to the embedded diff viewport in a later task.
 		return m, nil
 	case "f":
 		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
@@ -273,30 +226,27 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 			return reviewReworkRequestMsg{sessionID: sessID, repoPath: repoPath, prompt: prompt}
 		}
 	case "enter":
-		if m.activeTab == reviewTabTasks {
-			entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
-			group := reviewTaskGroupAtCursor(entry, m.taskCursor)
-			if group == nil || group.rawDiff == "" {
-				return m, nil
-			}
-			// Build "[N] task text" label using same row order as the list pane.
-			label := "Other changes"
-			if entry != nil {
-				row := 0
-				for _, t := range entry.tasks {
-					if row == m.taskCursor {
-						label = fmt.Sprintf("[%d] %s", t.Index, t.Text)
-						break
-					}
-					row++
+		entry := m.deps.ReviewCache(m.repoPath, m.session.ID)
+		group := reviewTaskGroupAtCursor(entry, m.taskCursor)
+		if group == nil || group.rawDiff == "" {
+			return m, nil
+		}
+		// Build "[N] task text" label using same row order as the list pane.
+		label := "Other changes"
+		if entry != nil {
+			row := 0
+			for _, t := range entry.tasks {
+				if row == m.taskCursor {
+					label = fmt.Sprintf("[%d] %s", t.Index, t.Text)
+					break
 				}
-			}
-			rawDiff := group.rawDiff
-			return m, func() tea.Msg {
-				return reviewOpenTaskDiffMsg{rawDiff: rawDiff, taskLabel: label}
+				row++
 			}
 		}
-		return m, nil
+		rawDiff := group.rawDiff
+		return m, func() tea.Msg {
+			return reviewOpenTaskDiffMsg{rawDiff: rawDiff, taskLabel: label}
+		}
 	case "space":
 		return m, nil
 	case "?":
@@ -320,14 +270,13 @@ func (m *reviewPanelModel) handleClick(msg tea.MouseClickMsg) {
 		return
 	}
 	headerH := len(renderReviewHeader(m.session, m.width, m.now))
-	const tabBarH = 2
-	paneTop := m.dashboardTopY + headerH + tabBarH
+	paneTop := m.dashboardTopY + headerH
 	rowIdx := reviewListPaneRowAt(entry, msg.X, msg.Y, paneTop, 0, m.width-2)
 	if rowIdx < 0 {
 		return
 	}
 	footerLines := 3
-	bodyH := m.height - m.dashboardTopY - headerH - tabBarH - footerLines
+	bodyH := m.height - m.dashboardTopY - headerH - footerLines
 	if bodyH < 4 {
 		bodyH = 4
 	}
