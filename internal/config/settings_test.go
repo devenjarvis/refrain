@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/devenjarvis/refrain/internal/config"
@@ -255,6 +256,23 @@ func TestSaveLoadRoundTrip_Repo(t *testing.T) {
 	}
 	if loaded.DefaultBranch == nil || *loaded.DefaultBranch != "trunk" {
 		t.Errorf("DefaultBranch = %v, want trunk", loaded.DefaultBranch)
+	}
+}
+
+func TestDefaultBuildSystemPrompt_TrailerContract(t *testing.T) {
+	p := config.DefaultBuildSystemPrompt
+
+	if !strings.Contains(p, "Plan-Task:") {
+		t.Error("DefaultBuildSystemPrompt must contain the literal 'Plan-Task:'")
+	}
+	if !strings.Contains(p, "trailer") {
+		t.Error("DefaultBuildSystemPrompt must contain the word 'trailer'")
+	}
+	if strings.Contains(p, "[task ") {
+		t.Error("DefaultBuildSystemPrompt must NOT contain the legacy '[task ' subject token")
+	}
+	if !strings.Contains(p, "NEVER squash") || !strings.Contains(p, "NEVER amend") {
+		t.Error("DefaultBuildSystemPrompt must preserve the never-squash / never-amend clause")
 	}
 }
 

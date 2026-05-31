@@ -2345,8 +2345,8 @@ func TestManager_StopHookRefreshesCommitTaskCount(t *testing.T) {
 	sess.SetLifecyclePhase(LifecycleInProgress)
 
 	// Make two task commits in the worktree.
-	makeTestCommit(t, sess.Worktree.Path, "[task 1] first")
-	makeTestCommit(t, sess.Worktree.Path, "[task 2] second")
+	makeTestCommitWithTaskTrailer(t, sess.Worktree.Path, "feat: first", 1)
+	makeTestCommitWithTaskTrailer(t, sess.Worktree.Path, "feat: second", 2)
 
 	// Send a Stop event — dispatcher should fire RefreshCommitTaskCount in a goroutine.
 	if err := hook.SendEvent(mgr.HookSocketPath(), hook.Event{
@@ -2392,7 +2392,7 @@ func TestManager_StopHookSkipsRefreshAfterMarkDone(t *testing.T) {
 	sess.SetLifecyclePhase(LifecycleReadyForReview)
 
 	// Make commits that would produce a smaller count if incorrectly refreshed.
-	makeTestCommit(t, sess.Worktree.Path, "[task 1] should not be counted")
+	makeTestCommitWithTaskTrailer(t, sess.Worktree.Path, "feat: should not be counted", 1)
 
 	if err := hook.SendEvent(mgr.HookSocketPath(), hook.Event{
 		Kind:    hook.KindStop,
@@ -2426,7 +2426,7 @@ func TestManager_StopHookSkipsRefreshOutsideBuilding(t *testing.T) {
 	}
 
 	// Leave lifecycle as LifecyclePlanning (default).
-	makeTestCommit(t, sess.Worktree.Path, "[task 1] should not be counted")
+	makeTestCommitWithTaskTrailer(t, sess.Worktree.Path, "feat: should not be counted", 1)
 
 	if err := hook.SendEvent(mgr.HookSocketPath(), hook.Event{
 		Kind:    hook.KindStop,

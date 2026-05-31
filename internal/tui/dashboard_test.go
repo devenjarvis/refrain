@@ -563,8 +563,8 @@ func TestFirstUncompletedTask(t *testing.T) {
 	// Spec/Verification stray-checkbox case mirrors the same scoping rule
 	// planTaskCounts uses (agent.ScanTaskLines): when a "## Tasks" heading
 	// is present, only checkboxes inside that section count — otherwise the
-	// commit-to-task prefix mapping ("[task N]") and the displayed "current
-	// task" disagree on which item is being worked on.
+	// Plan-Task trailer mapping and the displayed "current task" disagree on
+	// which item is being worked on.
 	for _, tc := range []struct {
 		name string
 		plan string
@@ -606,11 +606,10 @@ func TestFirstUncompletedTask(t *testing.T) {
 
 // TestFirstUncompletedTask_ConsistentWithPlanTaskCounts pins the structural
 // invariant the scoping bug violated: the planning card cannot display a
-// "current task" that planTaskCounts treats as nonexistent, because the
-// "[task N]" commit prefix the build agent emits is derived from
-// planTaskCounts' scope. If firstUncompletedTask surfaces a Spec checkbox
-// while planTaskCounts counts only Tasks-section items, the UI would show
-// "1/0 tasks · current task: <spec item>" — nonsensical.
+// "current task" that planTaskCounts treats as nonexistent. If
+// firstUncompletedTask surfaces a Spec checkbox while planTaskCounts counts
+// only Tasks-section items, the UI would show "1/0 tasks · current task:
+// <spec item>" — nonsensical.
 func TestFirstUncompletedTask_ConsistentWithPlanTaskCounts(t *testing.T) {
 	for _, tc := range []struct {
 		name string

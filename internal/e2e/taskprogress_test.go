@@ -66,7 +66,7 @@ session:
   id: "e2e-tp-build"
   model: "claude-sonnet-4-6"
 turns:
-  - exec: "echo featureA > featureA.txt && git add featureA.txt && git commit -m '[task 1] Create feature A'"
+  - exec: "echo featureA > featureA.txt && git add featureA.txt && git commit -m 'feat: create feature A' -m 'Plan-Task: 1'"
     assistant:
       - type: text
         text: "Completed task 1."
@@ -82,7 +82,7 @@ session:
   id: "e2e-tp-build"
   model: "claude-sonnet-4-6"
 turns:
-  - exec: "echo featureB > featureB.txt && git add featureB.txt && git commit -m '[task 2] Create feature B'"
+  - exec: "echo featureB > featureB.txt && git add featureB.txt && git commit -m 'feat: create feature B' -m 'Plan-Task: 2'"
     assistant:
       - type: text
         text: "Completed task 2."
@@ -98,7 +98,7 @@ session:
   id: "e2e-tp-build"
   model: "claude-sonnet-4-6"
 turns:
-  - exec: "echo featureC > featureC.txt && git add featureC.txt && git commit -m '[task 3] Create feature C'"
+  - exec: "echo featureC > featureC.txt && git add featureC.txt && git commit -m 'feat: create feature C' -m 'Plan-Task: 3'"
     assistant:
       - type: text
         text: "Completed task 3."
