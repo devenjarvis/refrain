@@ -272,3 +272,147 @@ func TestNewSession_ShiftEnterInsertsNewline(t *testing.T) {
 		t.Fatal("shift+enter must not close the model")
 	}
 }
+
+func openModelWithDefaults() newSessionModel {
+	m := newNewSessionModel()
+	m.SetSize(140, 40)
+	m.SetDefaults(config.ResolvedSettings{
+		PlanModel:  config.KnownModels[0],
+		AgentModel: config.KnownAgentModels[0],
+	})
+	m.Open(ViewDashboard)
+	return m
+}
+
+func TestNewSession_Tab_MovesFocusFromTextareaToOverrides(t *testing.T) {
+	m := openModelWithDefaults()
+	if m.overrideFocus != -1 {
+		t.Fatalf("initial overrideFocus = %d, want -1 (textarea)", m.overrideFocus)
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	if m.overrideFocus != 0 {
+		t.Errorf("after one tab: overrideFocus = %d, want 0", m.overrideFocus)
+	}
+	if m.textarea.Focused() {
+		t.Error("textarea should be blurred when overrideFocus >= 0")
+	}
+}
+
+func TestNewSession_TabWalksOverrideFields(t *testing.T) {
+	m := openModelWithDefaults()
+	n := len(m.overrideFields)
+	for i := 0; i < n; i++ {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+		if m.overrideFocus != i {
+			t.Errorf("after %d tabs: overrideFocus = %d, want %d", i+1, m.overrideFocus, i)
+		}
+	}
+	// One more tab past the last field wraps back to textarea.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	if m.overrideFocus != -1 {
+		t.Errorf("tab past last field: overrideFocus = %d, want -1 (textarea)", m.overrideFocus)
+	}
+	if !m.textarea.Focused() {
+		t.Error("textarea should be focused when overrideFocus == -1")
+	}
+}
+
+func TestNewSession_ShiftTabReverses(t *testing.T) {
+	m := openModelWithDefaults()
+	// Start at textarea (overrideFocus=-1), shift+tab wraps to last field.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift, Text: "shift+tab"})
+	n := len(m.overrideFields)
+	if m.overrideFocus != n-1 {
+		t.Errorf("shift+tab from textarea: overrideFocus = %d, want %d (last field)", m.overrideFocus, n-1)
+	}
+	// shift+tab from last field goes to second-to-last.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift, Text: "shift+tab"})
+	if m.overrideFocus != n-2 {
+		t.Errorf("shift+tab from last: overrideFocus = %d, want %d", m.overrideFocus, n-2)
+	}
+}
+
+func TestNewSession_LeftRight_CyclesSelectOption(t *testing.T) {
+	m := openModelWithDefaults()
+	// Tab to Plan Model (index 0, a select field).
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	if m.overrideFocus != 0 {
+		t.Fatalf("overrideFocus = %d, want 0", m.overrideFocus)
+	}
+	initial := m.overrideFields[0].selected
+	// Right should advance selection.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight, Text: "right"})
+	want := (initial + 1) % len(m.overrideFields[0].options)
+	if m.overrideFields[0].selected != want {
+		t.Errorf("after right: selected = %d, want %d", m.overrideFields[0].selected, want)
+	}
+	// Left should retreat selection.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Text: "left"})
+	if m.overrideFields[0].selected != initial {
+		t.Errorf("after left: selected = %d, want %d (initial)", m.overrideFields[0].selected, initial)
+	}
+}
+
+func TestNewSession_Space_TogglesBypass(t *testing.T) {
+	m := openModelWithDefaults()
+	// Tab to last field (Bypass Permissions, a toggle).
+	n := len(m.overrideFields)
+	for i := 0; i < n; i++ {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	}
+	if m.overrideFocus != n-1 {
+		t.Fatalf("expected focus on last field (%d), got %d", n-1, m.overrideFocus)
+	}
+	before := m.overrideFields[n-1].toggleValue
+	m, _ = m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	if m.overrideFields[n-1].toggleValue == before {
+		t.Error("space on toggle field should flip toggleValue")
+	}
+}
+
+func TestNewSession_EnterOnOverrideField_DoesNotSubmit(t *testing.T) {
+	m := openModelWithDefaults()
+	m.textarea.SetValue("my goal")
+	// Move focus to first override field.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	// Press enter — should NOT emit submit.
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	if cmd != nil {
+		msg := cmd()
+		if _, ok := msg.(promptModalSubmitMsg); ok {
+			t.Fatal("enter on override field should NOT emit promptModalSubmitMsg")
+		}
+	}
+	if !m.active {
+		t.Error("model should remain active; enter on override field is not a submit")
+	}
+}
+
+func TestNewSession_EnterOnSelectField_CyclesSelection(t *testing.T) {
+	m := openModelWithDefaults()
+	// Tab to Plan Model (select field, index 0).
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	before := m.overrideFields[0].selected
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	want := (before + 1) % len(m.overrideFields[0].options)
+	if m.overrideFields[0].selected != want {
+		t.Errorf("enter on select: selected = %d, want %d", m.overrideFields[0].selected, want)
+	}
+}
+
+func TestNewSession_EscCancelsFromOverrideField(t *testing.T) {
+	m := openModelWithDefaults()
+	// Move focus to override.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	// Esc should cancel.
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd == nil {
+		t.Fatal("esc from override field should emit cancel cmd")
+	}
+	if _, ok := cmd().(promptModalCancelMsg); !ok {
+		t.Fatal("esc from override field should emit promptModalCancelMsg")
+	}
+	if m.active {
+		t.Error("model should deactivate on esc")
+	}
+}

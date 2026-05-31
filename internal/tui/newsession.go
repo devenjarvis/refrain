@@ -188,14 +188,87 @@ func (m *newSessionModel) Close() {
 	m.textarea.Blur()
 }
 
-// Update routes a tea.Msg. Intercepts esc / enter / ctrl+enter for control;
-// all other messages (including ctrl+j via InsertNewline) go to the textarea.
+// Update routes a tea.Msg. Intercepts focus-navigation (tab/shift+tab),
+// override-field interaction (enter/space/left/right/h/l) when focus is on a
+// form row, and esc/enter/ctrl+enter for cancel/submit from the textarea.
+// ctrl+j/shift+enter/alt+enter still reach the textarea for newline insertion.
 func (m newSessionModel) Update(msg tea.Msg) (newSessionModel, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "esc":
+			// Cancel from any focus state.
 			m.Close()
 			return m, func() tea.Msg { return promptModalCancelMsg{} }
+
+		case "tab":
+			// Advance focus: textarea → field0 → … → fieldn → textarea.
+			n := len(m.overrideFields)
+			if n == 0 {
+				break
+			}
+			if m.overrideFocus == -1 {
+				m.overrideFocus = 0
+				m.textarea.Blur()
+			} else if m.overrideFocus < n-1 {
+				m.overrideFocus++
+			} else {
+				m.overrideFocus = -1
+				return m, m.textarea.Focus()
+			}
+			return m, nil
+
+		case "shift+tab":
+			// Retreat focus: textarea → fieldn → … → field0 → textarea.
+			n := len(m.overrideFields)
+			if n == 0 {
+				break
+			}
+			if m.overrideFocus == -1 {
+				m.overrideFocus = n - 1
+				m.textarea.Blur()
+			} else if m.overrideFocus > 0 {
+				m.overrideFocus--
+			} else {
+				m.overrideFocus = -1
+				return m, m.textarea.Focus()
+			}
+			return m, nil
+		}
+
+		// Field-level key handling when an override row has focus.
+		if m.overrideFocus >= 0 && m.overrideFocus < len(m.overrideFields) {
+			f := &m.overrideFields[m.overrideFocus]
+			switch key.String() {
+			case "enter", "right", "l":
+				if f.kind == overrideFieldSelect && len(f.options) > 0 {
+					f.selected = (f.selected + 1) % len(f.options)
+				} else if f.kind == overrideFieldToggle {
+					f.toggleValue = !f.toggleValue
+				}
+				return m, nil
+			case "left", "h":
+				if f.kind == overrideFieldSelect && len(f.options) > 0 {
+					f.selected = (f.selected - 1 + len(f.options)) % len(f.options)
+				}
+				return m, nil
+			case "space":
+				if f.kind == overrideFieldToggle {
+					f.toggleValue = !f.toggleValue
+				} else if f.kind == overrideFieldSelect && len(f.options) > 0 {
+					f.selected = (f.selected + 1) % len(f.options)
+				}
+				return m, nil
+			}
+			// Absorb ctrl+enter / enter already handled above; other keys
+			// (including ctrl+enter when focus is on a field) are swallowed.
+			if key.String() == "ctrl+enter" {
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Textarea-focused submit/cancel paths.
+		switch key.String() {
 		case "ctrl+enter":
 			val := strings.TrimSpace(m.textarea.Value())
 			if val == "" {
