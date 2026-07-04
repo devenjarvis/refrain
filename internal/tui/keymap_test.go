@@ -11,19 +11,14 @@ import (
 // to more than one action in the default map. A duplicate would mean two
 // actions race for the same press — the dispatch order would silently win and
 // the loser would be unreachable.
-//
-// Exceptions: "enter" appears on both Activate (space/enter on a session
-// card) and OpenRepoCfg (enter/right on a repo header). The dashboard
-// disambiguates by item kind, not by key, so the overlap is intentional.
 func TestDefaultKeyMap_NoDuplicateBindings(t *testing.T) {
 	km := DefaultKeyMap()
-	allowed := map[string]bool{"enter": true}
 
 	seen := map[string]string{} // key -> action name
 	check := func(action string, keys []string) {
 		t.Helper()
 		for _, k := range keys {
-			if prior, ok := seen[k]; ok && !allowed[k] {
+			if prior, ok := seen[k]; ok {
 				t.Errorf("key %q bound to both %s and %s", k, prior, action)
 			}
 			seen[k] = action
@@ -34,12 +29,9 @@ func TestDefaultKeyMap_NoDuplicateBindings(t *testing.T) {
 	check("Up", km.Up)
 	check("Down", km.Down)
 	check("Activate", km.Activate)
-	check("OpenRepoCfg", km.OpenRepoCfg)
 	check("NextRepo", km.NextRepo)
 	check("NewSession", km.NewSession)
 	check("AddAgent", km.AddAgent)
-	check("BuildAdvance", km.BuildAdvance)
-	check("MarkReady", km.MarkReady)
 	check("OpenReview", km.OpenReview)
 	check("OpenTerminal", km.OpenTerminal)
 	check("OpenIDE", km.OpenIDE)

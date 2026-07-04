@@ -92,7 +92,7 @@ func (a *App) initRepoConfigForm(repoPath string) {
 	a.pendingChecks = append([]config.ValidationCheck(nil), rs.ValidationChecks...)
 	fields = addAction(fields, "Validation Checks", repoChecksHint(a.pendingChecks))
 
-	form := newConfigForm(fields, a.dashboard.fixedTermWidth())
+	form := newConfigForm(fields, a.width)
 	a.openConfigForm(&form, repoPath)
 }
 
@@ -167,10 +167,11 @@ func (a App) updateRepoChecks(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.closeRepoChecksEditor()
 		return a, nil
 	case tea.KeyPressMsg:
-		a.wellness.RecordInput()
-		var cmd tea.Cmd
-		a.dashboard, cmd = a.dashboard.Update(msg, a.dashboardProps())
-		return a, cmd
+		if editor := a.modals.RepoChecks(); editor != nil {
+			var cmd tea.Cmd
+			*editor, cmd = editor.Update(msg)
+			return a, cmd
+		}
 	}
 	return a, nil
 }

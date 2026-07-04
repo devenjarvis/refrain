@@ -13,7 +13,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/audio"
 	"github.com/devenjarvis/refrain/internal/config"
@@ -177,6 +176,8 @@ type App struct {
 
 	view         ViewMode
 	dashboard    dashboardModel
+	sessionList  sessionListModel // root screen: repo-grouped flat session list
+	launch       launchModel      // fullscreen agent terminal (focusLaunch)
 	diff         diffModel
 	globalConfig globalConfigModel
 
@@ -193,8 +194,7 @@ type App struct {
 	// flushed to the wellness log on quit. See wellness.go.
 	wellness wellnessState
 
-	sessionLimitModalActive bool
-	cursor                  FocusedCursor // pipeline cursor: section + per-section indices
+	cursor FocusedCursor // legacy pipeline cursor; unused by the session list (deleted in Phase 5)
 	// modals owns panel focus and the lifetime of every overlay model. The
 	// invariant "the model for panelFocus X is non-nil iff modals.Current() == X"
 	// is enforced by the Modals type; see internal/tui/modals.go. App callers
@@ -224,10 +224,9 @@ type App struct {
 	// handlePlanEditorAbandon, and revise/retry cleanup paths.
 	pendingOverrides map[string]sessionOverrides
 
-	// Pipeline mouse click tracking for double-click detection.
-	lastPipelineClick    time.Time
-	lastPipelineClickSec focusSection
-	lastPipelineClickIdx int
+	// Session-list mouse click tracking for double-click detection.
+	lastListClick    time.Time
+	lastListClickIdx int
 
 	ghClient        *github.Client
 	prCache         map[string]*prCacheEntry   // keyed by cacheKey(repoPath, sessionID)
@@ -332,6 +331,7 @@ func NewApp() App {
 		view:             ViewDashboard,
 		debugDumpPath:    os.Getenv("REFRAIN_E2E_DEBUG_DUMP"),
 		dashboard:        newDashboardModel(),
+		sessionList:      newSessionListModel(),
 		cursor:           NewFocusedCursor(),
 		keys:             DefaultKeyMap(),
 		wellness:         newWellnessState(),
@@ -493,7 +493,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Route to the active view.
 	switch a.view {
 	case ViewDashboard:
-		return a.updateDashboard(msg)
+		return a.updateSessionList(msg)
 	case ViewDiff:
 		return a.updateDiff(msg)
 	case ViewFileBrowser:
@@ -546,32 +546,17 @@ func (a *App) addRepo(path string) tea.Cmd {
 	return nil
 }
 
-// resizeAgentForDashboard resizes a specific agent to the dashboard preview dimensions.
-func (a *App) resizeAgentForDashboard(ag *agent.Agent) {
-	if ag == nil {
+// resizeAllAgents resizes every agent to the fullscreen terminal geometry.
+// Called on WindowSizeMsg so all agents match the new terminal size — there
+// is no preview pane, so every agent shares the launch-view dimensions.
+func (a *App) resizeAllAgents() {
+	rows := a.agentTermRows()
+	cols := a.agentTermCols()
+	if rows <= 0 || cols <= 0 {
 		return
 	}
-	w := a.dashboard.fixedTermWidth()
-	h := a.dashboard.fixedTermHeight()
-	if w > 0 && h > 0 {
-		ag.Resize(h, w)
-	}
-}
-
-// resizeAllForDashboard resizes every agent to the dashboard preview dimensions.
-// Called on WindowSizeMsg so all agents match the new terminal size.
-func (a *App) resizeAllForDashboard() {
-	w := a.dashboard.fixedTermWidth()
-	h := a.dashboard.fixedTermHeight()
-	if w <= 0 || h <= 0 {
-		return
-	}
-	launchAgent := a.modals.LaunchAgent()
 	for _, ag := range a.listItems().agents() {
-		if launchAgent != nil && ag.ID == launchAgent.ID {
-			continue
-		}
-		ag.Resize(h, w)
+		ag.Resize(rows, cols)
 	}
 }
 
@@ -607,51 +592,6 @@ func (a *App) openNewSession(returnTo ViewMode) tea.Cmd {
 	resolved := a.resolvedCache[a.activeRepo]
 	a.newSession.SetDefaults(resolved)
 	return a.newSession.Open(returnTo)
-}
-
-// focusLaunchTermHeight returns the terminal height for the focusLaunch view,
-// accounting for the header row and the tab bar row.
-func (a *App) focusLaunchTermHeight() int {
-	return a.dashboard.height - 2
-}
-
-// focusLaunchTabIndexAt returns the agent index in focusLaunchSession for a
-// tab bar click at column x, or -1 if x doesn't land on any tab. Uses the same
-// label formula as renderFocusLaunchTabBar so click targets stay in sync.
-func (a *App) focusLaunchTabIndexAt(x int) int {
-	sess := a.modals.LaunchSession()
-	if sess == nil {
-		return -1
-	}
-	agents := sess.Agents()
-	col := 0
-	for i, ag := range agents {
-		label := focusLaunchTabText(ag)
-		w := ansi.StringWidth(label)
-		if x >= col && x < col+w {
-			return i
-		}
-		col += w + 2 // 2-space separator between tabs
-	}
-	return -1
-}
-
-// screenToTermCellFocusLaunch converts a screen-space mouse coordinate to a VT
-// cell coordinate for the fullscreen focusLaunch agent terminal.
-func (a *App) screenToTermCellFocusLaunch(screenX, screenY int) (termX, termY int, inViewport bool) {
-	dashboardTopY := 0
-	if a.err != "" {
-		dashboardTopY++
-	}
-	if a.confirmQuit {
-		dashboardTopY++
-	}
-	termX = screenX
-	termY = screenY - dashboardTopY - 2
-	w := a.dashboard.width
-	h := a.dashboard.height - 2
-	inViewport = termX >= 0 && termX < w && termY >= 0 && termY < h
-	return termX, termY, inViewport
 }
 
 // panelCloseMsg asks App to drop the active overlay panel and return focus to
@@ -899,195 +839,11 @@ func (a *App) listItems() listItems {
 	return items
 }
 
-// clampCursor keeps the pipeline cursor in range as sessions transition phases
-// or are killed. Replaces the cursor-clamping side effect that the old
-// refreshAgentList performed; call it after any mutation that can change the
-// per-section row counts.
+// clampCursor keeps the session-list cursor and scroll in range as sessions
+// are created, killed, or complete. Call after any mutation that can change
+// the row list.
 func (a *App) clampCursor() {
-	a.cursor.Clamp(a.listItems().sectionCounts())
-}
-
-// dashboardProps assembles the per-frame snapshot the dashboard renders from.
-// Built fresh on every View()/Update so the dashboard never holds a mirror of
-// App state (CONVENTIONS.md §5/§6). All time-derived fields are computed
-// against the tick-refreshed render clock (a.dashboard.now), never time.Now(),
-// so this stays pure when called from View() (§5).
-func (a *App) dashboardProps() dashboardProps {
-	now := a.dashboard.now
-	var focusBreakElapsed time.Duration
-	if a.wellness.focusBreakMode {
-		focusBreakElapsed = now.Sub(a.wellness.focusBreakStart)
-	}
-	return dashboardProps{
-		panelFocus:         a.modals.Current(),
-		repoConfigForm:     a.modals.Config(),
-		configRepoPath:     a.modals.ConfigRepoPath(),
-		repoChecksEditor:   a.modals.RepoChecks(),
-		repoChecksRepoPath: a.modals.RepoChecksRepoPath(),
-		focusLaunchAgent:   a.modals.LaunchAgent(),
-		focusLaunchSession: a.modals.LaunchSession(),
-
-		cursor: a.cursor,
-
-		sessionElapsed:         a.wellness.EffectiveElapsedAt(now),
-		focusSessionMinutes:    a.wellness.focusSessionMinutes,
-		focusBreakMode:         a.wellness.focusBreakMode,
-		focusBreakElapsed:      focusBreakElapsed,
-		focusBlockCount:        a.wellness.focusBlockCount,
-		focusBreakMinutes:      a.wellness.focusBreakMinutes,
-		focusBreakAnimFrame:    a.wellness.focusBreakAnimFrame,
-		focusBreakShortWarning: a.wellness.focusBreakShortWarning,
-		focusBreakTimerUp:      a.wellness.focusBreakTimerUp,
-
-		prDraftSessionID: a.prDraftSessionID,
-		prDraftRepoPath:  a.prDraftRepoPath,
-
-		activeRepoName: a.activeRepoDisplayName(),
-		activeRepoPath: a.activeRepo,
-
-		prCache:         a.prCache,
-		closingSessions: a.closingSessions,
-
-		items: a.listItems(),
-	}
-}
-
-// pipelineHitTest maps a mouse-click Y coordinate (relative to the dashboard
-// content origin, not screen) to the session under the click. Mirrors the
-// vertical layout in dashboardModel.renderFullscreenFocus, walking sections in
-// focusSectionsInOrder():
-//
-//	row 0:                 header line
-//	row 1:                 separator
-//	rows 2..5:             pipeline widget (4 rows)
-//	row 6:                 blank
-//	(per non-empty section, in order Planning → Building → Reviewing → Shipping:)
-//	  label row + N rows per item (4 for Planning, 4–5 for Building cards depending on plan progress, 2 for Reviewing/Shipping)
-//	  blank row between rows; trailing blank row before next section
-//
-// Returns (section, index, true) when the click landed on a session row,
-// otherwise ok=false. dashboardContentY is the click's Y relative to the
-// dashboard content origin (i.e. screenY - dashboardTopY).
-func (a *App) pipelineHitTest(dashboardContentY int) (focusSection, int, bool) {
-	const (
-		headerRows   = 1
-		sepRows      = 1
-		pipelineRows = 4
-		blankRows    = 1
-		labelRows    = 1
-		cardRows     = 4
-		queueRows    = 2
-	)
-	rowsPerItem := func(s focusSection) int {
-		switch s {
-		case focusSectionPlanning, focusSectionBuilding:
-			return cardRows
-		default:
-			return queueRows
-		}
-	}
-
-	allItems := a.listItems()
-	rowCursor := headerRows + sepRows + pipelineRows + blankRows
-	for _, section := range focusSectionsInOrder() {
-		items := allItems.sectionItems(section)
-		if len(items) == 0 {
-			continue
-		}
-		rowCursor += labelRows
-		for i := range items {
-			rowH := rowsPerItem(section)
-			start := rowCursor
-			end := start + rowH
-			if dashboardContentY >= start && dashboardContentY < end {
-				return section, i, true
-			}
-			rowCursor = end
-			if i < len(items)-1 {
-				rowCursor += blankRows
-			}
-		}
-		rowCursor += blankRows
-	}
-	return focusSectionPlanning, 0, false
-}
-
-// cursorSelectedSession returns the session under the pipeline cursor, or nil
-// when the cursor's section is empty. Workflow keys (c, x, X, t, e, p, d) use
-// this because the pipeline addresses sessions by section + index, derived
-// fresh from a.listItems().
-func (a *App) cursorSelectedSession() *agent.Session {
-	section := a.cursor.Section()
-	items := a.listItems().sectionItems(section)
-	if len(items) == 0 {
-		return nil
-	}
-	idx := a.cursor.Index(section)
-	if idx < 0 || idx >= len(items) {
-		idx = 0
-	}
-	return items[idx].session
-}
-
-// cursorSelectedRepoPath returns the repo path of the session under the
-// pipeline cursor, or the active repo when no session is selected.
-func (a *App) cursorSelectedRepoPath() string {
-	sess := a.cursorSelectedSession()
-	if sess != nil {
-		// Find the repo that owns this session.
-		for _, item := range a.listItems() {
-			if item.kind == listItemSession && item.session == sess {
-				return item.repoPath
-			}
-			if item.kind == listItemAgent && item.session == sess {
-				return item.repoPath
-			}
-		}
-	}
-	return a.activeRepo
-}
-
-// activateFocusCursor opens the row currently under the fullscreen-focus
-// cursor. Planning + Building rows jump into a focusLaunch terminal so the
-// user can drive the agent. Reviewing rows open the review panel. Shipping
-// rows open the PR URL when one is cached, otherwise fall back to the agent
-// terminal so the user can run gh manually. Returns ok=false when the cursor's
-// section has no actionable row.
-func (a *App) activateFocusCursor() (tea.Cmd, bool) {
-	section := a.cursor.Section()
-	items := a.listItems().sectionItems(section)
-	if len(items) == 0 {
-		return nil, false
-	}
-	idx := a.cursor.Index(section)
-	if idx >= len(items) {
-		idx = len(items) - 1
-	}
-	sess := items[idx].session
-
-	switch section {
-	case focusSectionPlanning:
-		// Planning rows open the plan editor — there is no agent yet to drop
-		// into a focusLaunch terminal. Drafting sessions also live in the
-		// Planning section; the editor renders a "Drafting…" placeholder
-		// until the background draft lands and reloads.
-		a.openPlanEditor(sess, items[idx].repoPath)
-		return nil, true
-	case focusSectionBuilding:
-		return nil, a.openSessionInFocusLaunch(sess, items[idx].repoPath)
-	case focusSectionReview:
-		sess.SetLifecyclePhase(agent.LifecycleInReview)
-		rp := items[idx].repoPath
-		a.openReviewPanel(sess, rp)
-		if _, ok := a.reviewDiffCache[cacheKey(rp, sess.ID)]; !ok {
-			return a.fetchReviewDiffCmd(sess, rp), true
-		}
-		return nil, true
-	case focusSectionShipping:
-		a.openShippingPanel(sess, items[idx].repoPath)
-		return nil, true
-	}
-	return nil, false
+	a.sessionList.clamp(buildSessionListLayout(a.listItems()))
 }
 
 // openSessionInFocusLaunch picks the most-active agent in sess and opens it
@@ -1113,8 +869,9 @@ func (a *App) openSessionInFocusLaunch(sess *agent.Session, repoPath string) boo
 		}
 	}
 	a.openLaunchPanel(sess, target, repoPath)
-	a.dashboard.scrollOffset = 0
-	target.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+	a.launch.scrollOffset = 0
+	a.launch.clearSelection()
+	target.Resize(a.agentTermRows(), a.agentTermCols())
 	return true
 }
 
@@ -1152,75 +909,10 @@ func (a App) View() tea.View {
 			v.AltScreen = true
 			return v
 		}
-		props := a.dashboardProps()
-		body := a.dashboard.View(props)
-		hints := dashboardHints
-		switch props.panelFocus {
-		case focusConfig:
-			hints = repoConfigHints
-		case focusRepoChecks:
-			hints = repoChecksHints
-		case focusLaunch:
-			hints = focusLaunchHints
-		}
-		// `b` is dual-purpose: it advances a Planning session to Building when
-		// the cursor is on Planning, and otherwise triggers the wellness break.
-		// We expose this through a single hint slot to keep the bar from
-		// overflowing 120 cols — when the cursor is not on Planning AND the
-		// wellness timer is enabled, swap the desc on the static `b` entry to
-		// "break". Skip in focusLaunch: b routes to the agent terminal there.
-		if props.panelFocus != focusLaunch {
-			if a.wellness.focusBreakMode {
-				if a.wellness.focusBreakTimerUp {
-					hints = []keyHint{{key: "b", desc: "resume focus"}}
-				} else {
-					hints = []keyHint{{key: "b", desc: "exit early"}}
-				}
-			} else if a.cursor.Section() != focusSectionPlanning && a.wellness.focusSessionMinutes > 0 {
-				// Copy first — `hints := dashboardHints` aliases the package
-				// var's backing array, and we'd otherwise mutate it globally.
-				hints = append([]keyHint(nil), hints...)
-				for i := range hints {
-					if hints[i].key == "b" {
-						hints[i].desc = "break"
-						break
-					}
-				}
-			}
-		}
+		body, hints := a.rootBodyView()
 		// PR compose modal overlay.
 		if a.prComposeModal.Active() {
 			body = a.prComposeModal.View()
-		}
-		// Agent-limit modal overlay: replace body with centered modal when active.
-		if a.sessionLimitModalActive {
-			modalW := a.width / 2
-			if modalW > 60 {
-				modalW = 60
-			}
-			if modalW < 40 {
-				modalW = 40
-			}
-			activeCount := a.activeSessionCount()
-			limitLine := StyleWarning.Render(fmt.Sprintf(
-				"You're already running %d active sessions — beyond ~3, oversight cost exceeds output value.",
-				activeCount,
-			))
-			overlayContent := lipgloss.JoinVertical(
-				lipgloss.Left,
-				StyleTitle.Render("Focus limit reached"),
-				"",
-				limitLine,
-				"",
-				"Press [n] again to spawn anyway",
-				"Any other key to cancel",
-			)
-			overlay := lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				Padding(0, 1).
-				Width(modalW).
-				Render(overlayContent)
-			body = placeCentered(a.width, a.height-statusBarHeight, overlay)
 		}
 		statusbar := renderStatusBar(hints, a.width)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, statusbar)
@@ -1268,23 +960,49 @@ func (a App) View() tea.View {
 	v.AltScreen = true
 	if a.view == ViewDashboard {
 		v.MouseMode = tea.MouseModeCellMotion
-		if ag := a.modals.LaunchAgent(); ag != nil && a.dashboard.scrollOffset == 0 {
+		if ag := a.modals.LaunchAgent(); ag != nil && a.launch.scrollOffset == 0 {
 			if !ag.IsAltScreen() && ag.CursorVisible() {
 				cursorX, cursorY := ag.CursorPosition()
-				dashboardTopY := 0
-				if a.err != "" {
-					dashboardTopY++
-				}
-				if a.confirmQuit {
-					dashboardTopY++
-				}
 				screenX := cursorX
-				screenY := cursorY + dashboardTopY + 2 // header row + tab bar row
+				screenY := cursorY + a.dashboardTopY() + 2 // header row + tab bar row
 				v.Cursor = tea.NewCursor(screenX, screenY)
 			}
 		}
 	}
 	return v
+}
+
+// rootBodyView renders the ViewDashboard body — the session list, the
+// fullscreen agent terminal, or a config overlay — plus the matching status
+// bar hints. Shared by View and the e2e debug dump so both emit the same
+// frame.
+func (a *App) rootBodyView() (string, []keyHint) {
+	switch {
+	case a.modals.Is(focusLaunch) && a.modals.LaunchAgent() != nil:
+		return a.launch.View(a.modals.LaunchSession(), a.modals.LaunchAgent()), focusLaunchHints
+	case a.modals.Config() != nil:
+		repoPath := a.modals.ConfigRepoPath()
+		return renderRepoConfigModal(a.modals.Config(), a.repoDisplayName(repoPath), repoPath,
+			a.width, a.height-statusBarHeight), repoConfigHints
+	case a.modals.RepoChecks() != nil:
+		return renderRepoChecksModal(a.modals.RepoChecks(), a.modals.RepoChecksRepoPath(),
+			a.width, a.height-statusBarHeight), repoChecksHints
+	default:
+		return a.sessionList.View(a.sessionListProps()), sessionListHints
+	}
+}
+
+// repoDisplayName returns the display name (alias or base path) for any
+// configured repo path.
+func (a *App) repoDisplayName(repoPath string) string {
+	if a.cfg != nil {
+		for _, repo := range a.cfg.Repos {
+			if repo.Path == repoPath {
+				return repo.DisplayName()
+			}
+		}
+	}
+	return filepath.Base(repoPath)
 }
 
 // cacheKey composes a repo-scoped key for App-level per-session caches.
@@ -1400,16 +1118,6 @@ func (a *App) cleanStaleCaches() {
 			delete(a.lastKnownStatus, k)
 		}
 	}
-}
-
-// pollAllSessions returns Cmds for sessions that are due for a PR status poll.
-// It respects adaptive intervals and limits concurrent in-flight polls.
-func (a *App) activeSessionCount() int {
-	count := 0
-	for _, mgr := range a.managers {
-		count += mgr.ActiveSessionCount()
-	}
-	return count
 }
 
 // wellnessLogEntry is the JSON structure written on session end.

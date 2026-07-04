@@ -24,14 +24,6 @@ func (a App) updateGlobalConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 				mgr.UpdateSettings(a.resolvedCache[repoPath])
 			}
 		}
-		newResolved := config.Resolve(a.globalSettings, nil)
-		if newResolved.SidebarWidth != a.dashboard.sidebarWidth {
-			a.dashboard.sidebarWidth = newResolved.SidebarWidth
-			a.resizeAllForDashboard()
-		}
-		// Refresh wellness settings from updated global config.
-		a.wellness.focusSessionMinutes = newResolved.FocusSessionMinutes
-		a.wellness.focusBreakMinutes = newResolved.FocusBreakMinutes
 		a.view = ViewDashboard
 		return a, nil
 	case globalConfigCancelMsg:

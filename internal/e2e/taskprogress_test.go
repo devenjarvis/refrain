@@ -116,7 +116,7 @@ func allTaskProgressScenarios() []scenarioFile {
 }
 
 func waitForProgress(s *Session, done, total int, timeoutMs int) bool {
-	needle := fmt.Sprintf("%d/%d tasks", done, total)
+	needle := fmt.Sprintf("plan %d/%d", done, total)
 	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if strings.Contains(s.Screenshot(), needle) {
@@ -130,81 +130,79 @@ func waitForProgress(s *Session, done, total int, timeoutMs int) bool {
 func TestTaskProgressBarUpdates(t *testing.T) {
 	s := newPlanningSession(t, allTaskProgressScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "progress test")
 	waitAndOpenEditor(t, s)
 
 	s.Press("a")
-	if !waitForBadgeText(s, "BUILDING", 15000) {
-		t.Fatalf("session did not transition to BUILDING after approve\nScreen:\n%s", s.Screenshot())
+	if !waitForBadgeText(s, "active", 15000) {
+		t.Fatalf("build agent never went active after approve\nScreen:\n%s", s.Screenshot())
 	}
 
 	// Open the agent terminal and send the build prompt to trigger task 1.
 	// scrim starts in interactive mode and waits for prompts via stdin.
 	s.Press("enter")
-	s.WaitForText("back", 10000)
+	s.WaitForText(launchAnchor, 10000)
 	s.Type("execute the plan\n")
 	s.WaitForText("Completed task 1", 15000)
 	s.Press("Escape")
-	s.WaitForText("navigate", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	if !waitForProgress(s, 1, 3, 30000) {
-		t.Fatalf("progress bar never showed 1/3 tasks\nScreen:\n%s", s.Screenshot())
+		t.Fatalf("plan badge never showed 1/3\nScreen:\n%s", s.Screenshot())
 	}
 
-	// Send task 2, escape back to dashboard to observe 2/3 progress.
+	// Send task 2, escape back to the list to observe 2/3 progress.
 	s.Press("enter")
-	s.WaitForText("back", 10000)
+	s.WaitForText(launchAnchor, 10000)
 	s.Type("continue task 2\n")
 	s.WaitForText("Completed task 2", 15000)
 	s.Press("Escape")
-	s.WaitForText("navigate", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	if !waitForProgress(s, 2, 3, 30000) {
-		t.Errorf("progress bar never showed 2/3 tasks\nScreen:\n%s", s.Screenshot())
+		t.Errorf("plan badge never showed 2/3\nScreen:\n%s", s.Screenshot())
 	}
 
-	// Send task 3, then wait for either 3/3 tasks or auto-promotion to REVIEWING.
+	// Send task 3 and wait for the badge to reach 3/3.
 	s.Press("enter")
-	s.WaitForText("back", 10000)
+	s.WaitForText(launchAnchor, 10000)
 	s.Type("continue task 3\n")
 	s.Press("Escape")
-	s.WaitForText("navigate", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	if !waitForBadgeText(s, "REVIEWING", 30000) {
-		if !waitForProgress(s, 3, 3, 5000) {
-			t.Errorf("progress bar never showed 3/3 tasks and session didn't promote to REVIEWING\nScreen:\n%s", s.Screenshot())
-		}
+	if !waitForProgress(s, 3, 3, 30000) {
+		t.Errorf("plan badge never showed 3/3\nScreen:\n%s", s.Screenshot())
 	}
 }
 
-func TestTaskProgressBarStaysInBuilding(t *testing.T) {
+func TestTaskProgressBadgePersists(t *testing.T) {
 	s := newPlanningSession(t, taskProgressDraftScenario, taskProgressBranchNameScenario, taskProgressBuildTask1)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "progress test")
 	waitAndOpenEditor(t, s)
 
 	s.Press("a")
-	if !waitForBadgeText(s, "BUILDING", 15000) {
-		t.Fatalf("session did not transition to BUILDING\nScreen:\n%s", s.Screenshot())
+	if !waitForBadgeText(s, "active", 15000) {
+		t.Fatalf("build agent never went active after approve\nScreen:\n%s", s.Screenshot())
 	}
 
 	// Open the agent terminal and trigger task 1.
 	s.Press("enter")
-	s.WaitForText("back", 10000)
+	s.WaitForText(launchAnchor, 10000)
 	s.Type("execute the plan\n")
 	s.WaitForText("Completed task 1", 15000)
 	s.Press("Escape")
-	s.WaitForText("navigate", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	if !waitForProgress(s, 1, 3, 30000) {
-		t.Errorf("progress bar never showed 1/3 tasks\nScreen:\n%s", s.Screenshot())
+		t.Errorf("plan badge never showed 1/3\nScreen:\n%s", s.Screenshot())
 	}
 
+	// The session stays on the list with its partial progress visible.
 	s.WaitStable(3000)
-	s.AssertScreenContains("BUILDING")
-	s.AssertScreenContains("1/3 tasks")
+	s.AssertScreenContains("plan 1/3")
 }

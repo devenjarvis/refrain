@@ -22,6 +22,8 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 	a.height = msg.Height
 	a.dashboard.width = msg.Width
 	a.dashboard.height = msg.Height - 1 // room for statusbar
+	a.sessionList.SetSize(msg.Width, msg.Height-1)
+	a.launch.SetSize(msg.Width, msg.Height-1)
 	a.diff, _ = a.diff.Update(tea.WindowSizeMsg{Width: msg.Width, Height: msg.Height - 1})
 	a.repoBrowser.width = msg.Width
 	a.repoBrowser.height = msg.Height - 1
@@ -31,7 +33,7 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 	a.repoPicker.height = msg.Height - 1
 	// A resize remaps the VT viewport — any in-flight selection is now
 	// pointing at stale cells. Drop it.
-	a.dashboard.clearSelection()
+	a.launch.clearSelection()
 
 	// newSession always tracks terminal dimensions (it may be open in any view).
 	a.newSession.SetSize(msg.Width, msg.Height-1)
@@ -40,10 +42,7 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 
 	// Resize agent terminals to match their current display container.
 	if a.view == ViewDashboard {
-		a.resizeAllForDashboard()
-		if ag := a.modals.LaunchAgent(); ag != nil {
-			ag.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
-		}
+		a.resizeAllAgents()
 		if pe := a.modals.PlanEditor(); pe != nil {
 			pe.SetSize(msg.Width, msg.Height-1)
 		}
@@ -76,17 +75,8 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 	a.wellness.sessionStart = now
 	a.wellness.lastInputAt = now
 
-	// Derive UI state from the injected global settings. config.Resolve here is
-	// a pure derivation, not wiring — globalSettings was loaded in cmd/ and
-	// injected via NewAppFromDeps.
-	resolved := config.Resolve(a.globalSettings, nil)
-	a.dashboard.sidebarWidth = resolved.SidebarWidth
-	a.wellness.focusSessionMinutes = resolved.FocusSessionMinutes
-	a.wellness.focusBreakMinutes = resolved.FocusBreakMinutes
-	a.cursor.SetSection(focusSectionPlanning)
-	// Default activeRepo to the first registered repo so the pipeline
-	// header shows "repo: <name>" and workflow keys ('n', 'a', 'o') target
-	// a known repo on a fresh dashboard.
+	// Default activeRepo to the first registered repo so workflow keys
+	// ('n', 'a', 'o') target a known repo on a fresh session list.
 	if a.activeRepo == "" && len(a.cfg.Repos) > 0 {
 		a.activeRepo = a.cfg.Repos[0].Path
 	}
@@ -145,8 +135,8 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 			continue
 		}
 		resolved := a.resolvedCache[repo.Path]
-		fixedW := a.dashboard.fixedTermWidth()
-		fixedH := a.dashboard.fixedTermHeight()
+		fixedW := a.agentTermCols()
+		fixedH := a.agentTermRows()
 		if fixedW <= 0 {
 			fixedW = 80
 		}
@@ -198,58 +188,12 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 
 func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 	_ = msg
-	// Break mode: advance animation and detect timer expiry. We DO NOT
-	// auto-exit — once the configured break elapses we flip into a
-	// "ready" state and wait for the user to explicitly resume. This
-	// avoids dropping the user back into focus mode while they're still
-	// away from the keyboard.
-	if a.wellness.focusBreakMode {
-		a.wellness.focusBreakAnimFrame++
-		if a.wellness.focusBreakMinutes > 0 && !a.wellness.focusBreakTimerUp &&
-			time.Since(a.wellness.focusBreakStart) >= time.Duration(a.wellness.focusBreakMinutes)*time.Minute {
-			a.wellness.focusBreakTimerUp = true
-			a.wellness.focusBreakShortWarning = false
-			a.wellness.focusBreakAnimFrame = 0
-			// One unmistakable cue when the break ends. Played even in
-			// focus mode (the normal suppression path), since the whole
-			// point is to grab attention.
-			if a.audioPlayer != nil {
-				a.audioPlayer.Play()
-			}
-		}
-	} else if a.wellness.focusSessionMinutes > 0 &&
-		a.modals.IsList() &&
-		a.wellness.EffectiveElapsed() >= time.Duration(a.wellness.focusSessionMinutes)*time.Minute {
-		// Auto-enter break when the work block elapses. The asymmetry
-		// with break-end (which waits for explicit `b`) is intentional:
-		// end-of-block SHOULD interrupt the user — that's the whole
-		// point of the timer — whereas end-of-break should not drag
-		// them back from the keyboard.
-		//
-		// Deferred for ANY non-pipeline panel: focusLaunch (fullscreen
-		// agent terminal), focusReview (review panel), focusShipping
-		// (mid-merge / mid-feedback in the shipping panel), focusConfig
-		// (editing settings), focusPlanEditor (editing plan.md). Firing
-		// the overlay during a merge would hide the merge result behind
-		// the break screen; deferring until the user is back on the
-		// pipeline keeps interrupts at safe checkpoints.
-		a.wellness.focusBreakMode = true
-		a.wellness.focusBreakStart = time.Now().Round(0)
-		a.wellness.focusBreakShortWarning = false
-		a.wellness.focusBreakTimerUp = false
-		a.wellness.focusBreakAnimFrame = 0
-		// Bypass the dashboard chime suppression — same rationale as
-		// the break-end branch above.
-		if a.audioPlayer != nil {
-			a.audioPlayer.Play()
-		}
-	}
-	// Keep the pipeline cursor in range as sessions transition phases.
+	// Keep the session-list cursor in range as sessions come and go.
 	a.clampCursor()
 	// Refresh every component's render clock from a single tick timestamp so
 	// their View()/render helpers stay pure (§5: no clock read at render time).
 	renderNow := time.Now()
-	a.dashboard.now = renderNow
+	a.sessionList.now = renderNow
 	if pe := a.modals.PlanEditor(); pe != nil {
 		pe.refreshDerived(renderNow)
 	}
@@ -271,25 +215,21 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 	}
 	// Detect alt-screen transitions and trigger a resize so Claude's TUI
 	// redraws cleanly (replaces the old splashResizeMsg delayed timer).
-	fixedW := a.dashboard.fixedTermWidth()
-	fixedH := a.dashboard.fixedTermHeight()
-	if fixedW > 0 && fixedH > 0 {
+	rows := a.agentTermRows()
+	cols := a.agentTermCols()
+	if rows > 0 && cols > 0 {
 		launchAgent := a.modals.LaunchAgent()
 		for _, item := range items {
 			if item.kind != listItemAgent || item.agent == nil {
 				continue
 			}
 			if item.agent.AltScreenEntered() {
-				// The focusLaunch agent renders fullscreen, so resize it
-				// to the fullscreen dimensions instead of shrinking it
-				// back to the preview size. VT history is cleared on
-				// alt-screen entry; any prior scrollOffset now indexes into
-				// an empty buffer, so snap the focusLaunch agent back to live.
+				item.agent.Resize(rows, cols)
+				// VT history is cleared on alt-screen entry; any prior
+				// scrollOffset now indexes into an empty buffer, so snap the
+				// launch view back to live.
 				if launchAgent != nil && item.agent.ID == launchAgent.ID {
-					item.agent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
-					a.dashboard.scrollOffset = 0
-				} else {
-					item.agent.Resize(fixedH, fixedW)
+					a.launch.scrollOffset = 0
 				}
 			}
 		}
@@ -302,16 +242,13 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 	}
 	// Clean stale diff cache entries periodically.
 	a.cleanStaleCaches()
-	// Advance sidebar marquee tickers for overflowing session names. Reuse
-	// renderNow so all of the dashboard's time-derived state (now field +
-	// ticker advance) is coherent from a single per-tick timestamp.
-	a.dashboard.advanceTickers(renderNow, a.dashboardProps())
-	// E2E debug-dump: write the latest composed dashboard frame to the file
-	// named by REFRAIN_E2E_DEBUG_DUMP (read once at startup). Kept out of any
-	// View()/render helper so rendering stays pure (§5); dashboard.View() is
+	// E2E debug-dump: write the latest composed root frame to the file named
+	// by REFRAIN_E2E_DEBUG_DUMP (read once at startup). Kept out of any
+	// View()/render helper so rendering stays pure (§5); rootBodyView is
 	// itself pure, so calling it here from the Update path is side-effect free.
 	if a.debugDumpPath != "" {
-		_ = os.WriteFile(a.debugDumpPath, []byte(a.dashboard.View(a.dashboardProps())), 0o644)
+		body, _ := a.rootBodyView()
+		_ = os.WriteFile(a.debugDumpPath, []byte(body), 0o644)
 	}
 	// Adaptive per-session PR polling.
 	var prCmds []tea.Cmd
@@ -496,29 +433,19 @@ func (a App) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 	// Find the new agent by ID. Cursor always moves to the new session's
 	// row; focusLaunch is only entered when skipFocusLaunch is false.
 	if msg.agentID != "" {
-		items := a.listItems()
-		for _, item := range items {
+		for _, item := range a.listItems() {
 			if item.kind == listItemAgent && item.agent != nil && item.agent.ID == msg.agentID {
 				if !msg.skipFocusLaunch {
 					a.openLaunchPanel(item.session, item.agent, item.repoPath)
-					a.dashboard.scrollOffset = 0
-					item.agent.Resize(a.focusLaunchTermHeight(), a.dashboard.width)
+					a.launch.scrollOffset = 0
+					a.launch.clearSelection()
+					item.agent.Resize(a.agentTermRows(), a.agentTermCols())
 				}
-				// Move the pipeline cursor to the new session so when the
-				// user esc's back to focusList their cursor is on the row
-				// they just spawned. Walk every section because newSession
-				// defaults to LifecyclePlanning and AddAgent/Restore paths
-				// can land in any phase.
+				// Move the list cursor to the new session so when the user
+				// esc's back to the list their cursor is on the row they
+				// just spawned.
 				if item.session != nil {
-				Sections:
-					for _, section := range focusSectionsInOrder() {
-						for idx, s := range items.sectionItems(section) {
-							if s.session == item.session {
-								a.cursor.JumpTo(section, idx)
-								break Sections
-							}
-						}
-					}
+					a.selectSessionRow(item.repoPath, item.session.ID)
 				}
 				break
 			}
@@ -546,7 +473,7 @@ func (a App) handleKillResult(msg killResultMsg) (tea.Model, tea.Cmd) {
 		// Exit focusLaunch if the killed agent is the one being viewed.
 		if ag := a.modals.LaunchAgent(); ag != nil && ag.ID == msg.agentID {
 			a.closeModal()
-			a.dashboard.scrollOffset = 0
+			a.launch.scrollOffset = 0
 		}
 	case killScopeSession:
 		sessKey := cacheKey(msg.repoPath, msg.sessionID)

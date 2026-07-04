@@ -34,7 +34,7 @@ turns:
 
 // hookContinueScenario is a clean scenario (no notification) for the re-arm
 // test. The 2s delay gives the test enough polling time to observe the Active
-// badge from UserPromptSubmit before Stop fires.
+// status from UserPromptSubmit before Stop fires.
 var hookContinueScenario = scenarioFile{
 	name: "hook_continue.yaml",
 	content: `name: hook_continue
@@ -52,70 +52,69 @@ turns:
 }
 
 // TestHookPipeline drives refrain through scrim's scenario replay engine and
-// asserts the dashboard transitions Active → Waiting → Idle → Active → Idle.
-// This is the end-to-end check that hooks-file wiring, socket forwarding,
-// agent status transitions, and dashboard rendering all work in concert.
+// asserts the session-list status word transitions Active → Waiting → Idle →
+// Active → Idle. This is the end-to-end check that hooks-file wiring, socket
+// forwarding, agent status transitions, and list rendering all work in
+// concert.
 //
 // Scrim fires hook events through the same settings-file mechanism as real
 // Claude Code: refrain writes hooks.json, passes --settings to scrim, and
 // scrim executes `refrain hook <event>` at each lifecycle point.
 //
-// Both inputs ("start" and "continue") are typed while in focusLaunch, before
-// the session auto-promotes to REVIEWING. Scrim buffers the second line in
-// stdin and reads it after the first scenario completes. This avoids the need
-// to navigate back to the agent terminal from the REVIEWING state (where
-// Enter opens the review panel, not focusLaunch).
+// Both inputs ("start" and "continue") are typed while in the fullscreen
+// terminal; scrim buffers the second line in stdin and reads it after the
+// first scenario completes.
 func TestHookPipeline(t *testing.T) {
 	s := newScrimSession(t, hookStartScenario, hookContinueScenario)
 	s.Start()
 
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	// Create a session. Scrim starts in interactive mode and fires
+	// Create a blank session. Scrim starts in interactive mode and fires
 	// SessionStart immediately → agent marked Active.
-	s.Press("n")
-	s.WaitForText("back", 10000)
+	createBlankSession(t, s)
 
-	// Type both inputs while in focusLaunch. Scrim reads "start" first,
-	// fires UserPromptSubmit, matches hook_start, and replays two turns:
-	// turn 1 (1s delay → notification → text) then turn 2 (3s delay → text
-	// → stop). "continue" buffers in stdin. After hook_start completes,
-	// scrim reads "continue", fires UserPromptSubmit (re-arm → Active),
-	// matches hook_continue, and replays (2s delay → text → stop).
+	// Type "start" in the terminal: scrim fires UserPromptSubmit, matches
+	// hook_start, and replays two turns — turn 1 (1s delay → notification →
+	// text) then turn 2 (3s delay → text → stop).
 	s.Type("start\n")
-	s.Type("continue\n")
 
 	s.Press("Escape")
-	s.WaitForText("navigate", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	// Active — SessionStart hook has fired.
 	if !waitForBadgeText(s, "active", 5000) {
-		t.Fatalf("never observed Active badge text\nScreen:\n%s", s.Screenshot())
+		t.Fatalf("never observed Active status\nScreen:\n%s", s.Screenshot())
 	}
 
 	// Waiting — Notification hook fires during first scenario replay.
 	// The 3s delay on turn 2 keeps the agent in Waiting long enough to poll.
 	if !waitForBadgeText(s, "waiting", 10000) {
-		t.Fatalf("never observed Waiting badge text\nScreen:\n%s", s.Screenshot())
+		t.Fatalf("never observed Waiting status\nScreen:\n%s", s.Screenshot())
 	}
 
-	// Idle — Stop fires at end of first scenario. Auto-promotion moves the
-	// session from BUILDING to REVIEWING.
-	if !waitForBadgeText(s, "REVIEWING", 10000) {
-		t.Fatalf("never observed REVIEWING section after Stop\nScreen:\n%s", s.Screenshot())
+	// Idle — Stop fires at end of first scenario.
+	if !waitForBadgeText(s, "idle", 10000) {
+		t.Fatalf("never observed Idle status after Stop\nScreen:\n%s", s.Screenshot())
 	}
 
-	// Active again — scrim reads buffered "continue", fires UserPromptSubmit
-	// which re-arms the status indicator. The 2s delay in hook_continue gives
-	// enough time for the test to poll and observe the Active badge.
+	// Re-enter the terminal from the row (enter always opens the terminal on
+	// the new home screen) and send the second prompt: UserPromptSubmit
+	// re-arms the status indicator. The 2s delay in hook_continue gives the
+	// poll loop time to observe the Active status.
+	s.Press("enter")
+	s.WaitForText(launchAnchor, 10000)
+	s.Type("continue\n")
+	s.Press("Escape")
+	s.WaitForText(listAnchor, 10000)
+
 	if !waitForBadgeText(s, "active", 10000) {
-		t.Fatalf("never observed re-armed Active badge after UserPromptSubmit\nScreen:\n%s", s.Screenshot())
+		t.Fatalf("never observed re-armed Active status after UserPromptSubmit\nScreen:\n%s", s.Screenshot())
 	}
 
-	// Idle again — Stop fires at end of second scenario. Session stays in
-	// REVIEWING.
-	if !waitForBadgeText(s, "REVIEWING", 10000) {
-		t.Fatalf("never observed REVIEWING section after second Stop\nScreen:\n%s", s.Screenshot())
+	// Idle again — Stop fires at end of second scenario.
+	if !waitForBadgeText(s, "idle", 10000) {
+		t.Fatalf("never observed Idle status after second Stop\nScreen:\n%s", s.Screenshot())
 	}
 }
 

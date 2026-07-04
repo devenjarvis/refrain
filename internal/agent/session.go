@@ -714,6 +714,12 @@ func NewSessionForTest(id, name string) *Session {
 	return newSession(id, name, &git.WorktreeInfo{})
 }
 
+// SetKindForTest overrides the session kind for tests outside the agent
+// package; production code sets kind only in the manager's creation paths.
+func (s *Session) SetKindForTest(k SessionKind) {
+	s.kind = k
+}
+
 // NewSessionForTestWithPath creates a Session whose worktree path is set, so
 // callers can exercise plan-file helpers (WritePlan, ReadPlan, HasPlan,
 // HasPrevPlan, RestorePrevPlan) without spinning up a real git worktree.

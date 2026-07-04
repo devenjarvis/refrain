@@ -10,20 +10,17 @@ type keyHint struct {
 }
 
 var (
-	// dashboardHints is the unified hint set shown on the pipeline view (the
-	// only dashboard mode). Workflow keys (c/x/X/t/e/p/d/o/a/s) act on the
-	// session under the pipeline cursor. Kept tight so a 120-col terminal
-	// never truncates "quit" off the right edge — the `b` hint's desc is
-	// rewritten to "break" by App.View() outside the Planning section.
-	// `t` (shell) and `x` (kill) are omitted to stay within the column budget
-	// after adding `R repos` and `o branch`; both bindings remain active.
-	dashboardHints = []keyHint{
+	// sessionListHints is the hint set shown on the root session list.
+	// Workflow keys (c/x/X/t/e/p/d/o/a/s) act on the session under the list
+	// cursor. Kept tight so a 120-col terminal never truncates "quit" off the
+	// right edge — `t` (shell), `x`/`X` (kill), and `a` (add repo) are omitted
+	// to stay within the column budget; the bindings remain active.
+	sessionListHints = []keyHint{
 		{"j/k", "navigate"},
 		{"⏎", "open"},
 		{"n", "session"},
-		{"b", "build"},
-		{"m", "ready"},
 		{"r", "review"},
+		{"p", "PR"},
 		{"c", "agent"},
 		{"d", "diff"},
 		{"R", "repos"},
@@ -103,10 +100,10 @@ var (
 	}
 
 	newSessionHints = []keyHint{
-		{"⏎", "draft plan"},
-		{"ctrl+⏎", "run now"},
+		{"⏎", "start"},
+		{"ctrl+p", "plan first"},
 		{"ctrl+j", "newline"},
-		{"tab", "overrides"},
+		{"tab", "context/overrides"},
 		{"esc", "cancel"},
 	}
 )

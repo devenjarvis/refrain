@@ -43,19 +43,18 @@ turns:
 // TestArtifactsOnPlanReview drives a scrim agent through a plan-approval-shaped
 // interaction: enter alt-screen, draw a frame ending in a distinctive marker,
 // wait long enough for refrain to render it to the outer terminal, then redraw
-// a shorter frame. The test asserts on refrain's emitted View (written to
-// REFRAIN_E2E_DEBUG_DUMP by dashboard.View). Regression target: after
-// alt-screen entry and a clean redraw, refrain's preview View must not contain
+// a shorter frame. The test asserts on refrain's emitted root view (written
+// to REFRAIN_E2E_DEBUG_DUMP each tick). Regression target: after alt-screen
+// entry and a clean redraw, refrain's view must not contain
 // GHOST_ARTIFACT_FOO.
 func TestArtifactsOnPlanReview(t *testing.T) {
 	s := newScrimSession(t, artifactScenario)
 	dumpPath := t.TempDir() + "/baton_view_dump.txt"
 	s.extraEnv = append(s.extraEnv, "REFRAIN_E2E_DEBUG_DUMP="+dumpPath)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	s.Press("n")
-	s.WaitForText("back", 10000)
+	createBlankSession(t, s)
 
 	s.Type("go\n")
 

@@ -2,25 +2,22 @@ package tui
 
 import tea "charm.land/bubbletea/v2"
 
-// KeyMap groups action-keyed bindings for the dashboard. Each field lists the
-// `tea.KeyPressMsg.String()` values that trigger the action. Mapping by action
-// (not by key) keeps the dispatch switches readable, makes per-action testing
-// possible, and is the seam for future user-configurable rebindings.
+// KeyMap groups action-keyed bindings for the session list. Each field lists
+// the `tea.KeyPressMsg.String()` values that trigger the action. Mapping by
+// action (not by key) keeps the dispatch switches readable, makes per-action
+// testing possible, and is the seam for future user-configurable rebindings.
 type KeyMap struct {
 	Quit         []string // detach and exit
-	Up           []string // pipeline cursor up
-	Down         []string // pipeline cursor down
-	Activate     []string // space/enter on cursor
-	OpenRepoCfg  []string // right/enter on a repo header
+	Up           []string // list cursor up
+	Down         []string // list cursor down
+	Activate     []string // space/enter: open the row's terminal
 	NextRepo     []string // cycle active repo
 	NewSession   []string // create a new session
 	AddAgent     []string // add an agent to the cursor's session
-	BuildAdvance []string // promote Planning → Building OR take a break
-	MarkReady    []string // mark Planning/Building → ReadyForReview
 	OpenReview   []string // open the review panel
 	OpenTerminal []string // open or focus shell terminal
 	OpenIDE      []string // open worktree in IDE
-	OpenPR       []string // open the session's PR (or push+draft)
+	OpenPR       []string // open the session's PR panel (or push+draft)
 	OpenBranch   []string // open branch/PR picker
 	ManageRepos  []string // open repo picker in manage mode
 	AddRepo      []string // add a repo via filesystem browser
@@ -38,12 +35,9 @@ func DefaultKeyMap() KeyMap {
 		Up:           []string{"up", "k"},
 		Down:         []string{"down", "j"},
 		Activate:     []string{"space", "enter"},
-		OpenRepoCfg:  []string{"enter", "right"},
 		NextRepo:     []string{"N"},
 		NewSession:   []string{"n"},
 		AddAgent:     []string{"c"},
-		BuildAdvance: []string{"b"},
-		MarkReady:    []string{"m"},
 		OpenReview:   []string{"r"},
 		OpenTerminal: []string{"t"},
 		OpenIDE:      []string{"e"},

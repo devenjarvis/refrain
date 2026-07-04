@@ -61,6 +61,15 @@ func requireClaude(t *testing.T) {
 	}
 }
 
+// asApp unwraps a tea.Model that may be either App (value-receiver handlers)
+// or *App (the few pointer-receiver handlers like submitPromptModal).
+func asApp(model tea.Model) App {
+	if p, ok := model.(*App); ok {
+		return *p
+	}
+	return model.(App)
+}
+
 // returnToList exits the focusLaunch overlay (where keys forward to the agent
 // terminal) so app-level key handlers can fire.
 func returnToList(app App) App {
@@ -71,25 +80,43 @@ func returnToList(app App) App {
 	return app
 }
 
-// createAgent presses 'n' and executes the async create cmd, returning the
-// updated app. If the focusLaunch overlay is active it escapes back first so
-// the 'n' key isn't forwarded to the agent.
+// createAgent drives the new-session flow: presses 'n' (which opens the
+// full-viewport composition screen), submits the empty prompt with enter (the
+// raw blank-REPL path), and executes the async create cmd. If the focusLaunch
+// overlay is active it escapes back first so the 'n' key isn't forwarded to
+// the agent.
 func createAgent(t *testing.T, app App) App {
 	t.Helper()
 
 	app = returnToList(app)
 
-	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
-
-	if cmd == nil {
-		t.Fatal("Expected cmd from 'n', got nil")
+	if app.view != ViewNewSession {
+		t.Fatalf("Expected ViewNewSession after 'n', got %v", app.view)
 	}
 
-	msg := cmd()
-	model, _ = app.Update(msg)
+	model, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: ""})
 	app = model.(App)
-
+	if cmd == nil {
+		t.Fatal("Expected submit cmd from enter, got nil")
+	}
+	// The submit emits promptModalSubmitMsg → CreateSession cmd →
+	// createResultMsg; pump the whole chain so the session exists and
+	// focusLaunch opens before returning.
+	msgs := runCmdAll(t, cmd)
+	for len(msgs) > 0 {
+		var next []tea.Msg
+		for _, msg := range msgs {
+			if msg == nil {
+				continue
+			}
+			m, c := app.Update(msg)
+			app = asApp(m)
+			next = append(next, runCmdAll(t, c)...)
+		}
+		msgs = next
+	}
 	return app
 }
 
@@ -497,139 +524,6 @@ func TestShiftEscForwardsEscapeToAgent(t *testing.T) {
 	}
 }
 
-// TestPipelineClickMovesCursor verifies that a left click on a session card in
-// the BUILDING section moves focusBuildingIdx to the clicked session, and a
-// click on a REVIEWING row sets the cursor section + index accordingly. Single
-// click does not activate; double-click within 500ms does.
-func TestPipelineClickMovesCursor(t *testing.T) {
-	sessA := agent.NewSessionForTest("a", "active-a")
-	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
-	sessB := agent.NewSessionForTest("b", "active-b")
-	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
-	sessR := agent.NewSessionForTest("r", "review-r")
-	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessA},
-		{kind: listItemSession, repoPath: "/r", session: sessB},
-		{kind: listItemSession, repoPath: "/r", session: sessR},
-	})
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 0)
-
-	// Pipeline layout (Planning is empty so its label/rows are skipped):
-	// header(0) + sep(1) + pipeline widget(2..5) + blank(6)
-	// + "BUILDING"(7) + card0(8..11) + blank(12) + card1(13..16) + blank(17)
-	// + "REVIEWING"(18) + queue0(19..20).
-	// Click on card 1 (building session B) at Y=14.
-	model, _ := app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 14})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionBuilding || app.cursor.Index(focusSectionBuilding) != 1 {
-		t.Fatalf("expected cursor on building[1] after click on sessB card, got section=%v idx=%d", app.cursor.Section(), app.cursor.Index(focusSectionBuilding))
-	}
-
-	// Click on the reviewing row at Y=19.
-	model, _ = app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 19})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionReview || app.cursor.Index(focusSectionReview) != 0 {
-		t.Fatalf("expected cursor on review[0] after click on queue row, got section=%v idx=%d", app.cursor.Section(), app.cursor.Index(focusSectionReview))
-	}
-
-	// Right-click does nothing.
-	app.cursor.SetIndex(focusSectionBuilding, 0)
-	app.cursor.SetSection(focusSectionBuilding)
-	model, _ = app.Update(tea.MouseClickMsg{Button: tea.MouseRight, X: 30, Y: 14})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionBuilding || app.cursor.Index(focusSectionBuilding) != 0 {
-		t.Errorf("right-click should not move cursor")
-	}
-}
-
-// TestPipelineClickMovesCursor_PlanningAndShipping covers the two new sections
-// added in the four-phase refactor. The hit-test uses the same pointer-
-// assignment path (*focusSectionIdx(section) = idx) for every section, so a
-// click on a Planning card must set focusPlanningIdx and a click on a Shipping
-// row must set focusShippingIdx.
-func TestPipelineClickMovesCursor_PlanningAndShipping(t *testing.T) {
-	sessP := agent.NewSessionForTest("p", "planning-p")
-	sessP.SetLifecyclePhase(agent.LifecyclePlanning)
-	sessS := agent.NewSessionForTest("s", "shipping-s")
-	sessS.SetLifecyclePhase(agent.LifecycleShipping)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessP},
-		{kind: listItemSession, repoPath: "/r", session: sessS},
-	})
-	// Start the cursor on Building so a successful click has somewhere to move
-	// the selection FROM (Building is empty here, but the cursor is held there
-	// until the first click).
-	app.cursor.SetSection(focusSectionBuilding)
-
-	// Pipeline layout (Building + Reviewing are empty so their rows are
-	// skipped): header(0) + sep(1) + pipeline widget(2..5) + blank(6)
-	// + "PLANNING"(7) + card0(8..11) + blank(12)
-	// + "SHIPPING"(13) + ship0(14..15).
-	model, _ := app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 9})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionPlanning || app.cursor.Index(focusSectionPlanning) != 0 {
-		t.Fatalf("expected cursor on planning[0] after click on planning card, got section=%v idx=%d", app.cursor.Section(), app.cursor.Index(focusSectionPlanning))
-	}
-
-	model, _ = app.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 14})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionShipping || app.cursor.Index(focusSectionShipping) != 0 {
-		t.Fatalf("expected cursor on shipping[0] after click on shipping row, got section=%v idx=%d", app.cursor.Section(), app.cursor.Index(focusSectionShipping))
-	}
-}
-
-// TestPipelineDoubleClickActivatesReview verifies that a double-click on a
-// REVIEW QUEUE row opens the review panel for that session.
-func TestPipelineDoubleClickActivatesReview(t *testing.T) {
-	sessR := agent.NewSessionForTest("r", "review-r")
-	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessR},
-	})
-
-	// With no active sessions, REVIEW QUEUE starts at row 7 (header(0) + sep(1)
-	// + pipeline(2..5) + blank(6) + "REVIEW QUEUE"(7) + queue0(8..9)).
-	first := tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 8}
-	model, _ := app.Update(first)
-	app = model.(App)
-	if app.modals.Current() == focusReview {
-		t.Fatal("single click should not enter focusReview")
-	}
-
-	// Second click within the double-click window opens the review panel.
-	model, _ = app.Update(first)
-	app = model.(App)
-	if app.modals.Current() != focusReview {
-		t.Fatalf("expected focusReview after double-click, got %v", app.modals.Current())
-	}
-	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
-		t.Fatalf("expected reviewSession=sessR, got %v", app.modals.Review())
-	}
-}
-
 // Wheel-scroll handling for the agent terminal is exercised end-to-end via
 // focusLaunch in the e2e suite; the previous focusTerminal-only test became
 // unreachable when the split-panel layout was removed.
@@ -751,14 +645,14 @@ func TestScrollOffsetResetsOnAltScreenEntry(t *testing.T) {
 	// Open the launch panel on this agent so modals.LaunchAgent() targets it;
 	// the alt-screen-entered consumer keys the scrollOffset reset off it.
 	app.openLaunchPanel(sess, ag, dir)
-	app.dashboard.scrollOffset = 42
+	app.launch.scrollOffset = 42
 
 	// A tickMsg drives the alt-screen-entered consumer. Since the launch agent
 	// is ag, the transition should reset scrollOffset to 0.
 	model, _ := app.Update(tickMsg(time.Now()))
 	app = model.(App)
-	if app.dashboard.scrollOffset != 0 {
-		t.Fatalf("expected scrollOffset reset to 0 after alt-screen entry tick, got %d", app.dashboard.scrollOffset)
+	if app.launch.scrollOffset != 0 {
+		t.Fatalf("expected scrollOffset reset to 0 after alt-screen entry tick, got %d", app.launch.scrollOffset)
 	}
 }
 
@@ -1078,27 +972,6 @@ func TestChimeSuppressionByStatus(t *testing.T) {
 	}
 }
 
-func TestBacklogGate_WarnOnN(t *testing.T) {
-	app := NewApp()
-	two := 2
-	app.globalSettings = &config.GlobalSettings{MaxReviewBacklog: &two}
-
-	// First n when no backlog — no warning, focusBacklogWarning stays false.
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	app = model.(App)
-	if app.wellness.focusBacklogWarning {
-		t.Error("focusBacklogWarning should not be set when backlog is below limit")
-	}
-
-	// Verify the warning is cleared when a non-n key is pressed after being set.
-	app.wellness.focusBacklogWarning = true
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-	if app.wellness.focusBacklogWarning {
-		t.Error("focusBacklogWarning should be cleared by a non-n key press")
-	}
-}
-
 func TestRKey_NoopWithEmptyQueue(t *testing.T) {
 	app := NewApp()
 
@@ -1119,6 +992,12 @@ func TestRKey_NoopWithEmptyQueue(t *testing.T) {
 func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 	app, sessR := makeFocusModeApp(t)
 
+	// The flat list has no review queue: move the cursor onto sessR's row
+	// (third session) before pressing r.
+	for range 2 {
+		m, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		app = m.(App)
+	}
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	app = model.(App)
 
@@ -1135,214 +1014,6 @@ func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 	view := app.View()
 	if !view.AltScreen {
 		t.Error("review panel View must keep AltScreen=true; otherwise focus mode flickers out of alt-screen and r looks like a no-op")
-	}
-}
-
-// TestSoftAgentLimitGuard verifies the two-press 'n' guard in focus mode:
-// first press shows the modal and sets sessionLimitModalActive; second press proceeds.
-func TestSoftAgentLimitGuard(t *testing.T) {
-	requireClaude(t)
-	dir, err := os.MkdirTemp("", "refrain-softlimit-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-
-	run := func(args ...string) {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("cmd %v: %v\n%s", args, err, out)
-		}
-	}
-	run("git", "init")
-	run("git", "config", "commit.gpgsign", "false")
-	run("git", "commit", "--allow-empty", "-m", "init")
-
-	mgr := agent.NewManager(dir, config.ResolvedSettings{
-		BypassPermissions:     true,
-		AgentProgram:          "claude",
-		MaxConcurrentSessions: 1, // limit to 1 so we hit it immediately
-	})
-	defer mgr.Shutdown()
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	app.managers[dir] = mgr
-	app.activeRepo = dir
-	app.resolvedCache[dir] = config.ResolvedSettings{
-		BypassPermissions:     true,
-		AgentProgram:          "claude",
-		MaxConcurrentSessions: 1,
-	}
-
-	// Create the first session to reach the limit.
-	app = createAgent(t, app)
-	if app.err != "" {
-		t.Fatalf("Error creating first agent: %s", app.err)
-	}
-	if mgr.AgentCount() != 1 {
-		t.Fatalf("Expected 1 agent, got %d", mgr.AgentCount())
-	}
-
-	// Return to list focus so 'n' reaches the app-level handler.
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
-	app = model.(App)
-	if app.modals.Current() != focusList {
-		t.Fatalf("Expected focusList after ctrl+e, got %v", app.modals.Current())
-	}
-
-	// Enable focus mode.
-
-	// First 'n' press: should set sessionLimitModalActive and not create agent.
-	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	app = model.(App)
-	if cmd != nil {
-		// If a cmd was returned, execute it to check if it created an agent.
-		// We don't expect this in the first press.
-		msg := cmd()
-		if _, ok := msg.(createResultMsg); ok {
-			t.Fatal("Expected no agent creation on first 'n' press at limit")
-		}
-	}
-	if !app.sessionLimitModalActive {
-		t.Fatal("Expected sessionLimitModalActive=true after first 'n' at limit")
-	}
-	if v := app.View(); !strings.Contains(v.Content, "Focus limit reached") {
-		t.Fatalf("Expected rendered View to contain 'Focus limit reached' modal title; got:\n%s", v.Content)
-	}
-
-	// Second 'n' press: should clear modal and proceed with creation.
-	model, cmd = app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	app = model.(App)
-	if app.sessionLimitModalActive {
-		t.Fatal("Expected sessionLimitModalActive=false after second 'n'")
-	}
-	if v := app.View(); strings.Contains(v.Content, "Focus limit reached") {
-		t.Fatal("Expected rendered View to NOT contain 'Focus limit reached' after override")
-	}
-	// cmd should be non-nil (agent creation is dispatched).
-	if cmd == nil {
-		t.Fatal("Expected non-nil cmd from second 'n' press (agent creation)")
-	}
-
-	// Any other key press should dismiss the modal without spawning and without
-	// performing its normal action (e.g. 'j' must not move the focus cursor).
-	app.sessionLimitModalActive = true
-	beforeIdx := app.cursor.Index(focusSectionBuilding)
-	beforeQueue := app.cursor.Index(focusSectionReview)
-	beforeSection := app.cursor.Section()
-	model, dismissCmd := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-	if app.sessionLimitModalActive {
-		t.Fatal("Expected sessionLimitModalActive cleared by non-n key press")
-	}
-	if dismissCmd != nil {
-		if msg := dismissCmd(); msg != nil {
-			if _, ok := msg.(createResultMsg); ok {
-				t.Fatal("Expected no agent creation when dismissing modal with 'j'")
-			}
-		}
-	}
-	if v := app.View(); strings.Contains(v.Content, "Focus limit reached") {
-		t.Fatal("Expected rendered View to NOT contain 'Focus limit reached' after cancel")
-	}
-	if app.cursor.Index(focusSectionBuilding) != beforeIdx || app.cursor.Index(focusSectionReview) != beforeQueue || app.cursor.Section() != beforeSection {
-		t.Fatalf("Expected focus cursor unchanged after dismiss key; before=(idx=%d,q=%d,sec=%v) after=(idx=%d,q=%d,sec=%v)",
-			beforeIdx, beforeQueue, beforeSection, app.cursor.Index(focusSectionBuilding), app.cursor.Index(focusSectionReview), app.cursor.Section())
-	}
-}
-
-// TestSoftAgentLimitGuardMultiRepo verifies the two-press 'n' guard in focus
-// mode applies to the multi-repo path (picker) just like the single-repo path.
-func TestSoftAgentLimitGuardMultiRepo(t *testing.T) {
-	requireClaude(t)
-	dir, err := os.MkdirTemp("", "refrain-softlimit-multi-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-
-	run := func(args ...string) {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("cmd %v: %v\n%s", args, err, out)
-		}
-	}
-	run("git", "init")
-	run("git", "config", "commit.gpgsign", "false")
-	run("git", "commit", "--allow-empty", "-m", "init")
-
-	mgr := agent.NewManager(dir, config.ResolvedSettings{
-		BypassPermissions:     true,
-		AgentProgram:          "claude",
-		MaxConcurrentSessions: 1,
-	})
-	defer mgr.Shutdown()
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	app.managers[dir] = mgr
-	app.activeRepo = dir
-	app.resolvedCache[dir] = config.ResolvedSettings{
-		BypassPermissions:     true,
-		AgentProgram:          "claude",
-		MaxConcurrentSessions: 1,
-	}
-
-	// Create the first session to reach the limit (single-repo cfg so 'n' creates
-	// directly rather than opening the repo picker).
-	app = createAgent(t, app)
-	if app.err != "" {
-		t.Fatalf("Error creating first agent: %s", app.err)
-	}
-	if mgr.AgentCount() != 1 {
-		t.Fatalf("Expected 1 agent, got %d", mgr.AgentCount())
-	}
-
-	// Now expand cfg to two repos so 'n' takes the multi-repo branch.
-	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}, {Path: "/fake/other"}}}
-
-	// Return to list focus so 'n' reaches the app-level handler.
-	app = returnToList(app)
-	if app.modals.Current() != focusList {
-		t.Fatalf("Expected focusList after exit, got %v", app.modals.Current())
-	}
-
-	// First 'n' press: should show modal and set sessionLimitModalActive; picker must NOT open.
-	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	app = model.(App)
-	if cmd != nil {
-		msg := cmd()
-		if _, ok := msg.(createResultMsg); ok {
-			t.Fatal("Expected no agent creation on first 'n' press at limit")
-		}
-	}
-	if !app.sessionLimitModalActive {
-		t.Fatal("Expected sessionLimitModalActive=true after first 'n' at limit")
-	}
-	if v := app.View(); !strings.Contains(v.Content, "Focus limit reached") {
-		t.Fatalf("Expected rendered View to contain 'Focus limit reached' modal title; got:\n%s", v.Content)
-	}
-	if app.view == ViewRepoPicker {
-		t.Fatal("Expected view != ViewRepoPicker on first 'n' at limit")
-	}
-
-	// Second 'n' press: should clear modal and open the picker.
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	app = model.(App)
-	if app.sessionLimitModalActive {
-		t.Fatal("Expected sessionLimitModalActive=false after second 'n'")
-	}
-	if app.view != ViewRepoPicker {
-		t.Fatal("Expected view == ViewRepoPicker after second 'n' override")
 	}
 }
 
@@ -1370,56 +1041,6 @@ func makeFocusModeApp(t *testing.T) (App, *agent.Session) {
 		{kind: listItemSession, repoPath: "/r", session: sessR},
 	})
 	return app, sessR
-}
-
-// TestFocusModeNavigationCrossesSections verifies that j/k in focus mode
-// traverses Active → Review in render order, transitioning between sections at
-// the boundaries instead of bouncing two indices in lockstep.
-func TestFocusModeNavigationCrossesSections(t *testing.T) {
-	app, _ := makeFocusModeApp(t)
-	if app.cursor.Section() != focusSectionBuilding {
-		// The cursor is clamped via clampCursor() on ticks/events; here we
-		// drive the state directly. Make the starting condition explicit.
-		app.cursor.SetSection(focusSectionBuilding)
-	}
-
-	// Start at active[0].
-	if app.cursor.Index(focusSectionBuilding) != 0 || app.cursor.Section() != focusSectionBuilding {
-		t.Fatalf("expected start at active[0], got section=%v active=%d", app.cursor.Section(), app.cursor.Index(focusSectionBuilding))
-	}
-
-	// j: active[0] → active[1].
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionBuilding || app.cursor.Index(focusSectionBuilding) != 1 {
-		t.Fatalf("after 1st j: expected active[1], got section=%v active=%d", app.cursor.Section(), app.cursor.Index(focusSectionBuilding))
-	}
-
-	// j: active[1] (last) → review[0].
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionReview || app.cursor.Index(focusSectionReview) != 0 {
-		t.Fatalf("after 2nd j: expected review[0], got section=%v review=%d", app.cursor.Section(), app.cursor.Index(focusSectionReview))
-	}
-
-	// j: review[0] (last review, no further section) → no-op.
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionReview || app.cursor.Index(focusSectionReview) != 0 {
-		t.Fatalf("after 3rd j: expected review[0] (no-op), got section=%v review=%d", app.cursor.Section(), app.cursor.Index(focusSectionReview))
-	}
-
-	// k: review[0] → active[1].
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionBuilding || app.cursor.Index(focusSectionBuilding) != 1 {
-		t.Fatalf("after k from review: expected active[1], got section=%v active=%d", app.cursor.Section(), app.cursor.Index(focusSectionBuilding))
-	}
-
-	// Verify the cursor reflects the updated state immediately.
-	if app.cursor.Section() != focusSectionBuilding || app.cursor.Index(focusSectionBuilding) != 1 {
-		t.Fatalf("cursor not updated: section=%v active=%d", app.cursor.Section(), app.cursor.Index(focusSectionBuilding))
-	}
 }
 
 // TestFocusModeEnterOnActiveOpensFocusLaunch verifies that pressing enter
@@ -1478,79 +1099,6 @@ func TestFocusModeEnterOnActiveOpensFocusLaunch(t *testing.T) {
 	}
 	if app.modals.LaunchAgent() == nil || app.modals.LaunchAgent().ID != ag.ID {
 		t.Fatalf("expected focusLaunchAgent=ag, got %v", app.modals.LaunchAgent())
-	}
-}
-
-// TestFocusModeNavigationVisibleOnActiveOnly verifies that when only Active
-// rows exist (no review queue), j/k still move within the active section and
-// the dashboard sees the updated focusBuildingIdx so the selection marker can
-// render. This is the bug the user reported: an invisible cursor.
-func TestFocusModeNavigationVisibleOnActiveOnly(t *testing.T) {
-	sessA := &agent.Session{Name: "active-a"}
-	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
-	sessB := &agent.Session{Name: "active-b"}
-	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessA},
-		{kind: listItemSession, repoPath: "/r", session: sessB},
-	})
-	app.cursor.SetSection(focusSectionBuilding)
-
-	// j moves within active (active is the only non-empty section).
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-	if app.cursor.Index(focusSectionBuilding) != 1 {
-		t.Fatalf("expected focusBuildingIdx=1 after j, got %d", app.cursor.Index(focusSectionBuilding))
-	}
-
-	// j again at the bottom: no-op (no other section to fall through to).
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-	if app.cursor.Index(focusSectionBuilding) != 1 {
-		t.Fatalf("expected focusBuildingIdx=1 (no-op at end), got %d", app.cursor.Index(focusSectionBuilding))
-	}
-
-	// k moves back up.
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	app = model.(App)
-	if app.cursor.Index(focusSectionBuilding) != 0 {
-		t.Fatalf("expected focusBuildingIdx=0 after k, got %d", app.cursor.Index(focusSectionBuilding))
-	}
-}
-
-// TestClampFocusCursorHopsToNonEmptySection verifies that when the cursor's
-// section becomes empty (e.g. all in-progress sessions transition to ready),
-// clampFocusCursor moves the cursor to the next non-empty section so the
-// selection marker stays visible.
-func TestClampFocusCursorHopsToNonEmptySection(t *testing.T) {
-	sessR := &agent.Session{Name: "review-r"}
-	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessR},
-	})
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 0)
-
-	app.cursor.Clamp(app.listItems().sectionCounts())
-	if app.cursor.Section() != focusSectionReview {
-		t.Fatalf("expected hop to review section, got %v", app.cursor.Section())
-	}
-	if app.cursor.Index(focusSectionReview) != 0 {
-		t.Fatalf("expected review index 0, got %d", app.cursor.Index(focusSectionReview))
 	}
 }
 
@@ -1631,44 +1179,9 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 	}
 }
 
-// TestFocusMode_MKey_IsCursorAware verifies that pressing "m" in focus pipeline
-// view marks the session under the cursor (focusBuildingIdx), not the first matching
-// session in the list.
-func TestFocusMode_MKey_IsCursorAware(t *testing.T) {
-	sessA := agent.NewSessionForTest("a", "active-a")
-	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
-	sessA.AddTestAgent("a-1", false, agent.StatusIdle)
-	sessB := agent.NewSessionForTest("b", "active-b")
-	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
-	sessB.AddTestAgent("b-1", false, agent.StatusIdle)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessA},
-		{kind: listItemSession, repoPath: "/r", session: sessB},
-	})
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 1) // cursor on sessB, not sessA
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
-	app = model.(App)
-
-	if sessB.LifecyclePhase() != agent.LifecycleReadyForReview {
-		t.Errorf("expected sessB (cursor session) phase=ReadyForReview, got %v", sessB.LifecyclePhase())
-	}
-	if sessA.LifecyclePhase() != agent.LifecycleInProgress {
-		t.Errorf("expected sessA (non-cursor session) phase unchanged=InProgress, got %v", sessA.LifecyclePhase())
-	}
-}
-
-// makeFocusModeMRApp wires up an App in focus mode with one in-progress session
-// (sessA) and one ready-for-review session (sessR). Used by the m/r handler tests
-// below. The caller is responsible for adding agents to sessA via AddTestAgent.
+// makeFocusModeMRApp wires up an App with one in-progress session (sessA) and
+// one ready-for-review session (sessR). Used by the review-panel tests below.
+// The caller is responsible for adding agents to sessA via AddTestAgent.
 func makeFocusModeMRApp(t *testing.T) (App, *agent.Session, *agent.Session) {
 	t.Helper()
 	sessA := agent.NewSessionForTest("a", "active-a")
@@ -1687,140 +1200,6 @@ func makeFocusModeMRApp(t *testing.T) (App, *agent.Session, *agent.Session) {
 		{kind: listItemSession, repoPath: "/r", session: sessR},
 	})
 	return app, sessA, sessR
-}
-
-// TestFocusMode_MKey_CursorOnReviewSection_ShowsError verifies that pressing "m"
-// while the cursor is on the REVIEW QUEUE section is a no-op that surfaces an
-// error explaining why nothing happened.
-func TestFocusMode_MKey_CursorOnReviewSection_ShowsError(t *testing.T) {
-	app, sessA, _ := makeFocusModeMRApp(t)
-	sessA.AddTestAgent("a-1", false, agent.StatusIdle)
-	app.cursor.SetSection(focusSectionReview)
-	app.cursor.SetIndex(focusSectionReview, 0)
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
-	app = model.(App)
-
-	if app.err == "" {
-		t.Fatal("expected error message when pressing m with cursor on review section")
-	}
-	if !strings.Contains(app.err, "Planning or Building") {
-		t.Errorf("expected error to mention Planning or Building, got %q", app.err)
-	}
-	// sessA must NOT have transitioned phase.
-	if sessA.LifecyclePhase() != agent.LifecycleInProgress {
-		t.Errorf("expected sessA phase unchanged=InProgress, got %v", sessA.LifecyclePhase())
-	}
-}
-
-// TestFocusMode_MKey_ActiveSession_ShowsRunningError verifies that pressing "m"
-// on an active (non-reviewable) session surfaces a "still running" error and
-// does not transition the session phase.
-func TestFocusMode_MKey_ActiveSession_ShowsRunningError(t *testing.T) {
-	app, sessA, _ := makeFocusModeMRApp(t)
-	sessA.AddTestAgent("a-1", false, agent.StatusActive)
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 0)
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
-	app = model.(App)
-
-	if app.err == "" {
-		t.Fatal("expected error message when pressing m on active session")
-	}
-	if !strings.Contains(app.err, "still running") {
-		t.Errorf("expected error to mention still running, got %q", app.err)
-	}
-	if sessA.LifecyclePhase() != agent.LifecycleInProgress {
-		t.Errorf("expected sessA phase unchanged=InProgress, got %v", sessA.LifecyclePhase())
-	}
-}
-
-// TestFocusMode_MKey_IdleSession_TransitionsToReady verifies that pressing "m"
-// on a session whose agents are all idle (Claude finished a turn but did not
-// /exit) transitions the session to ReadyForReview and fires the diff fetch.
-func TestFocusMode_MKey_IdleSession_TransitionsToReady(t *testing.T) {
-	app, sessA, _ := makeFocusModeMRApp(t)
-	sessA.AddTestAgent("a-1", false, agent.StatusIdle)
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 0)
-
-	model, cmd := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
-	app = model.(App)
-
-	if sessA.LifecyclePhase() != agent.LifecycleReadyForReview {
-		t.Errorf("expected sessA phase=ReadyForReview, got %v", sessA.LifecyclePhase())
-	}
-	if app.cursor.Index(focusSectionReview) != 0 {
-		t.Errorf("expected focusReviewIdx reset to 0, got %d", app.cursor.Index(focusSectionReview))
-	}
-	if cmd == nil {
-		t.Error("expected a diff-fetch Cmd, got nil")
-	}
-	if app.err != "" {
-		t.Errorf("expected no error on success, got %q", app.err)
-	}
-}
-
-// TestFocusMode_RKey_EmptyQueue_ShowsError verifies that pressing "r" with no
-// review-phase sessions surfaces an error and does not change panelFocus.
-func TestFocusMode_RKey_EmptyQueue_ShowsError(t *testing.T) {
-	sessA := agent.NewSessionForTest("a", "active-a")
-	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
-	sessA.AddTestAgent("a-1", false, agent.StatusActive)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessA},
-	})
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 0)
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	app = model.(App)
-
-	if app.err == "" {
-		t.Fatal("expected error message when pressing r with empty queue")
-	}
-	if !strings.Contains(app.err, "review queue is empty") {
-		t.Errorf("expected error to mention empty review queue, got %q", app.err)
-	}
-	if app.modals.Current() == focusReview {
-		t.Error("expected panelFocus to stay focusList, got focusReview")
-	}
-	if app.modals.Review() != nil {
-		t.Errorf("expected reviewSession to stay nil, got %v", app.modals.Review())
-	}
-}
-
-// TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel verifies that pressing "r"
-// with at least one review-phase session opens the review panel and selects the
-// session at focusReviewIdx.
-func TestFocusMode_RKey_NonEmptyQueue_OpensReviewPanel(t *testing.T) {
-	app, _, sessR := makeFocusModeMRApp(t)
-	app.cursor.SetSection(focusSectionReview)
-	app.cursor.SetIndex(focusSectionReview, 0)
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	app = model.(App)
-
-	if app.err != "" {
-		t.Errorf("expected no error, got %q", app.err)
-	}
-	if app.modals.Current() != focusReview {
-		t.Errorf("expected panelFocus=focusReview, got %v", app.modals.Current())
-	}
-	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
-		t.Errorf("expected reviewSession=sessR, got %v", app.modals.Review())
-	}
-	if sessR.LifecyclePhase() != agent.LifecycleInReview {
-		t.Errorf("expected sessR phase=InReview, got %v", sessR.LifecyclePhase())
-	}
 }
 
 // TestReviewPanel_CKey_MarksComplete verifies that pressing "c" in the review
@@ -2425,61 +1804,6 @@ func TestPrimaryAgent_PrefersActiveOverIdle(t *testing.T) {
 	_ = idleAgent
 }
 
-// TestPipelinePRClickResetsDoubleClick guards against a phantom double-click:
-// when the user clicks the PR-indicator on a review row and then quickly
-// clicks the same review card, the second click must NOT be interpreted as a
-// double-click that opens the review panel. The fix is to reset
-// lastPipelineClick after the PR-activation early return.
-func TestPipelinePRClickResetsDoubleClick(t *testing.T) {
-	origOpenURL := openURL
-	openURL = func(string) error { return nil }
-	defer func() { openURL = origOpenURL }()
-
-	sessR := agent.NewSessionForTest("r", "review-r")
-	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessR},
-	})
-	// Seed a PR cache entry so the indicator shows up and the early-return path is reachable.
-	sessKey := cacheKey("/r", sessR.ID)
-	app.prCache = map[string]*prCacheEntry{
-		sessKey: {pr: &github.PRState{Number: 42, URL: ""}},
-	}
-
-	// First click on the right edge of the review row triggers the PR
-	// early-return path. URL is empty so openURL is skipped, but the early
-	// return runs.
-	prClick := tea.MouseClickMsg{Button: tea.MouseLeft, X: app.width - 2, Y: 8}
-	model, _ := app.Update(prClick)
-	app = model.(App)
-	if !app.lastPipelineClick.IsZero() {
-		// Empty URL skipped the early return — set a URL and try again so
-		// the test exercises the path we actually care about.
-		app.prCache[sessKey].pr.URL = "https://example/pr/42"
-		model, _ = app.Update(prClick)
-		app = model.(App)
-	}
-
-	// Second click within the double-click window on the same card. With the
-	// fix, lastPipelineClick was zeroed by the PR-click early return, so this
-	// is a fresh single click — not a double-click — and panelFocus stays out
-	// of focusReview.
-	cardClick := tea.MouseClickMsg{Button: tea.MouseLeft, X: 30, Y: 8}
-	model, _ = app.Update(cardClick)
-	app = model.(App)
-
-	if app.modals.Current() == focusReview {
-		t.Fatalf("expected card click after PR click to single-click only, but it triggered focusReview (phantom double-click)")
-	}
-}
-
 // TestRepoPathForSession_FindsSessionsAcrossMultiRepo verifies that
 // repoPathForSession returns the owning repo of a session even when
 // activeRepo points elsewhere — the multi-repo correctness condition the
@@ -2714,344 +2038,6 @@ func TestHandleReviewDiff_UsesRepoPathFromMsg_NotFirstMatch(t *testing.T) {
 	}
 	if reviewerA.capturedPrompt != "" {
 		t.Errorf("repoA reviewer should not have been called, but got prompt=%q", reviewerA.capturedPrompt)
-	}
-}
-
-// makeFourPhaseApp wires up an app with one session in each of the four
-// pipeline phases so tests can exercise navigation across all sections without
-// requiring a real manager / process. Sessions are constructed via
-// NewSessionForTest so callers can attach AddTestAgent rows when they need
-// agent state to drive IsReviewable / status badges.
-func makeFourPhaseApp(t *testing.T) (App, *agent.Session, *agent.Session, *agent.Session, *agent.Session) {
-	t.Helper()
-	sessP := agent.NewSessionForTest("p", "planning")
-	sessP.SetLifecyclePhase(agent.LifecyclePlanning)
-	sessB := agent.NewSessionForTest("b", "building")
-	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
-	sessR := agent.NewSessionForTest("r", "review")
-	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
-	sessS := agent.NewSessionForTest("s", "shipping")
-	sessS.SetLifecyclePhase(agent.LifecycleShipping)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessP},
-		{kind: listItemSession, repoPath: "/r", session: sessB},
-		{kind: listItemSession, repoPath: "/r", session: sessR},
-		{kind: listItemSession, repoPath: "/r", session: sessS},
-	})
-	app.cursor.SetSection(focusSectionPlanning)
-	return app, sessP, sessB, sessR, sessS
-}
-
-// TestFourPhaseNavigation_JKWalksAllSections verifies that j moves through the
-// pipeline in render order Planning → Building → Reviewing → Shipping with one
-// keystroke per row, and k walks back the same path.
-func TestFourPhaseNavigation_JKWalksAllSections(t *testing.T) {
-	app, _, _, _, _ := makeFourPhaseApp(t)
-
-	want := []focusSection{
-		focusSectionBuilding,
-		focusSectionReview,
-		focusSectionShipping,
-	}
-	for i, section := range want {
-		model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-		app = model.(App)
-		if app.cursor.Section() != section {
-			t.Fatalf("after %d j-presses: expected section %v, got %v", i+1, section, app.cursor.Section())
-		}
-	}
-	// k walks back: shipping → review → building → planning.
-	wantBack := []focusSection{
-		focusSectionReview,
-		focusSectionBuilding,
-		focusSectionPlanning,
-	}
-	for i, section := range wantBack {
-		model, _ := app.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-		app = model.(App)
-		if app.cursor.Section() != section {
-			t.Fatalf("after %d k-presses: expected section %v, got %v", i+1, section, app.cursor.Section())
-		}
-	}
-}
-
-// TestFourPhaseNavigation_SkipsEmptySections verifies that with an empty
-// Building section, j moves directly Planning → Reviewing instead of stopping
-// on an empty Building cursor.
-func TestFourPhaseNavigation_SkipsEmptySections(t *testing.T) {
-	app, _, sessB, _, _ := makeFourPhaseApp(t)
-	// Demote the Building session into Planning so Building is empty; the
-	// cursor should still skip across to Reviewing on j.
-	sessB.SetLifecyclePhase(agent.LifecyclePlanning)
-
-	// Cursor starts on Planning section; press j to move past Planning's two
-	// rows (the original planning session + the demoted one).
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionPlanning || app.cursor.Index(focusSectionPlanning) != 1 {
-		t.Fatalf("first j: expected planning[1], got section=%v idx=%d", app.cursor.Section(), app.cursor.Index(focusSectionPlanning))
-	}
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-	if app.cursor.Section() != focusSectionReview {
-		t.Fatalf("second j (past empty Building): expected Reviewing, got %v", app.cursor.Section())
-	}
-}
-
-// TestBKey_AdvancesPlanningToBuilding verifies that pressing 'b' on a Planning
-// row transitions it to LifecycleInProgress and the cursor lands on a still-
-// non-empty section after clamp.
-func TestBKey_AdvancesPlanningToBuilding(t *testing.T) {
-	app, sessP, _, _, _ := makeFourPhaseApp(t)
-	app.cursor.SetSection(focusSectionPlanning)
-	app.cursor.SetIndex(focusSectionPlanning, 0)
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
-	app = model.(App)
-	if sessP.LifecyclePhase() != agent.LifecycleInProgress {
-		t.Fatalf("expected Planning → InProgress on 'b', got %v", sessP.LifecyclePhase())
-	}
-	// Planning had only one row, so the cursor should clamp to a non-empty
-	// section (Building, where the row just moved).
-	if app.cursor.Section() != focusSectionBuilding {
-		t.Fatalf("after 'b': expected cursor on Building, got %v", app.cursor.Section())
-	}
-}
-
-// TestMKey_FromPlanning_AdvancesToReady verifies that pressing 'm' on a
-// Planning session whose agent is idle skips Building and transitions
-// directly to ReadyForReview. This matches the "press m to review" cue
-// rendered on any idle-reviewable card and supports the natural flow when
-// Claude finishes the requested work in one shot.
-func TestMKey_FromPlanning_AdvancesToReady(t *testing.T) {
-	app, sessP, _, _, _ := makeFourPhaseApp(t)
-	sessP.AddTestAgent("p-1", false, agent.StatusIdle)
-	app.cursor.SetSection(focusSectionPlanning)
-	app.cursor.SetIndex(focusSectionPlanning, 0)
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
-	app = model.(App)
-	if sessP.LifecyclePhase() != agent.LifecycleReadyForReview {
-		t.Fatalf("expected Planning → ReadyForReview on 'm' (skipping Building), got %v", sessP.LifecyclePhase())
-	}
-}
-
-// TestBKey_OutsidePlanning_FallsThroughToBreak verifies that 'b' on a
-// non-Planning section is NOT a session transition — it falls through to the
-// existing global "take a break" handler so the Planning advance and the
-// wellness break can share the same physical key.
-func TestBKey_OutsidePlanning_FallsThroughToBreak(t *testing.T) {
-	app, _, sessB, _, _ := makeFourPhaseApp(t)
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 0)
-	if app.wellness.focusBreakMode {
-		t.Fatal("precondition: focusBreakMode should be false")
-	}
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
-	app = model.(App)
-	if !app.wellness.focusBreakMode {
-		t.Fatal("expected 'b' outside Planning to engage the break overlay")
-	}
-	if sessB.LifecyclePhase() != agent.LifecycleInProgress {
-		t.Errorf("Building session phase changed unexpectedly: %v", sessB.LifecyclePhase())
-	}
-}
-
-// TestBKey_InBreakMode_FromPlanningCursor_ExitsBreak verifies that pressing 'b'
-// while the break overlay is active exits the break regardless of which pipeline
-// section the cursor is on. The Planning-advance branch must not intercept the
-// press when focusBreakMode is true.
-func TestBKey_InBreakMode_FromPlanningCursor_ExitsBreak(t *testing.T) {
-	app, sessP, _, _, _ := makeFourPhaseApp(t)
-	app.wellness.focusBreakMode = true
-	app.wellness.focusBreakTimerUp = true // single-press clean exit
-	// makeFourPhaseApp already sets focusCursorSection = focusSectionPlanning
-	app.cursor.SetIndex(focusSectionPlanning, 0)
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
-	app = model.(App)
-
-	if app.wellness.focusBreakMode {
-		t.Fatal("expected 'b' in break mode to exit the break overlay; focusBreakMode is still true")
-	}
-	if sessP.LifecyclePhase() != agent.LifecyclePlanning {
-		t.Errorf("Planning session phase changed unexpectedly: got %v, want %v",
-			sessP.LifecyclePhase(), agent.LifecyclePlanning)
-	}
-}
-
-// TestTick_BreakDoesNotEnterWhilePanelOpen pins M1: the auto-break entry must
-// only fire when the user is on the pipeline (focusList). If the user is in
-// the shipping panel mid-merge, the review panel, the plan editor, or
-// elsewhere, the break overlay must defer until they're back on the pipeline
-// — otherwise the blue overlay covers e.g. the shipping panel and hides the
-// merge result behind the break screen.
-func TestTick_BreakDoesNotEnterWhilePanelOpen(t *testing.T) {
-	cases := []struct {
-		name  string
-		focus panelFocus
-	}{
-		{"focusLaunch", focusLaunch},
-		{"focusReview", focusReview},
-		{"focusShipping", focusShipping},
-		{"focusPlanEditor", focusPlanEditor},
-		{"focusConfig", focusConfig},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			app := NewApp()
-			app.wellness.focusSessionMinutes = 1
-			app.wellness.sessionStart = time.Now().Add(-2 * time.Minute) // long past deadline
-			app.wellness.lastInputAt = time.Now()                        // recent input → no idle decay
-			// Stub an overlay into the requested focus state. The break-defer
-			// guard reads modals.IsList(); the specific model doesn't matter.
-			switch tc.focus {
-			case focusLaunch:
-				app.modals.OpenLaunch(nil, nil, "")
-			case focusReview:
-				app.modals.OpenReview(&reviewPanelModel{})
-			case focusShipping:
-				app.modals.OpenShipping(&shippingPanelModel{})
-			case focusPlanEditor:
-				app.modals.OpenPlanEditor(&planEditorModel{})
-			case focusConfig:
-				app.modals.OpenConfig(&configForm{}, "/repo")
-			}
-
-			model, _ := app.Update(tickMsg(time.Now()))
-			app = model.(App)
-
-			if app.wellness.focusBreakMode {
-				t.Errorf("break entered while panelFocus=%v; expected deferral until focusList", tc.focus)
-			}
-		})
-	}
-}
-
-// TestTick_BreakEntersOnPipeline confirms the positive case: when the user is
-// on the pipeline (focusList), the auto-break fires once the session window
-// has elapsed.
-func TestTick_BreakEntersOnPipeline(t *testing.T) {
-	app := NewApp()
-	app.wellness.focusSessionMinutes = 1
-	app.wellness.sessionStart = time.Now().Add(-2 * time.Minute)
-	app.wellness.lastInputAt = time.Now() // recent input → EffectiveElapsed ≈ 2min > threshold
-	// Default modal state is focusList (zero value); no setup needed.
-
-	model, _ := app.Update(tickMsg(time.Now()))
-	app = model.(App)
-
-	if !app.wellness.focusBreakMode {
-		t.Error("expected break to enter when on pipeline past session deadline")
-	}
-}
-
-// TestTick_BreakDoesNotFireWhenIdleDecayBringsElapsedUnderThreshold verifies
-// that a user who walked away for a long time does not get a surprise auto-break
-// on return: if idleDebt / currentExtendedIdle brings EffectiveElapsed below
-// the session threshold, the break should NOT fire even though wall-clock
-// time.Since(sessionStart) would exceed it.
-func TestTick_BreakDoesNotFireWhenIdleDecayBringsElapsedUnderThreshold(t *testing.T) {
-	app := NewApp()
-	app.wellness.focusSessionMinutes = 90
-	app.wellness.sessionStart = time.Now().Add(-100 * time.Minute)
-	// 60 min idle: currentExtendedIdle = 60min - 3min grace = 57min
-	// EffectiveElapsed = 100min - 0 - 57min = 43min < 90min → no break
-	app.wellness.lastInputAt = time.Now().Add(-60 * time.Minute)
-
-	model, _ := app.Update(tickMsg(time.Now()))
-	app = model.(App)
-
-	if app.wellness.focusBreakMode {
-		t.Error("break fired despite EffectiveElapsed being under threshold; idle decay must suppress it")
-	}
-}
-
-// TestTick_BreakFiresWhenEffectiveElapsedExceedsThreshold is the complementary
-// positive case: when lastInputAt is recent (within grace), EffectiveElapsed
-// matches wall-clock elapsed and the break fires normally.
-func TestTick_BreakFiresWhenEffectiveElapsedExceedsThreshold(t *testing.T) {
-	app := NewApp()
-	app.wellness.focusSessionMinutes = 1
-	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
-	app.wellness.lastInputAt = time.Now() // recent — no idle decay
-
-	model, _ := app.Update(tickMsg(time.Now()))
-	app = model.(App)
-
-	if !app.wellness.focusBreakMode {
-		t.Error("break did not fire despite EffectiveElapsed exceeding threshold with recent lastInputAt")
-	}
-}
-
-// TestActivateFocusCursor_Shipping_OpensShippingPanel verifies that pressing
-// enter on a Shipping row opens the shipping panel (focusShipping) regardless
-// of whether a PR URL is cached. The browser is reached via the 'p' key inside
-// the panel rather than being opened directly on activation.
-func TestActivateFocusCursor_Shipping_OpensShippingPanel(t *testing.T) {
-	sessS := agent.NewSessionForTest("s", "ship-s")
-	sessS.SetLifecyclePhase(agent.LifecycleShipping)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessS},
-	})
-	app.prCache = map[string]*prCacheEntry{
-		sessS.ID: {pr: &github.PRState{Number: 7, URL: "https://example/pr/7"}},
-	}
-	app.cursor.SetSection(focusSectionShipping)
-	app.cursor.SetIndex(focusSectionShipping, 0)
-
-	_, ok := app.activateFocusCursor()
-	if !ok {
-		t.Fatal("expected activateFocusCursor on Shipping to return ok=true")
-	}
-	if app.modals.Current() != focusShipping {
-		t.Fatalf("expected panelFocus=focusShipping, got %v", app.modals.Current())
-	}
-	if app.modals.Shipping() == nil || app.modals.Shipping().Session() != sessS {
-		t.Fatalf("expected shippingSession to be set to the selected session")
-	}
-}
-
-// TestActivateFocusCursor_Shipping_NoPREntry verifies that activating a
-// Shipping row with no cached PR entry still opens the shipping panel so the
-// user can see the "fetching PR status" placeholder instead of a no-op.
-func TestActivateFocusCursor_Shipping_NoPREntry(t *testing.T) {
-	sessS := agent.NewSessionForTest("s", "ship-s")
-	sessS.SetLifecyclePhase(agent.LifecycleShipping)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: sessS},
-	})
-	app.cursor.SetSection(focusSectionShipping)
-	app.cursor.SetIndex(focusSectionShipping, 0)
-
-	_, ok := app.activateFocusCursor()
-	if !ok {
-		t.Fatal("expected ok=true even without a cached PR")
-	}
-	if app.modals.Current() != focusShipping {
-		t.Fatalf("expected focusShipping, got %v", app.modals.Current())
 	}
 }
 
@@ -4157,8 +3143,8 @@ func TestNewSessionFlow_SubmitReturnsToDashboard(t *testing.T) {
 	app.view = ViewNewSession
 	app.newSession.returnTo = ViewDashboard
 
-	// Planning path (skipPlanning=false) should return to dashboard.
-	model, _ := app.Update(promptModalSubmitMsg{prompt: "add dark mode", skipPlanning: false, overrides: sessionOverrides{}})
+	// Plan-first path should return to dashboard.
+	model, _ := app.Update(promptModalSubmitMsg{prompt: "add dark mode", planFirst: true, overrides: sessionOverrides{}})
 	if p, ok := model.(*App); ok {
 		app = *p
 	} else {
@@ -4266,7 +3252,7 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 	}
 	app.resolvedCache[dir] = resolved
 
-	model, _ := app.Update(promptModalSubmitMsg{prompt: "write the feature", skipPlanning: false, overrides: sessionOverrides{}})
+	model, _ := app.Update(promptModalSubmitMsg{prompt: "write the feature", planFirst: true, overrides: sessionOverrides{}})
 	if p, ok := model.(*App); ok {
 		app = *p
 	} else {
@@ -4504,14 +3490,14 @@ func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 		t.Fatal("expected ViewNewSession after picker select with PlanFirstEnabled=true")
 	}
 
-	// Submit through the planning path (skipPlanning=false uses
+	// Submit through the planning path (planFirst=true uses
 	// CreateSessionNoAgent which doesn't spawn an agent). The skip path
 	// differs only in calling CreateSession; both share the same repo lookup
 	// that the fix straightened out, so this exercises the fix.
 	sessionsBefore1 := len(mgr1.ListSessions())
 	sessionsBefore2 := len(mgr2.ListSessions())
 
-	model, _ = app.Update(promptModalSubmitMsg{prompt: "test", skipPlanning: false, overrides: sessionOverrides{}})
+	model, _ = app.Update(promptModalSubmitMsg{prompt: "test", planFirst: true, overrides: sessionOverrides{}})
 	// submitPromptModal is on *App so the returned tea.Model is *App, not App.
 	if p, ok := model.(*App); ok {
 		app = *p
@@ -4884,9 +3870,9 @@ func TestSubmitPromptModal_SkipPath_AppliesAgentModelOverride(t *testing.T) {
 	app, mgr := setupSubmitModalApp(t, resolved)
 
 	_, cmd := app.Update(promptModalSubmitMsg{
-		prompt:       "add dark mode",
-		skipPlanning: true,
-		overrides:    sessionOverrides{AgentModel: "claude-opus-4-8"},
+		prompt:    "add dark mode",
+		planFirst: false,
+		overrides: sessionOverrides{AgentModel: "claude-opus-4-8"},
 	})
 	if cmd == nil {
 		t.Fatal("expected cmd from skip-path submit")
@@ -4904,9 +3890,9 @@ func TestSubmitPromptModal_SkipPath_BypassPermissionsOverride(t *testing.T) {
 
 	trueVal := true
 	_, cmd := app.Update(promptModalSubmitMsg{
-		prompt:       "add dark mode",
-		skipPlanning: true,
-		overrides:    sessionOverrides{BypassPermissions: &trueVal},
+		prompt:    "add dark mode",
+		planFirst: false,
+		overrides: sessionOverrides{BypassPermissions: &trueVal},
 	})
 	if cmd == nil {
 		t.Fatal("expected cmd from skip-path submit")
@@ -4923,9 +3909,9 @@ func TestSubmitPromptModal_SkipPath_NoOverride_UsesResolved(t *testing.T) {
 	app, mgr := setupSubmitModalApp(t, resolved)
 
 	_, cmd := app.Update(promptModalSubmitMsg{
-		prompt:       "add dark mode",
-		skipPlanning: true,
-		overrides:    sessionOverrides{}, // no override
+		prompt:    "add dark mode",
+		planFirst: false,
+		overrides: sessionOverrides{}, // no override
 	})
 	if cmd == nil {
 		t.Fatal("expected cmd")
@@ -4943,9 +3929,9 @@ func TestSubmitPromptModal_PlanningPath_StoresPendingOverrides(t *testing.T) {
 
 	over := sessionOverrides{PlanModel: "claude-opus-4-8", AgentModel: "claude-sonnet-4-6"}
 	model2, _ := app.Update(promptModalSubmitMsg{
-		prompt:       "add dark mode",
-		skipPlanning: false,
-		overrides:    over,
+		prompt:    "add dark mode",
+		planFirst: true,
+		overrides: over,
 	})
 	var appAfter App
 	switch v := model2.(type) {
@@ -5281,18 +4267,12 @@ func TestCreateResult_SkipFocusLaunch_StaysOnDashboard(t *testing.T) {
 	if app.modals.LaunchAgent() != nil {
 		t.Errorf("focusLaunchAgent: got %v, want nil", app.modals.LaunchAgent().ID)
 	}
-	if app.cursor.Section() != focusSectionBuilding {
-		t.Errorf("focusCursorSection: got %v, want focusSectionBuilding", app.cursor.Section())
+	row, ok := app.selectedSessionRow()
+	if !ok {
+		t.Fatal("session list is empty — cursor-move block must run even when skipFocusLaunch is true")
 	}
-	building := app.listItems().buildingSessions()
-	if len(building) == 0 {
-		t.Fatal("building section is empty — cursor-move block must run even when skipFocusLaunch is true")
-	}
-	if app.cursor.Index(focusSectionBuilding) >= len(building) {
-		t.Fatalf("focusBuildingIdx %d out of range (len=%d)", app.cursor.Index(focusSectionBuilding), len(building))
-	}
-	if got := building[app.cursor.Index(focusSectionBuilding)].session; got == nil || got.ID != sess.ID {
-		t.Errorf("cursor does not point at new session: got %v, want %v", got, sess.ID)
+	if row.session == nil || row.session.ID != sess.ID {
+		t.Errorf("cursor does not point at new session: got %v, want %v", row.session, sess.ID)
 	}
 }
 
@@ -5841,9 +4821,10 @@ func TestAutoPromoteToReview_TriggersValidation(t *testing.T) {
 	}
 }
 
-// TestManualMarkReady_TriggersValidation verifies that pressing 'm' on a
-// finished Building session with configured checks starts a validation run.
-func TestManualMarkReady_TriggersValidation(t *testing.T) {
+// TestOpenReview_TriggersValidation verifies that opening the review panel
+// with 'r' on a finished session with configured checks starts a validation
+// run (the replacement for the retired mark-ready 'm' key).
+func TestOpenReview_TriggersValidation(t *testing.T) {
 	dir, mgr := setupAutoPromoteRepo(t)
 
 	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
@@ -5869,15 +4850,14 @@ func TestManualMarkReady_TriggersValidation(t *testing.T) {
 	}
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 	app.clampCursor()
-	// Move cursor to the Building section so the m-key handler targets the session.
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 0)
 
-	app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"}) //nolint:errcheck
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	app = model.(App)
+	app = pumpPanelCmd(t, app, cmd)
 
 	run := app.validationRuns[cacheKey(dir, sess.ID)]
 	if run == nil {
-		t.Fatal("validationRuns[cacheKey(dir, sess.ID)] is nil — validation was not triggered on manual m")
+		t.Fatal("validationRuns[cacheKey(dir, sess.ID)] is nil — validation was not triggered on r")
 	}
 	if len(run.results) != 1 {
 		t.Errorf("len(results) = %d, want 1", len(run.results))
@@ -5945,73 +4925,6 @@ func TestValidationRuns_RepoKeyedNoCollision(t *testing.T) {
 	}
 }
 
-// TestRecordInput_NonDashboardView verifies that a key press routed through the
-// non-dashboard view handler (e.g. the validation-checks sub-editor) also
-// records input so idle decay doesn't accumulate while the user is in settings.
-func TestRecordInput_NonDashboardView(t *testing.T) {
-	const tol = 500 * time.Millisecond
-	app := NewApp()
-	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
-	app.wellness.lastInputAt = time.Now().Add(-4 * time.Minute) // 1 min past grace
-
-	// Open the checks editor to put the app into the focusRepoChecks path.
-	// We use openRepoChecksEditor directly to bypass the normal init path.
-	editor := newRepoChecksModel("repo", nil)
-	app.openRepoChecksEditor(&editor, "/repo")
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-
-	if app.wellness.idleDebt < 1*time.Minute-tol || app.wellness.idleDebt > 1*time.Minute+tol {
-		t.Errorf("idleDebt = %v after non-dashboard KeyPress, want ~1m", app.wellness.idleDebt)
-	}
-}
-
-// TestRecordInput_KeyPress verifies that a tea.KeyPressMsg on the dashboard
-// locks the idle gap into idleDebt and resets lastInputAt so EffectiveElapsed
-// reflects the reduced active time.
-func TestRecordInput_KeyPress(t *testing.T) {
-	const tol = 500 * time.Millisecond
-	app := NewApp()
-	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
-	app.wellness.lastInputAt = time.Now().Add(-4 * time.Minute) // 1 min past grace
-
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	app = model.(App)
-
-	// idleDebt should be ≈ 1 min (4min gap − 3min grace)
-	if app.wellness.idleDebt < 1*time.Minute-tol || app.wellness.idleDebt > 1*time.Minute+tol {
-		t.Errorf("idleDebt = %v after KeyPress, want ~1m", app.wellness.idleDebt)
-	}
-	// EffectiveElapsed ≈ 5min − 1min idleDebt − 0 currentExtendedIdle = 4min
-	got := app.wellness.EffectiveElapsed()
-	want := 4 * time.Minute
-	if got < want-tol || got > want+tol {
-		t.Errorf("EffectiveElapsed() = %v, want ~%v after KeyPress records input", got, want)
-	}
-}
-
-// TestRecordInput_MouseClick verifies that a tea.MouseClickMsg on the dashboard
-// records input the same way as a key press.
-func TestRecordInput_MouseClick(t *testing.T) {
-	const tol = 500 * time.Millisecond
-	app := NewApp()
-	app.wellness.sessionStart = time.Now().Add(-5 * time.Minute)
-	app.wellness.lastInputAt = time.Now().Add(-4 * time.Minute)
-
-	model, _ := app.Update(tea.MouseClickMsg{})
-	app = model.(App)
-
-	if app.wellness.idleDebt < 1*time.Minute-tol || app.wellness.idleDebt > 1*time.Minute+tol {
-		t.Errorf("idleDebt = %v after MouseClick, want ~1m", app.wellness.idleDebt)
-	}
-	got := app.wellness.EffectiveElapsed()
-	want := 4 * time.Minute
-	if got < want-tol || got > want+tol {
-		t.Errorf("EffectiveElapsed() = %v, want ~%v after MouseClick records input", got, want)
-	}
-}
-
 // TestInit_SeedsLastInputAt verifies that handleInit populates lastInputAt so
 // the idle-decay path starts from a known reference rather than the zero value.
 func TestInit_SeedsLastInputAt(t *testing.T) {
@@ -6027,58 +4940,5 @@ func TestInit_SeedsLastInputAt(t *testing.T) {
 	}
 	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
 		t.Errorf("lastInputAt %v is not within [%v, %v]", app.wellness.lastInputAt, before, after)
-	}
-}
-
-// TestBreakExit_TimerUp_ResetsIdleDebt verifies that the timer-up break-exit
-// path (single 'b' press) resets idleDebt and refreshes lastInputAt.
-func TestBreakExit_TimerUp_ResetsIdleDebt(t *testing.T) {
-	app, _, _, _, _ := makeFourPhaseApp(t)
-	app.wellness.focusBreakMode = true
-	app.wellness.focusBreakTimerUp = true
-	app.wellness.idleDebt = 5 * time.Minute
-	app.wellness.lastInputAt = time.Now().Add(-10 * time.Minute)
-
-	before := time.Now()
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
-	after := time.Now()
-	app = model.(App)
-
-	if app.wellness.focusBreakMode {
-		t.Fatal("expected break mode to exit on timer-up 'b' press")
-	}
-	if app.wellness.idleDebt != 0 {
-		t.Errorf("idleDebt = %v after break exit, want 0", app.wellness.idleDebt)
-	}
-	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
-		t.Errorf("lastInputAt %v not refreshed on break exit; want within [%v, %v]",
-			app.wellness.lastInputAt, before, after)
-	}
-}
-
-// TestBreakExit_ShortBreakOverride_ResetsIdleDebt verifies that the double-press
-// early-exit path also resets idleDebt and refreshes lastInputAt.
-func TestBreakExit_ShortBreakOverride_ResetsIdleDebt(t *testing.T) {
-	app, _, _, _, _ := makeFourPhaseApp(t)
-	app.wellness.focusBreakMode = true
-	app.wellness.focusBreakTimerUp = false
-	app.wellness.focusBreakShortWarning = true // second 'b' press: override
-	app.wellness.idleDebt = 3 * time.Minute
-	app.wellness.lastInputAt = time.Now().Add(-8 * time.Minute)
-
-	before := time.Now()
-	model, _ := app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
-	after := time.Now()
-	app = model.(App)
-
-	if app.wellness.focusBreakMode {
-		t.Fatal("expected break mode to exit on short-break override 'b' press")
-	}
-	if app.wellness.idleDebt != 0 {
-		t.Errorf("idleDebt = %v after short-break override, want 0", app.wellness.idleDebt)
-	}
-	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
-		t.Errorf("lastInputAt %v not refreshed on short-break override; want within [%v, %v]",
-			app.wellness.lastInputAt, before, after)
 	}
 }

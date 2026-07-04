@@ -2,6 +2,7 @@ package audio
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -42,9 +43,11 @@ func TestPlayer_Debounce(t *testing.T) {
 	defer p.Close()
 
 	// Use "true" as a no-op command so Play() sets lastPlayed without
-	// needing a real audio player.
+	// needing a real audio player. The chime path must be a throwaway temp
+	// file: Close() removes chimePath, and pointing it at /dev/null deletes
+	// the device node when the suite runs as root (e.g. CI containers).
 	p.playCmd = "true"
-	p.chimePath = "/dev/null"
+	p.chimePath = filepath.Join(t.TempDir(), "chime.wav")
 
 	// First call should update lastPlayed.
 	p.Play()

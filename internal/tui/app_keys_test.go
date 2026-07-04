@@ -230,14 +230,14 @@ func TestFocusLaunch_NilAgent_RoutesBackToList(t *testing.T) {
 
 func TestFocusLaunch_Home_ResetsScroll(t *testing.T) {
 	// 'home' is the only focusLaunch key that doesn't touch the agent's VT
-	// (it just zeros dashboard.scrollOffset), so it's safe to exercise with
+	// (it just zeros launch.scrollOffset), so it's safe to exercise with
 	// a synthetic test agent that has no real terminal.
 	app, _, _ := appInFocusLaunch(t)
-	app.dashboard.scrollOffset = 5
+	app.launch.scrollOffset = 5
 	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyHome})
 	app = model.(App)
-	if app.dashboard.scrollOffset != 0 {
-		t.Errorf("home did not reset scrollOffset, got %d", app.dashboard.scrollOffset)
+	if app.launch.scrollOffset != 0 {
+		t.Errorf("home did not reset scrollOffset, got %d", app.launch.scrollOffset)
 	}
 }
 

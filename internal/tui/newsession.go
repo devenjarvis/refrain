@@ -21,13 +21,25 @@ type sessionOverrides struct {
 	BypassPermissions *bool
 }
 
-// promptModalSubmitMsg fires when the user accepts the prompt. SkipPlanning
-// is true for the ctrl+enter "do today's flow" path, false for the default
-// enter path that runs through the plan-first drafting/editor flow.
+// sessionContext selects where a new session's agents run: an isolated
+// worktree on a fresh branch (the default, parallel-safe) or the repo's main
+// working tree (a checkout session — for debugging and everyday tasks that
+// need the user's real state).
+type sessionContext int
+
+const (
+	contextWorktree sessionContext = iota
+	contextCheckout
+)
+
+// promptModalSubmitMsg fires when the user accepts the prompt. planFirst is
+// true for the ctrl+p plan-drafting path; the default enter path spawns a raw
+// claude session immediately (prompt may be empty — a blank REPL).
 type promptModalSubmitMsg struct {
-	prompt       string
-	skipPlanning bool
-	overrides    sessionOverrides
+	prompt    string
+	planFirst bool
+	context   sessionContext
+	overrides sessionOverrides
 }
 
 // promptModalCancelMsg fires on `esc`.
@@ -52,37 +64,33 @@ type overrideField struct {
 
 const promptModalCharLimit = 4000
 
-// promptModalTitles rotate through the screen header. Short and imperative,
-// each one nudges toward Refrain's one-primary-goal-per-block frame.
+// promptModalTitles rotate through the screen header. Task-neutral: a session
+// is a conversation with Claude, not necessarily a build.
 var promptModalTitles = []string{
-	"What do you want to build?",
-	"What's today's primary goal?",
-	"What's the one thing?",
-	"What does done look like?",
-	"What's the next move?",
-	"What should we ship?",
-	"What would make this block count?",
-	"Define the goal.",
+	"What's the task?",
+	"What should Claude look at?",
+	"What's next?",
 }
 
-// promptModalPlaceholders show concrete task shapes inside the textarea so
-// a first-time user has a model of what a planner-friendly prompt looks like.
+// promptModalPlaceholders show concrete task shapes inside the textarea —
+// deliberately mixed (explore, debug, write, build) so a first-time user
+// knows a session doesn't have to end in a PR.
 var promptModalPlaceholders = []string{
-	"e.g. Add a dark-mode toggle to the settings page",
+	"e.g. Explain how auth works in this repo",
 	"e.g. Fix the flaky test in foo_test.go",
-	"e.g. Migrate auth from sessions to JWT",
-	"e.g. Wire up file upload to S3",
+	"e.g. Draft a ticket for the flaky CI failure",
+	"e.g. Add a dark-mode toggle to the settings page",
+	"e.g. Review the error handling in internal/git",
 	"e.g. Add unit tests for the shutdown sequence",
-	"e.g. Refactor the dashboard render path",
 }
 
 // pickPrompt is the indirection tests use to make rotation deterministic.
 var pickPrompt = func(n int) int { return rand.IntN(n) }
 
 const (
-	// newSessionSidebarWidth matches the dashboard sidebar (defaultSidebarWidth)
-	// so the new-session form lines up with the pipeline view behind it.
-	newSessionSidebarWidth  = defaultSidebarWidth
+	// newSessionSidebarWidth fits the widest field row: cursor (2) + label
+	// (20) + space + "< Worktree (new branch) >" (25) = 48, plus slack.
+	newSessionSidebarWidth  = 50
 	newSessionSidebarMinVP  = 110 // sidebar shown only when viewport width >= this
 	newSessionMaxTextareaW  = 120
 	newSessionVerticalSlack = 8 // rows consumed by header + title + blank rows + footer
@@ -150,8 +158,14 @@ func (m *newSessionModel) SetDefaults(resolved config.ResolvedSettings) {
 	m.buildOverrideFields()
 }
 
-// buildOverrideFields reconstructs the overrideFields slice from overrideDefaults.
-// Called by SetDefaults and Open so the form always reflects the latest defaults.
+// contextOptions are the display labels for the Context field, indexed by
+// sessionContext.
+var contextOptions = []string{"Worktree (new branch)", "Current checkout"}
+
+// buildOverrideFields reconstructs the sidebar field rows from
+// overrideDefaults. The Context row leads (it changes where the session runs);
+// the remaining rows are per-session overrides. Called by SetDefaults and Open
+// so the form always reflects the latest defaults.
 func (m *newSessionModel) buildOverrideFields() {
 	planModelSel := optionIndex(config.KnownModels, m.overrideDefaults.PlanModel)
 	agentModelSel := optionIndex(config.KnownAgentModels, m.overrideDefaults.AgentModel)
@@ -160,10 +174,21 @@ func (m *newSessionModel) buildOverrideFields() {
 		bypassVal = *m.overrideDefaults.BypassPermissions
 	}
 	m.overrideFields = []overrideField{
+		{label: "Context", kind: overrideFieldSelect, options: contextOptions, selected: int(contextWorktree)},
 		{label: "Plan Model", kind: overrideFieldSelect, options: config.KnownModels, selected: planModelSel},
 		{label: "Agent Model", kind: overrideFieldSelect, options: config.KnownAgentModels, selected: agentModelSel},
 		{label: "Bypass Permissions", kind: overrideFieldToggle, toggleValue: bypassVal},
 	}
+}
+
+// selectedContext returns the Context row's current value.
+func (m *newSessionModel) selectedContext() sessionContext {
+	for _, f := range m.overrideFields {
+		if f.label == "Context" {
+			return sessionContext(f.selected)
+		}
+	}
+	return contextWorktree
 }
 
 // Open activates the screen, resets textarea content, and picks a fresh
@@ -240,6 +265,20 @@ func (m newSessionModel) Update(msg tea.Msg) (newSessionModel, tea.Cmd) {
 			m.Close()
 			return m, func() tea.Msg { return promptModalCancelMsg{} }
 
+		case "ctrl+p":
+			// Plan-first: draft a plan before any agent spawns. Needs a task
+			// description — an empty prompt has nothing to plan.
+			val := strings.TrimSpace(m.textarea.Value())
+			if val == "" {
+				return m, nil
+			}
+			over := m.buildSubmitOverrides()
+			ctx := m.selectedContext()
+			m.Close()
+			return m, func() tea.Msg {
+				return promptModalSubmitMsg{prompt: val, planFirst: true, context: ctx, overrides: over}
+			}
+
 		case "tab":
 			// Advance focus: textarea → field0 → … → fieldn → textarea.
 			n := len(m.overrideFields)
@@ -299,35 +338,20 @@ func (m newSessionModel) Update(msg tea.Msg) (newSessionModel, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Absorb ctrl+enter / enter already handled above; other keys
-			// (including ctrl+enter when focus is on a field) are swallowed.
-			if key.String() == "ctrl+enter" {
-				return m, nil
-			}
+			// Other keys are swallowed while a field has focus.
 			return m, nil
 		}
 
-		// Textarea-focused submit/cancel paths.
-		switch key.String() {
-		case "ctrl+enter":
+		// Textarea-focused submit path: enter starts a raw session. An empty
+		// prompt is allowed — it opens a blank claude REPL, the everyday case
+		// for debugging and exploring.
+		if key.String() == "enter" {
 			val := strings.TrimSpace(m.textarea.Value())
-			if val == "" {
-				return m, nil
-			}
 			over := m.buildSubmitOverrides()
+			ctx := m.selectedContext()
 			m.Close()
 			return m, func() tea.Msg {
-				return promptModalSubmitMsg{prompt: val, skipPlanning: true, overrides: over}
-			}
-		case "enter":
-			val := strings.TrimSpace(m.textarea.Value())
-			if val == "" {
-				return m, nil
-			}
-			over := m.buildSubmitOverrides()
-			m.Close()
-			return m, func() tea.Msg {
-				return promptModalSubmitMsg{prompt: val, skipPlanning: false, overrides: over}
+				return promptModalSubmitMsg{prompt: val, context: ctx, overrides: over}
 			}
 		}
 	}
@@ -348,8 +372,10 @@ func (m newSessionModel) View() string {
 	}
 	header := rightAlign(left, rightStr, m.width)
 
-	// Rotating title prompt.
-	title := StyleTitle.Render(promptModalTitles[m.titleIdx])
+	// Rotating title prompt, with the blank-REPL affordance spelled out —
+	// an empty submit is a feature, not an error.
+	title := StyleTitle.Render(promptModalTitles[m.titleIdx]) + "  " +
+		StyleSubtle.Render("(empty ⏎ opens a blank claude session)")
 
 	if m.showSidebar() {
 		tw := m.textareaWidth()
@@ -393,19 +419,13 @@ func (m *newSessionModel) textareaHeight() int {
 }
 
 func (m *newSessionModel) renderSidebar() string {
-	flowLabel := StyleSubtle.Render("FLOW")
-	flow := StyleAccent.Render("Plan → Build → Review → Ship")
-	flowBlock := lipgloss.JoinVertical(lipgloss.Left, flowLabel, flow)
-
-	overLabel := StyleSubtle.Render("OVERRIDES")
 	labelW := 20 // fixed label width keeps value column aligned
 	labelStyle := lipgloss.NewStyle().Width(labelW).Foreground(ColorText)
 	focusedLabelStyle := StyleActive.Bold(true).Width(labelW)
 	toggleOn := StyleSuccess.Render("[x]")
 	toggleOff := StyleSubtle.Render("[ ]")
 
-	rows := make([]string, 0, len(m.overrideFields))
-	for i, f := range m.overrideFields {
+	renderRow := func(i int, f overrideField) string {
 		cursor := "  "
 		ls := labelStyle
 		if i == m.overrideFocus {
@@ -435,9 +455,26 @@ func (m *newSessionModel) renderSidebar() string {
 				value = toggleOff
 			}
 		}
-		rows = append(rows, cursor+label+" "+value)
+		return cursor + label + " " + value
 	}
-	overBlock := lipgloss.JoinVertical(lipgloss.Left, append([]string{overLabel}, rows...)...)
 
-	return lipgloss.JoinVertical(lipgloss.Left, flowBlock, "", overBlock)
+	// Row 0 (Context) gets its own section: it changes where the session
+	// runs, not just which model runs it.
+	ctxRows := []string{StyleSubtle.Render("CONTEXT")}
+	overRows := []string{StyleSubtle.Render("OVERRIDES")}
+	for i, f := range m.overrideFields {
+		if f.label == "Context" {
+			ctxRows = append(ctxRows, renderRow(i, f))
+		} else {
+			overRows = append(overRows, renderRow(i, f))
+		}
+	}
+	ctxBlock := lipgloss.JoinVertical(lipgloss.Left, ctxRows...)
+	if m.selectedContext() == contextCheckout {
+		ctxBlock = lipgloss.JoinVertical(lipgloss.Left, ctxBlock,
+			StyleWarning.Render("  runs in your real working tree"))
+	}
+	overBlock := lipgloss.JoinVertical(lipgloss.Left, overRows...)
+
+	return lipgloss.JoinVertical(lipgloss.Left, ctxBlock, "", overBlock)
 }

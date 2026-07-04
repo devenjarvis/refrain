@@ -164,11 +164,11 @@ func allPlanningScenarios() []scenarioFile {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// waitForPlanReady polls until the dashboard shows a "plan ready" or "tasks"
-// badge for the planning card, indicating the draft subprocess has completed
-// and written the plan to disk.
+// waitForPlanReady polls until the session card shows its "plan" badge
+// ("plan" or "plan D/T"), indicating the draft subprocess has completed and
+// written the plan to disk.
 func waitForPlanReady(s *Session, timeoutMs int) bool {
-	return waitForAny(s, timeoutMs, "plan ready", "tasks")
+	return waitForAny(s, timeoutMs, "plan")
 }
 
 // waitForAny polls until the screen contains any of the given substrings.
@@ -186,18 +186,22 @@ func waitForAny(s *Session, timeoutMs int, needles ...string) bool {
 	return false
 }
 
-// submitPlanPrompt opens the prompt modal (n), types the prompt, and submits
-// with enter (plan-first path). Waits for the modal to appear first.
+// submitPlanPrompt opens the new-session screen (n), types the prompt, and
+// submits with ctrl+p (the plan-first path).
 func submitPlanPrompt(t *testing.T, s *Session, prompt string) {
 	t.Helper()
 	s.Press("n")
-	s.WaitForText("draft plan", 5000)
+	s.WaitForText(newSessionAnchor, 5000)
 	s.Type(prompt)
-	s.Press("enter")
+	s.Press("Ctrl+p")
+	// Back on the session list before polling for badges — the composition
+	// screen's own status bar contains "plan first" and would false-match.
+	s.WaitForText(listAnchor, 5000)
 }
 
 // waitAndOpenEditor waits for the draft to complete and then opens the plan
-// editor by pressing enter on the focused planning card.
+// editor by pressing enter on the selected session card (an agent-less
+// planned session opens its plan editor).
 func waitAndOpenEditor(t *testing.T, s *Session) {
 	t.Helper()
 	if !waitForPlanReady(s, 25000) {
@@ -211,21 +215,20 @@ func waitAndOpenEditor(t *testing.T, s *Session) {
 // Tests
 // ---------------------------------------------------------------------------
 
-// TestPlanDraftingBadge verifies that after submitting a prompt in the
-// plan-first flow, the session shows up in the PLANNING section. With scrim
-// the draft often completes instantly, so we accept either "drafting" or
-// "plan ready" as proof the pipeline ran.
+// TestPlanDraftingBadge verifies that after a plan-first submit the session
+// card carries a drafting or plan badge. With scrim the draft often completes
+// instantly, so we accept either "drafting" or "plan" as proof the pipeline
+// ran.
 func TestPlanDraftingBadge(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "add dark mode")
 
-	if !waitForAny(s, 15000, "drafting", "plan ready", "tasks") {
-		t.Fatalf("never observed planning badge\nScreen:\n%s", s.Screenshot())
+	if !waitForAny(s, 15000, "drafting", "plan") {
+		t.Fatalf("never observed drafting/plan badge\nScreen:\n%s", s.Screenshot())
 	}
-	s.AssertScreenContains("PLANNING")
 }
 
 // TestPlanDraftFlow verifies the full draft flow: prompt modal → drafting
@@ -233,7 +236,7 @@ func TestPlanDraftingBadge(t *testing.T) {
 func TestPlanDraftFlow(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "add dark mode")
 
@@ -245,21 +248,25 @@ func TestPlanDraftFlow(t *testing.T) {
 }
 
 // TestPlanApproval verifies that pressing 'a' in the plan editor approves
-// the plan, spawns a build agent, and transitions the session to BUILDING.
+// the plan and spawns a build agent — the card's status flips to active and
+// an agent count appears.
 func TestPlanApproval(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "add dark mode")
 	waitAndOpenEditor(t, s)
 
-	// Approve the plan.
+	// Approve the plan. The editor closes back to the list and the build
+	// agent spawns into the same session.
 	s.Press("a")
 
-	// Session should move from PLANNING to BUILDING.
-	if !waitForBadgeText(s, "BUILDING", 15000) {
-		t.Fatalf("session did not transition to BUILDING after approve\nScreen:\n%s", s.Screenshot())
+	if !waitForBadgeText(s, "1 agent", 15000) {
+		t.Fatalf("build agent never appeared on the card after approve\nScreen:\n%s", s.Screenshot())
+	}
+	if !waitForBadgeText(s, "active", 15000) {
+		t.Fatalf("card never showed the active status after approve\nScreen:\n%s", s.Screenshot())
 	}
 }
 
@@ -270,7 +277,7 @@ func TestPlanApproval(t *testing.T) {
 func TestPlanRevision(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "add dark mode")
 	waitAndOpenEditor(t, s)
@@ -296,7 +303,7 @@ func TestPlanRevision(t *testing.T) {
 func TestPlanUndo(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "add dark mode")
 	waitAndOpenEditor(t, s)
@@ -320,28 +327,28 @@ func TestPlanUndo(t *testing.T) {
 	s.AssertScreenNotContains("system-preference")
 }
 
-// TestSkipPlanning verifies that with plan_first_enabled=false, pressing n
-// creates a session directly in BUILDING without going through the planning
-// flow (no prompt modal, no drafting phase).
-//
-// Note: the ctrl+enter skip path within the prompt modal cannot be tested
-// via tu because tu doesn't support Ctrl+Enter as a key combination.
-func TestSkipPlanning(t *testing.T) {
+// TestRawSessionDefault verifies that plain enter in the new-session screen
+// spawns a raw claude session immediately — no plan draft, no editor — and
+// lands in the passthrough terminal.
+func TestRawSessionDefault(t *testing.T) {
 	s := newScrimSession(t, planBuildScenario)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	// With plan_first_enabled=false, pressing n creates a session directly
-	// in BUILDING — no prompt modal, no drafting. The session card should
-	// appear in the BUILDING section.
 	s.Press("n")
-	s.WaitForText("back", 10000)
-	s.Press("Escape")
-	s.WaitForText("navigate", 10000)
+	s.WaitForText(newSessionAnchor, 10000)
+	s.Type("just do the thing")
+	s.Press("enter")
+	s.WaitForText(launchAnchor, 10000)
 
-	// The session should be under BUILDING with "active" in its status,
-	// not under PLANNING.
-	s.AssertScreenContains("active")
+	s.Press("Escape")
+	s.WaitForText(listAnchor, 10000)
+
+	// The card shows agent activity and carries no plan badge.
+	if !waitForBadgeText(s, "active", 10000) {
+		t.Fatalf("raw session never showed the active status\nScreen:\n%s", s.Screenshot())
+	}
+	s.AssertScreenNotContains("drafting")
 }
 
 // TestPlanEditorNavigation verifies section navigation (]/[) and fold
@@ -349,7 +356,7 @@ func TestSkipPlanning(t *testing.T) {
 func TestPlanEditorNavigation(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "add dark mode")
 	waitAndOpenEditor(t, s)
@@ -391,18 +398,19 @@ func TestPlanEditorNavigation(t *testing.T) {
 func TestPlanEditorCloseReopen(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "add dark mode")
 	waitAndOpenEditor(t, s)
 	s.AssertScreenContains("dark mode support")
 
-	// Close the editor.
+	// Close the editor — back to the list, where the card carries its plan
+	// badge.
 	s.Press("Escape")
-	s.WaitForText("PLANNING", 8000)
-
-	// The dashboard should show the planning card.
-	s.AssertScreenContains("PLANNING")
+	s.WaitForText(listAnchor, 8000)
+	if !waitForPlanReady(s, 8000) {
+		t.Fatalf("plan badge missing after closing the editor\nScreen:\n%s", s.Screenshot())
+	}
 
 	// Reopen the editor.
 	s.Press("enter")
@@ -417,7 +425,7 @@ func TestPlanEditorCloseReopen(t *testing.T) {
 func TestPlanAbandon(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "add dark mode")
 	waitAndOpenEditor(t, s)
@@ -437,7 +445,7 @@ func TestPlanAbandon(t *testing.T) {
 func TestPlanDraftError(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	// "trigger error" matches planErrorScenario which returns empty text.
 	submitPlanPrompt(t, s, "trigger error")
@@ -457,7 +465,7 @@ func TestPlanDraftError(t *testing.T) {
 func TestPlanEditorEditMode(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	submitPlanPrompt(t, s, "add dark mode")
 	waitAndOpenEditor(t, s)
@@ -471,20 +479,20 @@ func TestPlanEditorEditMode(t *testing.T) {
 	s.WaitForText("approve", 3000) // scroll mode footer shows "approve"
 }
 
-// TestPlanPromptModalCancel verifies that pressing esc in the prompt modal
-// cancels without creating a session.
+// TestPlanPromptModalCancel verifies that pressing esc in the new-session
+// screen cancels without creating a session.
 func TestPlanPromptModalCancel(t *testing.T) {
 	s := newPlanningSession(t, allPlanningScenarios()...)
 	s.Start()
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	// Open prompt modal.
+	// Open the new-session screen.
 	s.Press("n")
-	s.WaitForText("draft plan", 5000)
+	s.WaitForText(newSessionAnchor, 5000)
 
 	// Cancel.
 	s.Press("Escape")
-	s.WaitForText("FOCUS", 5000)
+	s.WaitForText(listAnchor, 5000)
 
 	// No session should have been created.
 	if countSessionCards(s.Screenshot()) != 0 {
