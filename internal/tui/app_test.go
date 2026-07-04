@@ -2021,8 +2021,10 @@ func TestHandleReviewDiff_UsesRepoPathFromMsg_NotFirstMatch(t *testing.T) {
 	app.managers[repoA] = mgrA
 	app.managers[repoB] = mgrB
 
-	// A reviewDiffEntry with one group so handleReviewDiff dispatches a reviewer.
+	// A reviewDiffEntry with one task card + group so handleReviewDiff
+	// dispatches a reviewer.
 	entry := &reviewDiffEntry{
+		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
 		groups:   []taskReviewGroup{{taskIndex: 1}},
 		verdicts: map[int]*taskVerdictRecord{1: {state: verdictPending}},
 	}
@@ -2713,7 +2715,8 @@ func TestBuildReviewReworkPrompt_FlaggedAndConcerns(t *testing.T) {
 // at taskIndex=0 renders as "## Other changes" instead of "## Task 0".
 func TestBuildReviewReworkPrompt_OtherChanges(t *testing.T) {
 	entry := &reviewDiffEntry{
-		tasks: nil,
+		tasks:  nil,
+		groups: []taskReviewGroup{{taskIndex: 0}},
 		verdicts: map[int]*taskVerdictRecord{
 			0: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail, Rationale: "drive-by typo fix breaks build"}},
 		},
@@ -2735,6 +2738,7 @@ func TestBuildReviewReworkPrompt_SortOrder(t *testing.T) {
 			{Index: 2, Text: "second"},
 			{Index: 5, Text: "fifth"},
 		},
+		groups: []taskReviewGroup{{taskIndex: 0}},
 		verdicts: map[int]*taskVerdictRecord{
 			5: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail}},
 			0: {state: verdictDone, verdict: agent.ReviewVerdict{Kind: agent.VerdictFail}},

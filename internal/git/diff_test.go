@@ -262,6 +262,135 @@ func TestDiff_IncludesCommittedAndUncommitted(t *testing.T) {
 	}
 }
 
+func TestDiffForRange_AggregatesCommits(t *testing.T) {
+	repo := initTestRepo(t)
+
+	wt, err := git.CreateWorktree(repo, "range-agent", "", "", "")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+
+	// Two commits touching two files.
+	if err := os.WriteFile(filepath.Join(wt.Path, "one.txt"), []byte("a\nb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitInDir(t, wt.Path, "add", "one.txt")
+	gitInDir(t, wt.Path, "commit", "-m", "add one")
+	if err := os.WriteFile(filepath.Join(wt.Path, "two.txt"), []byte("c\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitInDir(t, wt.Path, "add", "two.txt")
+	gitInDir(t, wt.Path, "commit", "-m", "add two")
+
+	commits, err := git.LogCommitsAgainstBase(wt)
+	if err != nil {
+		t.Fatalf("LogCommitsAgainstBase: %v", err)
+	}
+	if len(commits) != 2 {
+		t.Fatalf("expected 2 commits, got %d", len(commits))
+	}
+
+	// Range covering both commits: base...second.
+	files, agg, raw, err := git.DiffForRange(wt, wt.BaseBranch, commits[1].Hash)
+	if err != nil {
+		t.Fatalf("DiffForRange: %v", err)
+	}
+	if len(files) != 2 {
+		t.Errorf("expected 2 files, got %d: %+v", len(files), files)
+	}
+	if agg.Insertions != 3 {
+		t.Errorf("expected 3 insertions, got %d", agg.Insertions)
+	}
+	if !strings.Contains(raw, "one.txt") || !strings.Contains(raw, "two.txt") {
+		t.Errorf("raw diff missing files:\n%s", raw)
+	}
+
+	// Range covering only the first commit.
+	files, _, _, err = git.DiffForRange(wt, wt.BaseBranch, commits[0].Hash)
+	if err != nil {
+		t.Fatalf("DiffForRange (first commit): %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "one.txt" {
+		t.Errorf("expected only one.txt, got %+v", files)
+	}
+}
+
+func TestSplitDiffByFile(t *testing.T) {
+	repo := initTestRepo(t)
+
+	// A file to modify and a file to delete, committed on main.
+	if err := os.WriteFile(filepath.Join(repo, "mod.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "gone.txt"), []byte("bye\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitInDir(t, repo, "add", ".")
+	gitInDir(t, repo, "commit", "-m", "seed files")
+
+	wt, err := git.CreateWorktree(repo, "split-agent", "", "", "")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "mod.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "added.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(wt.Path, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+	gitInDir(t, wt.Path, "add", "-A")
+
+	raw, err := git.Diff(repo, wt)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	chunks := git.SplitDiffByFile(raw)
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"mod.txt", "+new"},
+		{"added.txt", "+hi"},
+		{"gone.txt", "-bye"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			chunk, ok := chunks[tt.path]
+			if !ok {
+				t.Fatalf("no chunk for %s; got keys %v", tt.path, chunkKeys(chunks))
+			}
+			if !strings.HasPrefix(chunk, "diff --git ") {
+				t.Errorf("chunk must start with its own diff header, got %q", chunk[:min(40, len(chunk))])
+			}
+			if !strings.Contains(chunk, tt.want) {
+				t.Errorf("chunk for %s missing %q:\n%s", tt.path, tt.want, chunk)
+			}
+			// A chunk must contain only its own file's changes.
+			for _, other := range tests {
+				if other.path != tt.path && strings.Contains(chunk, other.path) {
+					t.Errorf("chunk for %s leaks content of %s", tt.path, other.path)
+				}
+			}
+		})
+	}
+
+	if got := git.SplitDiffByFile(""); len(got) != 0 {
+		t.Errorf("empty diff must produce no chunks, got %v", got)
+	}
+}
+
+func chunkKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func TestGetPerFileDiffStats_NoChanges(t *testing.T) {
 	repo := initTestRepo(t)
 

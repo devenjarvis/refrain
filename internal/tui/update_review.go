@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +16,103 @@ import (
 	"github.com/devenjarvis/refrain/internal/github"
 )
 
+// reviewCard is one row of the review ledger, derived per mode by
+// ledgerCards. index keys the entry's groups and verdicts maps.
+type reviewCard struct {
+	index  int
+	label  string // short bracketed tag or commit hash shown before the title
+	title  string // plan task text, commit subject, or file path
+	detail string // reviewer context: plan-task sub-bullets or commit body
+	// aggregate marks the capped-ledger "Earlier changes" rollup card, which
+	// gets no AI verdict and a mode-neutral heading in the rework prompt.
+	aggregate bool
+}
+
+// ledgerCards derives the ordered ledger rows for the entry's mode. Cards are
+// pure derivations of the entry's stored fields (§6: derive, don't store) so
+// the row model can't drift from the diff data.
+func (e *reviewDiffEntry) ledgerCards() []reviewCard {
+	if e == nil {
+		return nil
+	}
+	switch e.mode {
+	case reviewModeCommits:
+		cards := make([]reviewCard, 0, len(e.groups))
+		for i := range e.groups {
+			g := &e.groups[i]
+			c := reviewCard{index: g.taskIndex}
+			if len(g.commits) == 1 {
+				c.label = shortHash(g.commits[0].Hash)
+				c.title = g.commits[0].Subject
+				c.detail = g.commits[0].Body
+			} else {
+				c.label = "[+]"
+				c.title = fmt.Sprintf("Earlier changes (%d commits)", len(g.commits))
+				c.aggregate = true
+			}
+			cards = append(cards, c)
+		}
+		return cards
+	case reviewModeFiles:
+		cards := make([]reviewCard, 0, len(e.groups))
+		for i := range e.groups {
+			g := &e.groups[i]
+			if len(g.files) == 0 {
+				continue
+			}
+			status := g.files[0].Status
+			if status == "" {
+				status = "M"
+			}
+			cards = append(cards, reviewCard{
+				index: g.taskIndex,
+				label: "[" + status + "]",
+				title: g.files[0].Path,
+			})
+		}
+		return cards
+	default: // reviewModePlan
+		cards := make([]reviewCard, 0, len(e.tasks)+1)
+		for _, t := range e.tasks {
+			cards = append(cards, reviewCard{
+				index:  t.Index,
+				label:  fmt.Sprintf("[%d]", t.Index),
+				title:  t.Text,
+				detail: t.Body,
+			})
+		}
+		for i := range e.groups {
+			if e.groups[i].taskIndex == 0 {
+				cards = append(cards, reviewCard{index: 0, label: "[?]", title: "Other changes"})
+				break
+			}
+		}
+		return cards
+	}
+}
+
+// groupByCardIndex returns the entry's diff group keyed by a card index, or
+// nil when the card has no changes (e.g. a plan task with no commits).
+func (e *reviewDiffEntry) groupByCardIndex(idx int) *taskReviewGroup {
+	if e == nil {
+		return nil
+	}
+	for i := range e.groups {
+		if e.groups[i].taskIndex == idx {
+			return &e.groups[i]
+		}
+	}
+	return nil
+}
+
+// shortHash abbreviates a commit hash for display.
+func shortHash(h string) string {
+	if len(h) > 7 {
+		return h[:7]
+	}
+	return h
+}
+
 func (a App) handleReviewDiff(msg reviewDiffMsg) (tea.Model, tea.Cmd) {
 	if msg.err == nil && msg.entry != nil {
 		repoPath := msg.repoPath
@@ -24,36 +120,39 @@ func (a App) handleReviewDiff(msg reviewDiffMsg) (tea.Model, tea.Cmd) {
 			repoPath = a.activeRepo
 		}
 		a.reviewDiffCache[cacheKey(repoPath, msg.sessionID)] = msg.entry
-		// If the entry has task groups, dispatch a reviewer per group.
-		if len(msg.entry.groups) > 0 {
-			var cmds []tea.Cmd
-			mgr := a.managers[repoPath]
-			var reviewer agent.ReviewerAgent
-			if mgr != nil {
-				reviewer = mgr.ReviewerAgent()
-			}
-			if reviewer != nil {
-				sess := a.sessionByIDInRepo(repoPath, msg.sessionID)
-				if sess != nil {
-					for _, g := range msg.entry.groups {
-						// Mark running before dispatching so the spinner shows.
-						if v, ok := msg.entry.verdicts[g.taskIndex]; ok {
-							v.state = verdictRunning
-						}
-						cmds = append(cmds, a.reviewTaskCmd(sess, repoPath, g, reviewer))
+		// Dispatch a reviewer per pending card. File-mode cards and the
+		// capped-ledger aggregate card arrive verdictSkipped (§4.6: AI verdicts
+		// run in modes 1–2 only), so they never dispatch.
+		var cmds []tea.Cmd
+		mgr := a.managers[repoPath]
+		var reviewer agent.ReviewerAgent
+		if mgr != nil {
+			reviewer = mgr.ReviewerAgent()
+		}
+		if reviewer != nil {
+			sess := a.sessionByIDInRepo(repoPath, msg.sessionID)
+			if sess != nil {
+				for _, card := range msg.entry.ledgerCards() {
+					rec := msg.entry.verdicts[card.index]
+					group := msg.entry.groupByCardIndex(card.index)
+					if rec == nil || rec.state != verdictPending || group == nil {
+						continue
 					}
+					// Mark running before dispatching so the spinner shows.
+					rec.state = verdictRunning
+					cmds = append(cmds, reviewTaskCmd(sess, repoPath, *group, card, reviewer))
 				}
 			}
-			if len(cmds) > 0 {
-				return a, tea.Batch(cmds...)
-			}
-			// Reviewer unavailable (nil reviewer or nil session): mark all
-			// pending verdicts as error so they don't stay at "···" forever.
-			for _, rec := range msg.entry.verdicts {
-				if rec.state == verdictPending {
-					rec.state = verdictErr
-					rec.err = errors.New("reviewer unavailable")
-				}
+		}
+		if len(cmds) > 0 {
+			return a, tea.Batch(cmds...)
+		}
+		// Reviewer unavailable (nil reviewer or nil session): mark all
+		// pending verdicts as error so they don't stay at "···" forever.
+		for _, rec := range msg.entry.verdicts {
+			if rec.state == verdictPending {
+				rec.state = verdictErr
+				rec.err = errors.New("reviewer unavailable")
 			}
 		}
 	}
@@ -97,74 +196,32 @@ func (a *App) handleValidationCheckResult(msg validationCheckResultMsg) {
 	}
 }
 
+// reviewTaskGroupAtCursor returns the diff group for the ledger card at
+// cursor, or nil when the cursor is out of range or the card has no changes
+// (e.g. a plan task with no commits).
 func reviewTaskGroupAtCursor(entry *reviewDiffEntry, cursor int) *taskReviewGroup {
-	if entry == nil {
+	cards := entry.ledgerCards()
+	if cursor < 0 || cursor >= len(cards) {
 		return nil
 	}
-	groupByIdx := make(map[int]*taskReviewGroup, len(entry.groups))
-	for i := range entry.groups {
-		g := &entry.groups[i]
-		groupByIdx[g.taskIndex] = g
-	}
-	row := 0
-	for _, t := range entry.tasks {
-		if row == cursor {
-			return groupByIdx[t.Index]
-		}
-		row++
-	}
-	// Check "Other changes" row.
-	if g, ok := groupByIdx[0]; ok {
-		if row == cursor {
-			return g
-		}
-	}
-	return nil
+	return entry.groupByCardIndex(cards[cursor].index)
 }
 
-// reviewTaskIndexAtCursor returns the task index at cursor following the same
-// row ordering as reviewTaskGroupAtCursor (plan tasks first, then the "Other
-// changes" row when present). Unlike reviewTaskGroupAtCursor, this resolves
-// even when the plan task has no associated commit group — so the user can
-// flag a never-touched task for rework. Returns (0, false) for the synthetic
-// Overview row used in no-plan sessions.
+// reviewTaskIndexAtCursor returns the card index at cursor following the same
+// row ordering as reviewTaskGroupAtCursor. Unlike reviewTaskGroupAtCursor,
+// this resolves even when the card has no associated diff group — so the user
+// can flag a never-touched plan task for rework.
 func reviewTaskIndexAtCursor(entry *reviewDiffEntry, cursor int) (int, bool) {
-	if entry == nil || cursor < 0 {
+	cards := entry.ledgerCards()
+	if cursor < 0 || cursor >= len(cards) {
 		return 0, false
 	}
-	if cursor < len(entry.tasks) {
-		return entry.tasks[cursor].Index, true
-	}
-	// "Other changes" row, only present when some commit has no Plan-Task trailer.
-	if cursor == len(entry.tasks) {
-		for i := range entry.groups {
-			if entry.groups[i].taskIndex == 0 {
-				return 0, true
-			}
-		}
-	}
-	return 0, false
+	return cards[cursor].index, true
 }
 
-// reviewTaskCount returns the number of task rows in a review entry (plan tasks
-// plus the "other" group if present). For no-plan sessions with aggregate data,
-// returns 1 for the synthetic "Overview" row.
+// reviewTaskCount returns the number of ledger rows in a review entry.
 func reviewTaskCount(entry *reviewDiffEntry) int {
-	if entry == nil {
-		return 0
-	}
-	// No-plan session: synthetic Overview row.
-	if len(entry.tasks) == 0 && len(entry.groups) == 0 && entry.aggregate != nil {
-		return 1
-	}
-	n := len(entry.tasks)
-	for _, g := range entry.groups {
-		if g.taskIndex == 0 {
-			n++ // "Other changes" row
-			break
-		}
-	}
-	return n
+	return len(entry.ledgerCards())
 }
 
 // setFeedbackVerdictOn applies a triage verdict to the given triage map. It is
@@ -444,8 +501,9 @@ func fenceAsData(s string) string {
 }
 
 // handleReviewReworkRequest spawns a new agent in the session's existing
-// worktree using a prompt synthesised by the review panel from AI verdicts
-// and user flags, then transitions the session back to LifecycleInProgress.
+// directory using a prompt synthesised by the review panel from AI verdicts
+// and user flags — an action, not a transition (rollback design §4.6): the
+// session's lifecycle is untouched and no live build agent is required.
 // The reviewDiffCache entry is cleared so the next entry into review re-runs
 // the AI reviewer on the new commit history.
 func (a App) handleReviewReworkRequest(req reviewReworkRequestMsg) (tea.Model, tea.Cmd) {
@@ -490,40 +548,34 @@ func (a App) handleReviewReworkRequest(req reviewReworkRequestMsg) (tea.Model, t
 		if err != nil {
 			return createResultMsg{err: err}
 		}
-		sess.SetLifecyclePhase(agent.LifecycleInProgress)
 		return createResultMsg{sessionID: sessID, agentID: ag.ID}
 	}
 }
 
-// buildReviewReworkPrompt synthesizes a builder-agent prompt from the per-task
-// verdicts and user flags in entry. Returns "" when no task qualifies (no flag
-// set and no AI verdict of concerns/fail), so the caller can surface an error.
-//
-// The prompt instructs the agent to use Plan-Task: N commit-body trailers so a
-// subsequent review groups round-2 commits under the same task index — this is
-// what keeps the build↔review round-trip coherent.
+// buildReviewReworkPrompt synthesizes a builder-agent prompt from the
+// per-card verdicts and user flags in entry. Returns "" when no card
+// qualifies (no flag set and no AI verdict of concerns/fail), so the caller
+// can surface an error. Headings and closing instructions follow the entry's
+// ledger mode: plan tasks keep the Plan-Task trailer contract that ties
+// round-2 commits back to their task, while commit- and file-mode prompts
+// reference commits and files directly.
 func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 	if entry == nil || entry.verdicts == nil {
 		return ""
 	}
-	// Build a taskIndex → text lookup, including the special index 0 used for
-	// commits without a Plan-Task trailer.
-	taskText := map[int]string{0: "Other changes"}
-	for _, t := range entry.tasks {
-		taskText[t.Index] = t.Text
-	}
 
 	type entryRow struct {
-		idx        int
-		text       string
+		card       reviewCard
 		flagged    bool
 		hasVerdict bool
 		noCommits  bool
 		kind       agent.VerdictKind
 		rationale  string
 	}
-	rows := make([]entryRow, 0, len(entry.verdicts))
-	for idx, rec := range entry.verdicts {
+	cards := entry.ledgerCards()
+	rows := make([]entryRow, 0, len(cards))
+	for _, card := range cards {
+		rec := entry.verdicts[card.index]
 		if rec == nil {
 			continue
 		}
@@ -532,13 +584,8 @@ func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 		if !rec.userFlagged && !hasVerdict {
 			continue
 		}
-		text, ok := taskText[idx]
-		if !ok {
-			text = fmt.Sprintf("(task %d)", idx)
-		}
 		rows = append(rows, entryRow{
-			idx:        idx,
-			text:       text,
+			card:       card,
 			flagged:    rec.userFlagged,
 			hasVerdict: hasVerdict,
 			noCommits:  rec.state == verdictNoDiff,
@@ -549,26 +596,26 @@ func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 	if len(rows) == 0 {
 		return ""
 	}
-	// Stable ordering: by task index ascending, with "Other changes" (index 0)
-	// last so it doesn't lead the list when present.
-	sort.SliceStable(rows, func(i, j int) bool {
-		a, b := rows[i].idx, rows[j].idx
-		if a == 0 {
-			return false
-		}
-		if b == 0 {
-			return true
-		}
-		return a < b
-	})
 
 	var b strings.Builder
-	b.WriteString("The following tasks need rework based on the review:\n\n")
+	switch entry.mode {
+	case reviewModeCommits:
+		b.WriteString("The following commits need rework based on the review:\n\n")
+	case reviewModeFiles:
+		b.WriteString("The following files need rework based on the review:\n\n")
+	default:
+		b.WriteString("The following tasks need rework based on the review:\n\n")
+	}
 	for _, r := range rows {
-		if r.idx > 0 {
-			fmt.Fprintf(&b, "## Task %d: %s\n", r.idx, r.text)
-		} else {
-			b.WriteString("## Other changes\n")
+		switch {
+		case entry.mode == reviewModeCommits && !r.card.aggregate:
+			fmt.Fprintf(&b, "## Commit %s: %s\n", r.card.label, r.card.title)
+		case entry.mode == reviewModeFiles:
+			fmt.Fprintf(&b, "## File: %s\n", r.card.title)
+		case entry.mode == reviewModePlan && r.card.index > 0:
+			fmt.Fprintf(&b, "## Task %d: %s\n", r.card.index, r.card.title)
+		default:
+			fmt.Fprintf(&b, "## %s\n", r.card.title)
 		}
 		if r.hasVerdict {
 			fmt.Fprintf(&b, "AI reviewer verdict: %s\n", r.kind)
@@ -581,13 +628,20 @@ func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 		if r.flagged {
 			b.WriteString("Flagged by you: yes\n")
 		}
-		if r.idx > 0 {
-			fmt.Fprintf(&b, "Commit trailer: Plan-Task: %d\n", r.idx)
+		if entry.mode == reviewModePlan && r.card.index > 0 {
+			fmt.Fprintf(&b, "Commit trailer: Plan-Task: %d\n", r.card.index)
 		}
 		b.WriteByte('\n')
 	}
-	b.WriteString("Please address each task above. Re-read `.claude/plan.md` for full context.\n")
-	b.WriteString("When you commit fixes, write a Conventional-Commits subject and add `Plan-Task: N` as a trailer in the commit body, where N matches the task numbers above; commits for \"Other changes\" omit the trailer entirely.\n")
+	switch entry.mode {
+	case reviewModeCommits:
+		b.WriteString("Please address each commit above. When you commit fixes, write a Conventional-Commits subject.\n")
+	case reviewModeFiles:
+		b.WriteString("Please address each file above and commit your changes with a Conventional-Commits subject.\n")
+	default:
+		b.WriteString("Please address each task above. Re-read `.claude/plan.md` for full context.\n")
+		b.WriteString("When you commit fixes, write a Conventional-Commits subject and add `Plan-Task: N` as a trailer in the commit body, where N matches the task numbers above; commits for \"Other changes\" omit the trailer entirely.\n")
+	}
 	return b.String()
 }
 
@@ -603,6 +657,12 @@ func buildReviewReworkPrompt(entry *reviewDiffEntry) string {
 // `force` is true for the `M` force-merge keybind, which bypasses the
 // readiness gate but still respects state == open (you cannot force-merge a
 // PR that's already merged or closed).
+// maxCommitCards caps the per-commit review ledger (rollback design §4.6):
+// a long-lived branch gets one card per commit for its most recent
+// maxCommitCards commits, plus a single aggregate "Earlier changes" card for
+// everything older, so a 100-commit branch doesn't produce a 100-row ledger.
+const maxCommitCards = 20
+
 func (a App) fetchReviewDiffCmd(sess *agent.Session, repoPath string) tea.Cmd {
 	sessID := sess.ID
 	wt := sess.Worktree
@@ -617,44 +677,130 @@ func (a App) fetchReviewDiffCmd(sess *agent.Session, repoPath string) tea.Cmd {
 		}
 		entry := &reviewDiffEntry{files: files, aggregate: agg}
 
+		// Ledger fallback chain (§4.6): plan tasks → one card per commit →
+		// per-file cards over uncommitted work.
+		commits, logErr := git.LogCommitsAgainstBase(wt)
+		var tasks []agent.PlanTask
 		if hasPlan && planContent != "" {
-			entry.tasks = agent.ParsePlanTasks(planContent)
-			commits, logErr := git.LogCommitsAgainstBase(wt)
-			if logErr == nil && len(commits) > 0 {
-				commitGroups := agent.GroupCommitsByTask(commits)
-				entry.groups = make([]taskReviewGroup, 0, len(commitGroups))
-				entry.verdicts = make(map[int]*taskVerdictRecord)
-				for _, cg := range commitGroups {
-					hashes := make([]string, len(cg.Commits))
-					for i, c := range cg.Commits {
-						hashes[i] = c.Hash
-					}
-					gFiles, gStats, rawDiff, diffErr := git.DiffForCommits(wt, hashes)
-					if diffErr != nil {
-						gStats = &git.DiffStats{}
-					}
-					entry.groups = append(entry.groups, taskReviewGroup{
-						taskIndex: cg.TaskIndex,
-						commits:   cg.Commits,
-						files:     gFiles,
-						stats:     gStats,
-						rawDiff:   rawDiff,
-					})
-					entry.verdicts[cg.TaskIndex] = &taskVerdictRecord{state: verdictPending}
-				}
-				// Mark plan tasks that have no matching commit group so the review
-				// panel can surface the gap instead of silently omitting the row.
-				// This intentionally only runs when len(commits) > 0: a session
-				// with no commits at all leaves entry.verdicts nil, which the
-				// render loop treats as "not yet reviewed" rather than "missing
-				// diff". Moving this loop outside the len(commits) guard would
-				// also require initialising entry.verdicts in the outer block
-				// and would change that loading-state semantics.
-				populateNoDiffVerdicts(entry)
-			}
+			tasks = agent.ParsePlanTasks(planContent)
+		}
+		switch {
+		case len(tasks) > 0:
+			buildPlanLedger(entry, wt, tasks, commits)
+		case logErr == nil && len(commits) > 0:
+			buildCommitLedger(entry, wt, commits)
+		default:
+			buildFileLedger(entry, repoPath, wt)
 		}
 
 		return reviewDiffMsg{sessionID: sessID, repoPath: repoPath, entry: entry}
+	}
+}
+
+// buildPlanLedger populates entry with plan-mode rows: one card per plan task,
+// with commits grouped by their Plan-Task trailer (plus the "Other changes"
+// bucket for untagged commits).
+func buildPlanLedger(entry *reviewDiffEntry, wt *git.WorktreeInfo, tasks []agent.PlanTask, commits []git.Commit) {
+	entry.mode = reviewModePlan
+	entry.tasks = tasks
+	if len(commits) == 0 {
+		// No commits yet: leave entry.verdicts nil so the render loop shows
+		// "not yet reviewed" rather than stamping every task "no diff found".
+		return
+	}
+	commitGroups := agent.GroupCommitsByTask(commits)
+	entry.groups = make([]taskReviewGroup, 0, len(commitGroups))
+	entry.verdicts = make(map[int]*taskVerdictRecord)
+	for _, cg := range commitGroups {
+		hashes := make([]string, len(cg.Commits))
+		for i, c := range cg.Commits {
+			hashes[i] = c.Hash
+		}
+		gFiles, gStats, rawDiff, diffErr := git.DiffForCommits(wt, hashes)
+		if diffErr != nil {
+			gStats = &git.DiffStats{}
+		}
+		entry.groups = append(entry.groups, taskReviewGroup{
+			taskIndex: cg.TaskIndex,
+			commits:   cg.Commits,
+			files:     gFiles,
+			stats:     gStats,
+			rawDiff:   rawDiff,
+		})
+		entry.verdicts[cg.TaskIndex] = &taskVerdictRecord{state: verdictPending}
+	}
+	// Mark plan tasks that have no matching commit group so the review panel
+	// can surface the gap instead of silently omitting the row.
+	populateNoDiffVerdicts(entry)
+}
+
+// buildCommitLedger populates entry with commit-mode rows: one card per commit
+// in oldest-first order, capped at maxCommitCards with an aggregate "Earlier
+// changes" rollup (verdictSkipped — its diff spans too many commits for a
+// useful AI verdict) covering the excess.
+func buildCommitLedger(entry *reviewDiffEntry, wt *git.WorktreeInfo, commits []git.Commit) {
+	entry.mode = reviewModeCommits
+	entry.verdicts = make(map[int]*taskVerdictRecord)
+
+	recent := commits
+	idx := 1
+	if len(commits) > maxCommitCards {
+		earlier := commits[:len(commits)-maxCommitCards]
+		recent = commits[len(commits)-maxCommitCards:]
+		gFiles, gStats, rawDiff, diffErr := git.DiffForRange(wt, wt.BaseBranch, earlier[len(earlier)-1].Hash)
+		if diffErr != nil {
+			gStats = &git.DiffStats{}
+		}
+		entry.groups = append(entry.groups, taskReviewGroup{
+			taskIndex: idx,
+			commits:   earlier,
+			files:     gFiles,
+			stats:     gStats,
+			rawDiff:   rawDiff,
+		})
+		entry.verdicts[idx] = &taskVerdictRecord{state: verdictSkipped}
+		idx++
+	}
+	for _, c := range recent {
+		gFiles, gStats, rawDiff, diffErr := git.DiffForCommits(wt, []string{c.Hash})
+		if diffErr != nil {
+			gStats = &git.DiffStats{}
+		}
+		entry.groups = append(entry.groups, taskReviewGroup{
+			taskIndex: idx,
+			commits:   []git.Commit{c},
+			files:     gFiles,
+			stats:     gStats,
+			rawDiff:   rawDiff,
+		})
+		entry.verdicts[idx] = &taskVerdictRecord{state: verdictPending}
+		idx++
+	}
+}
+
+// buildFileLedger populates entry with file-mode rows: one card per changed
+// file from the entry's per-file stats (uncommitted work included). All cards
+// are verdictSkipped — the AI reviewer seeing fragments of uncommitted work
+// produces noise, so this mode is manual review (§4.6).
+func buildFileLedger(entry *reviewDiffEntry, repoPath string, wt *git.WorktreeInfo) {
+	entry.mode = reviewModeFiles
+	if len(entry.files) == 0 {
+		return
+	}
+	perFile := map[string]string{}
+	if raw, err := git.Diff(repoPath, wt); err == nil {
+		perFile = git.SplitDiffByFile(raw)
+	}
+	entry.verdicts = make(map[int]*taskVerdictRecord, len(entry.files))
+	for i, f := range entry.files {
+		idx := i + 1
+		entry.groups = append(entry.groups, taskReviewGroup{
+			taskIndex: idx,
+			files:     []git.FileStat{f},
+			stats:     &git.DiffStats{Files: 1, Insertions: f.Insertions, Deletions: f.Deletions},
+			rawDiff:   perFile[f.Path],
+		})
+		entry.verdicts[idx] = &taskVerdictRecord{state: verdictSkipped}
 	}
 }
 
@@ -670,29 +816,18 @@ func populateNoDiffVerdicts(entry *reviewDiffEntry) {
 	}
 }
 
-// reviewTaskCmd returns a Cmd that runs a reviewer subprocess for one task
-// group and returns a reviewVerdictMsg when done. repoPath pins the repo so
-// the verdict handler can key the cache lookup by (repoPath, sessionID).
-func (a App) reviewTaskCmd(sess *agent.Session, repoPath string, group taskReviewGroup, reviewer agent.ReviewerAgent) tea.Cmd {
+// reviewTaskCmd returns a Cmd that runs a reviewer subprocess for one ledger
+// card and returns a reviewVerdictMsg when done. The card supplies the task
+// text/detail (plan task text or commit subject/body — §4.6: the commit
+// subject stands in for the task text on plan-less branches); repoPath pins
+// the repo so the verdict handler keys the cache by (repoPath, sessionID).
+func reviewTaskCmd(sess *agent.Session, repoPath string, group taskReviewGroup, card reviewCard, reviewer agent.ReviewerAgent) tea.Cmd {
 	sessID := sess.ID
 	originalPrompt := sess.OriginalPrompt()
-	taskIndex := group.taskIndex
+	taskIndex := card.index
 	rawDiff := group.rawDiff
-
-	// Find task text and sub-bullet body from the entry if available.
-	taskText := fmt.Sprintf("Task %d", taskIndex)
-	var taskDetail string
-	if taskIndex == 0 {
-		taskText = "Other changes"
-	} else if entry := a.reviewDiffCache[cacheKey(repoPath, sessID)]; entry != nil {
-		for _, t := range entry.tasks {
-			if t.Index == taskIndex {
-				taskText = t.Text
-				taskDetail = t.Body
-				break
-			}
-		}
-	}
+	taskText := card.title
+	taskDetail := card.detail
 
 	changedFiles := make([]string, 0, len(group.files))
 	for _, f := range group.files {

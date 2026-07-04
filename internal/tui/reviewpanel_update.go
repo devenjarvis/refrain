@@ -286,16 +286,14 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 		if group == nil || group.rawDiff == "" {
 			return m, nil
 		}
-		// Build "[N] task text" label using same row order as the list pane.
-		label := "Other changes"
-		if entry != nil {
-			row := 0
-			for _, t := range entry.tasks {
-				if row == m.taskCursor {
-					label = fmt.Sprintf("[%d] %s", t.Index, t.Text)
-					break
-				}
-				row++
+		// Label the diff viewer with the focused card, matching the list pane.
+		label := "Changes"
+		if cards := entry.ledgerCards(); m.taskCursor < len(cards) {
+			card := cards[m.taskCursor]
+			if entry.mode == reviewModePlan && card.index > 0 {
+				label = fmt.Sprintf("[%d] %s", card.index, card.title)
+			} else {
+				label = card.title
 			}
 		}
 		rawDiff := group.rawDiff

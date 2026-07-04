@@ -106,6 +106,113 @@ func DiffForCommits(wt *WorktreeInfo, hashes []string) ([]FileStat, *DiffStats, 
 	return result, agg, rawDiffSb.String(), nil
 }
 
+// DiffForRange returns per-file stats, aggregate stats, and the raw unified
+// diff for the merge-base range from...to in the given worktree. The review
+// ledger uses it for the aggregate "earlier changes" card on long-lived
+// branches, where one card per commit would make the ledger unusable. The
+// three-dot form diffs against the merge base so commits that landed on the
+// base branch after the fork point don't show up as reverse changes.
+func DiffForRange(wt *WorktreeInfo, from, to string) ([]FileStat, *DiffStats, string, error) {
+	rangeSpec := from + "..." + to
+
+	raw, err := runGitRaw(wt.Path, "diff", rangeSpec)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("diff for range: %w", err)
+	}
+	numstatOut, err := runGit(wt.Path, "diff", "--numstat", "--diff-filter=AMD", rangeSpec)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("diff numstat for range: %w", err)
+	}
+	nameStatusOut, err := runGit(wt.Path, "diff", "--name-status", "--diff-filter=AMD", rangeSpec)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("diff name-status for range: %w", err)
+	}
+
+	fileMap := make(map[string]*FileStat)
+	parseNumstat(numstatOut, fileMap)
+	parseNameStatus(nameStatusOut, fileMap)
+
+	result := make([]FileStat, 0, len(fileMap))
+	agg := &DiffStats{}
+	for _, fs := range fileMap {
+		result = append(result, *fs)
+		agg.Files++
+		agg.Insertions += fs.Insertions
+		agg.Deletions += fs.Deletions
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
+
+	return result, agg, raw, nil
+}
+
+// SplitDiffByFile splits a raw unified diff into standalone per-file chunks
+// keyed by the file's post-image path (pre-image path for deletions). Each
+// chunk starts at its own "diff --git" header, so it parses on its own. Chunks
+// whose path cannot be determined (e.g. binary files with no ---/+++ lines and
+// an ambiguous header) are dropped rather than misattributed.
+func SplitDiffByFile(raw string) map[string]string {
+	result := make(map[string]string)
+	if raw == "" {
+		return result
+	}
+	lines := strings.SplitAfter(raw, "\n")
+	chunk := make([]string, 0, len(lines))
+	flush := func() {
+		if len(chunk) == 0 {
+			return
+		}
+		if path := diffChunkPath(chunk); path != "" {
+			result[path] = strings.Join(chunk, "")
+		}
+		chunk = chunk[:0]
+	}
+	for _, l := range lines {
+		if strings.HasPrefix(l, "diff --git ") {
+			flush()
+		}
+		chunk = append(chunk, l)
+	}
+	flush()
+	return result
+}
+
+// diffChunkPath extracts the file path from one per-file diff chunk. It
+// prefers the "+++ b/<path>" line, falls back to "--- a/<path>" for deleted
+// files, and returns "" when neither yields a usable path.
+func diffChunkPath(lines []string) string {
+	var minus string
+	for _, l := range lines {
+		l = strings.TrimRight(l, "\n")
+		if strings.HasPrefix(l, "@@") {
+			break // hunks start; header lines are over
+		}
+		switch {
+		case strings.HasPrefix(l, "--- "):
+			minus = diffPathToken(l[len("--- "):], "a/")
+		case strings.HasPrefix(l, "+++ "):
+			if plus := diffPathToken(l[len("+++ "):], "b/"); plus != "" {
+				return plus
+			}
+			return minus // "+++ /dev/null": deleted file
+		}
+	}
+	return ""
+}
+
+// diffPathToken strips an optional surrounding quote pair and the given
+// "a/"/"b/" prefix from a diff header path token. Returns "" for /dev/null or
+// a token without the expected prefix.
+func diffPathToken(tok, prefix string) string {
+	tok = strings.TrimSpace(tok)
+	if len(tok) >= 2 && strings.HasPrefix(tok, `"`) && strings.HasSuffix(tok, `"`) {
+		tok = tok[1 : len(tok)-1]
+	}
+	if tok == "/dev/null" || !strings.HasPrefix(tok, prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(tok, prefix)
+}
+
 // DiffStats holds summary statistics for a diff.
 type DiffStats struct {
 	Files      int

@@ -1236,6 +1236,7 @@ const (
 	verdictDone                        // reviewer returned a verdict
 	verdictErr                         // reviewer subprocess errored
 	verdictNoDiff                      // task has no matching commits — nothing to review
+	verdictSkipped                     // AI review intentionally not run — manual review
 )
 
 // validationCheckState tracks the lifecycle of one validation check run.
@@ -1289,7 +1290,10 @@ type taskVerdictRecord struct {
 	userFlagged bool
 }
 
-// taskReviewGroup holds one plan task's commits and their resolved diff stats.
+// taskReviewGroup holds one ledger card's commits and their resolved diff
+// stats. taskIndex keys the card in the entry's verdicts map: the plan-task
+// index in plan mode (0 = "Other changes"), or the card ordinal in commit and
+// file modes.
 type taskReviewGroup struct {
 	taskIndex int
 	commits   []git.Commit
@@ -1298,16 +1302,35 @@ type taskReviewGroup struct {
 	rawDiff   string
 }
 
+// reviewLedgerMode identifies which step of the review ledger fallback chain
+// (rollback design §4.6) produced an entry: plan tasks when a plan exists,
+// one card per commit on plan-less branches, and per-file cards for sessions
+// with only uncommitted work.
+type reviewLedgerMode int
+
+const (
+	reviewModePlan    reviewLedgerMode = iota // plan tasks + Plan-Task trailer grouping
+	reviewModeCommits                         // no plan: one card per commit (capped)
+	reviewModeFiles                           // no commits: per-file cards, manual review
+)
+
 // reviewDiffEntry caches diff stats for a session in the review panel.
 type reviewDiffEntry struct {
-	// Aggregate file stats (always populated, even when no plan exists).
+	// Aggregate file stats (always populated, regardless of mode).
 	files     []git.FileStat
 	aggregate *git.DiffStats
 
-	// Plan-driven fields; non-nil only when the session has a plan.
-	tasks    []agent.PlanTask
-	groups   []taskReviewGroup          // per-task + "other" commit groups
-	verdicts map[int]*taskVerdictRecord // keyed by taskIndex (0 = other)
+	// mode selects how ledgerCards derives the ledger rows from the fields
+	// below. The zero value is plan mode, matching entries that predate the
+	// fallback chain.
+	mode reviewLedgerMode
+
+	// tasks is populated in plan mode only.
+	tasks []agent.PlanTask
+	// groups holds one diff group per ledger card that has changes; verdicts
+	// is keyed by the same index (see taskReviewGroup.taskIndex).
+	groups   []taskReviewGroup
+	verdicts map[int]*taskVerdictRecord
 }
 
 // reviewOpenTaskDiffMsg is emitted by the review panel when the user presses

@@ -36,6 +36,9 @@ type fakeManager struct {
 	lastAddAgentCfg             agent.Config
 	// nextPlanningSession, when non-nil, is returned by CreateSessionNoAgent.
 	nextPlanningSession *agent.Session
+	// reviewer, when non-nil, is returned by ReviewerAgent so tests can
+	// exercise the verdict-dispatch path without a subprocess.
+	reviewer agent.ReviewerAgent
 }
 
 // Compile-time guarantee: keep fakeManager in sync with the SessionManager
@@ -179,7 +182,7 @@ func (f *fakeManager) ResumeSession(_ state.SessionState, _ agent.Config) error 
 func (f *fakeManager) StartDraft(_ string, _ string, _ ...agent.DraftOption) error { return nil }
 func (f *fakeManager) RevisePlan(_ string, _ string, _ ...agent.DraftOption) error { return nil }
 func (f *fakeManager) SetPlanDrafter(_ agent.PlanDrafter)                          {}
-func (f *fakeManager) ReviewerAgent() agent.ReviewerAgent                          { return nil }
+func (f *fakeManager) ReviewerAgent() agent.ReviewerAgent                          { return f.reviewer }
 func (f *fakeManager) ReconcileExternalBranchRename(_, _ string)                   {}
 
 func (f *fakeManager) UpdateSettings(s config.ResolvedSettings) {
