@@ -353,4 +353,34 @@ func TestSessionState_BackwardsCompatibility(t *testing.T) {
 		// Empty string means InProgress when parsed — that's the zero value default.
 		t.Errorf("expected empty LifecyclePhase for backwards compat, got %q", loaded.Sessions[0].LifecyclePhase)
 	}
+	if loaded.Sessions[0].Kind != "" {
+		// Empty string means "worktree" when parsed — all legacy sessions
+		// predate the kind field and are worktree sessions.
+		t.Errorf("expected empty Kind for backwards compat, got %q", loaded.Sessions[0].Kind)
+	}
+}
+
+func TestSessionState_KindPersistence(t *testing.T) {
+	dir := t.TempDir()
+	s := &RefrainState{
+		Version: 1,
+		SavedAt: time.Now(),
+		Sessions: []SessionState{
+			{ID: "s1", Name: "checkout", WorktreePath: "/repo", Branch: "main", Kind: "checkout"},
+			{ID: "s2", Name: "worktree", WorktreePath: "/repo/.refrain/worktrees/x", Branch: "refrain/x", Kind: "worktree"},
+		},
+	}
+	if err := Save(dir, s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := loaded.Sessions[0].Kind; got != "checkout" {
+		t.Errorf("Sessions[0].Kind = %q, want checkout", got)
+	}
+	if got := loaded.Sessions[1].Kind; got != "worktree" {
+		t.Errorf("Sessions[1].Kind = %q, want worktree", got)
+	}
 }

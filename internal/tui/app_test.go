@@ -4325,9 +4325,9 @@ func TestPlannerQuestionMsg_AutoOpensPlanEditor(t *testing.T) {
 	mgr.SetPlanDrafter(nil)
 
 	cfg := agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"}
-	sess, err := mgr.CreateSessionForPlanning(cfg)
+	sess, err := mgr.CreateSessionNoAgent(cfg)
 	if err != nil {
-		t.Fatalf("CreateSessionForPlanning: %v", err)
+		t.Fatalf("CreateSessionNoAgent: %v", err)
 	}
 	sess.SetLifecyclePhase(agent.LifecycleDrafting)
 
@@ -4505,7 +4505,7 @@ func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 	}
 
 	// Submit through the planning path (skipPlanning=false uses
-	// CreateSessionForPlanning which doesn't spawn an agent). The skip path
+	// CreateSessionNoAgent which doesn't spawn an agent). The skip path
 	// differs only in calling CreateSession; both share the same repo lookup
 	// that the fix straightened out, so this exercises the fix.
 	sessionsBefore1 := len(mgr1.ListSessions())
@@ -5075,7 +5075,7 @@ func TestHandlePlanEditorRevise_PassesPlanModelOverride(t *testing.T) {
 	defer mgr.Shutdown()
 	mgr.SetPlanDrafter(recorder)
 
-	sess, err := mgr.CreateSessionForPlanning(agent.Config{AgentProgram: "bash"})
+	sess, err := mgr.CreateSessionNoAgent(agent.Config{AgentProgram: "bash"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5320,11 +5320,11 @@ func TestApprovePlanAndSpawn_StaysOnDashboard(t *testing.T) {
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 	defer mgr.Shutdown()
 
-	sess, err := mgr.CreateSessionForPlanning(agent.Config{
+	sess, err := mgr.CreateSessionNoAgent(agent.Config{
 		Rows: 24, Cols: 80, AgentProgram: "bash",
 	})
 	if err != nil {
-		t.Fatalf("CreateSessionForPlanning: %v", err)
+		t.Fatalf("CreateSessionNoAgent: %v", err)
 	}
 
 	app := NewApp()
@@ -5409,9 +5409,9 @@ func setupAutoPromoteRepo(t *testing.T) (dir string, mgr *agent.Manager) {
 func TestAgentEvent_IdleAutoPromotesInProgressToReadyForReview(t *testing.T) {
 	dir, mgr := setupAutoPromoteRepo(t)
 
-	sess, err := mgr.CreateSessionForPlanning(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
+	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
 	if err != nil {
-		t.Fatalf("CreateSessionForPlanning: %v", err)
+		t.Fatalf("CreateSessionNoAgent: %v", err)
 	}
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("ag-idle-1", false, agent.StatusIdle)
@@ -5453,9 +5453,9 @@ func TestAgentEvent_IdleAutoPromotesInProgressToReadyForReview(t *testing.T) {
 func TestAgentEvent_ActiveDoesNotAutoPromote(t *testing.T) {
 	dir, mgr := setupAutoPromoteRepo(t)
 
-	sess, err := mgr.CreateSessionForPlanning(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
+	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
 	if err != nil {
-		t.Fatalf("CreateSessionForPlanning: %v", err)
+		t.Fatalf("CreateSessionNoAgent: %v", err)
 	}
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("ag-active-1", false, agent.StatusActive)
@@ -5486,9 +5486,9 @@ func TestAgentEvent_ActiveDoesNotAutoPromote(t *testing.T) {
 func TestAgentEvent_IdleLeavesShippingPhaseAlone(t *testing.T) {
 	dir, mgr := setupAutoPromoteRepo(t)
 
-	sess, err := mgr.CreateSessionForPlanning(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
+	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
 	if err != nil {
-		t.Fatalf("CreateSessionForPlanning: %v", err)
+		t.Fatalf("CreateSessionNoAgent: %v", err)
 	}
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	ag := sess.AddTestAgent("ag-ship-1", false, agent.StatusIdle)
@@ -5796,9 +5796,9 @@ func TestCleanStaleCaches_ScopesByRepo(t *testing.T) {
 func TestAutoPromoteToReview_TriggersValidation(t *testing.T) {
 	dir, mgr := setupAutoPromoteRepo(t)
 
-	sess, err := mgr.CreateSessionForPlanning(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
+	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
 	if err != nil {
-		t.Fatalf("CreateSessionForPlanning: %v", err)
+		t.Fatalf("CreateSessionNoAgent: %v", err)
 	}
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("ag-idle-val-1", false, agent.StatusIdle)
@@ -5846,9 +5846,9 @@ func TestAutoPromoteToReview_TriggersValidation(t *testing.T) {
 func TestManualMarkReady_TriggersValidation(t *testing.T) {
 	dir, mgr := setupAutoPromoteRepo(t)
 
-	sess, err := mgr.CreateSessionForPlanning(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
+	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
 	if err != nil {
-		t.Fatalf("CreateSessionForPlanning: %v", err)
+		t.Fatalf("CreateSessionNoAgent: %v", err)
 	}
 	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("ag-idle-m-1", false, agent.StatusIdle)

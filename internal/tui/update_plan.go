@@ -312,7 +312,7 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		AgentProgram:      resolved.AgentProgram,
 		AgentModel:        applyOverrideString(msg.overrides.AgentModel, resolved.AgentModel),
 	}
-	sess, err := mgr.CreateSessionForPlanning(cfg)
+	sess, err := mgr.CreateSessionNoAgent(cfg)
 	if err != nil {
 		a.setError(err.Error())
 		return a, nil
