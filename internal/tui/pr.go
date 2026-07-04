@@ -11,11 +11,18 @@ import (
 	"github.com/devenjarvis/refrain/internal/tui/theme"
 )
 
-// rowStatePhrase returns a human-readable badge for a session's shipping row.
-// Priority: merge-ready > conflicts > changes-requested > CI failure > CI pending.
+// rowStatePhrase returns a human-readable badge for a session row's PR state.
+// Priority: merged/closed (terminal) > merge-ready > conflicts >
+// changes-requested > CI failure > CI pending.
 func rowStatePhrase(entry *prCacheEntry) string {
 	if entry == nil || entry.pr == nil {
 		return ""
+	}
+	switch entry.pr.State {
+	case "merged":
+		return "Merged"
+	case "closed":
+		return "Closed"
 	}
 	if isMergeReady(entry) {
 		return "Ready"
@@ -187,21 +194,23 @@ func prIndicator(entry *prCacheEntry) string {
 // statePhraseStyle returns a lipgloss style appropriate for a row state phrase.
 func statePhraseStyle(phrase string) lipgloss.Style {
 	switch phrase {
-	case "Ready":
+	case "Ready", "Merged":
 		return StyleSuccess
 	case "Conflicts", "Changes requested":
 		return StyleError
 	case "Waiting on CI":
 		return StyleWarning
+	case "Closed":
+		return StyleSubtle
 	default: // "CI N/M failing"
 		return StyleError
 	}
 }
 
 // resolveMergedFallback fetches the authoritative PR state for a cached PR when
-// the open-only poll returns nil. It is only called for Shipping sessions so that
-// Building/Reviewing sessions retain today's 2-nil eviction behaviour.
-// Returns the PR if State is "merged" or "closed"; otherwise returns nil.
+// the open-only poll returns nil, so an external merge/close surfaces as a badge
+// instead of the cache silently evicting. Returns the PR if State is "merged" or
+// "closed"; otherwise returns nil (preserving the 2-nil eviction behaviour).
 func resolveMergedFallback(ctx context.Context, owner, repo string, cachedPRNumber int, refresh func(context.Context, string, string, int) (*github.PRState, error)) *github.PRState {
 	if cachedPRNumber <= 0 {
 		return nil

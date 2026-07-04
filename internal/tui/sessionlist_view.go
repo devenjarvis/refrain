@@ -244,6 +244,12 @@ func (m sessionListModel) renderBadges(row sessionRow, sessKey string, props ses
 		if ind := prIndicator(entry); ind != "" {
 			badges = append(badges, ind)
 		}
+		// Terminal PR states park the session until the user removes it; the
+		// hint is the row's only teardown affordance (rollback design §4.7 —
+		// no session vanishes on its own).
+		if entry.pr != nil && (entry.pr.State == "merged" || entry.pr.State == "closed") {
+			badges = append(badges, StyleSubtle.Render("X to clean up"))
+		}
 	}
 	return strings.Join(badges, StyleSubtle.Render(" · "))
 }

@@ -37,7 +37,7 @@ func TestSessionManager_FakeDrivesKillSession(t *testing.T) {
 	app.resolvedCache[repo] = config.Resolve(nil, nil)
 
 	// Drive KillSessionCmd through the panel-deps seam (the same path the
-	// shipping panel takes when the user confirms session teardown).
+	// PR panel takes when the user confirms session teardown).
 	deps := app.buildReviewDeps()
 	if deps.KillSessionCmd == nil {
 		t.Fatal("KillSessionCmd should be wired by buildReviewDeps")

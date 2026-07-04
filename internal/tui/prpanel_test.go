@@ -10,10 +10,10 @@ import (
 	"github.com/devenjarvis/refrain/internal/github"
 )
 
-func TestRenderShippingPanel_NilEntry(t *testing.T) {
+func TestRenderPRPanel_NilEntry(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "ship-it")
-	out := renderShippingPanel(sess, nil, 100, 30, 0, 0, nil)
-	if !strings.Contains(out, "SHIPPING") {
+	out := renderPRPanel(sess, nil, 100, 30, 0, 0, nil)
+	if !strings.Contains(out, "PULL REQUEST") {
 		t.Errorf("header missing: %q", out)
 	}
 	if !strings.Contains(ansi.Strip(out), "fetching PR status") {
@@ -21,7 +21,7 @@ func TestRenderShippingPanel_NilEntry(t *testing.T) {
 	}
 }
 
-func TestRenderShippingPanel_WithEntry(t *testing.T) {
+func TestRenderPRPanel_WithEntry(t *testing.T) {
 	sess := agent.NewSessionForTest("s2", "ship-it")
 	entry := &prCacheEntry{
 		pr: &github.PRState{
@@ -52,7 +52,7 @@ func TestRenderShippingPanel_WithEntry(t *testing.T) {
 		},
 	}
 
-	out := renderShippingPanel(sess, entry, 100, 40, 0, 0, nil)
+	out := renderPRPanel(sess, entry, 100, 40, 0, 0, nil)
 	stripped := ansi.Strip(out)
 
 	if !strings.Contains(out, "#42") {
@@ -81,21 +81,21 @@ func TestRenderShippingPanel_WithEntry(t *testing.T) {
 	}
 }
 
-func TestRenderShippingPanel_MergeReady(t *testing.T) {
+func TestRenderPRPanel_MergeReady(t *testing.T) {
 	sess := agent.NewSessionForTest("s3", "ship-it")
 	entry := &prCacheEntry{
 		pr:      &github.PRState{Number: 7, MergeableState: "clean"},
 		checks:  &github.CheckStatus{State: "success", Total: 2, Passed: 2},
 		reviews: &github.ReviewStatus{State: "approved", Approved: 1},
 	}
-	out := renderShippingPanel(sess, entry, 100, 30, 0, 0, nil)
+	out := renderPRPanel(sess, entry, 100, 30, 0, 0, nil)
 	stripped := ansi.Strip(out)
 	if !strings.Contains(stripped, "Ready") {
 		t.Errorf("Ready phrase missing: %q", stripped)
 	}
 }
 
-func TestRenderShippingPanel_UnknownMergeable(t *testing.T) {
+func TestRenderPRPanel_UnknownMergeable(t *testing.T) {
 	sess := agent.NewSessionForTest("s4", "ship-it")
 	entry := &prCacheEntry{
 		pr: &github.PRState{
@@ -105,7 +105,7 @@ func TestRenderShippingPanel_UnknownMergeable(t *testing.T) {
 			MergeableState: "unknown",
 		},
 	}
-	out := renderShippingPanel(sess, entry, 100, 30, 0, 0, nil)
+	out := renderPRPanel(sess, entry, 100, 30, 0, 0, nil)
 	stripped := ansi.Strip(out)
 	if !strings.Contains(stripped, "checking") {
 		t.Errorf("expected 'checking' for unknown mergeable state: %q", stripped)
@@ -115,7 +115,7 @@ func TestRenderShippingPanel_UnknownMergeable(t *testing.T) {
 	}
 }
 
-func TestRenderShippingPanel_HintsListsTriageKeys(t *testing.T) {
+func TestRenderPRPanel_HintsListsTriageKeys(t *testing.T) {
 	sess := agent.NewSessionForTest("s-hints", "ship-it")
 	entry := &prCacheEntry{
 		pr: &github.PRState{
@@ -125,7 +125,7 @@ func TestRenderShippingPanel_HintsListsTriageKeys(t *testing.T) {
 			MergeableState: "clean",
 		},
 	}
-	out := renderShippingPanel(sess, entry, 120, 30, 0, 0, nil)
+	out := renderPRPanel(sess, entry, 120, 30, 0, 0, nil)
 	stripped := ansi.Strip(out)
 	if !strings.Contains(stripped, "a — approve") {
 		t.Errorf("hint 'a — approve' missing: %q", stripped)
@@ -138,7 +138,7 @@ func TestRenderShippingPanel_HintsListsTriageKeys(t *testing.T) {
 	}
 }
 
-func TestRenderShippingPanel_TwoPaneFullBody(t *testing.T) {
+func TestRenderPRPanel_TwoPaneFullBody(t *testing.T) {
 	sess := agent.NewSessionForTest("s5", "ship-it")
 	// 400-char body with no newlines — old truncateVisible would clip it.
 	longBody := strings.Repeat("x", 50) + " " + strings.Repeat("y", 50) + " " +
@@ -160,7 +160,7 @@ func TestRenderShippingPanel_TwoPaneFullBody(t *testing.T) {
 			},
 		},
 	}
-	out := renderShippingPanel(sess, entry, 120, 40, 0, 0, nil)
+	out := renderPRPanel(sess, entry, 120, 40, 0, 0, nil)
 	stripped := ansi.Strip(out)
 
 	// Reviewer name appears in left pane.

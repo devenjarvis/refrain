@@ -96,11 +96,11 @@ func TestManager_StartDraft_Success(t *testing.T) {
 	}
 
 	waitForCondition(t, 2*time.Second, func() bool {
-		return !sess.IsDrafting() && sess.LifecyclePhase() == LifecyclePlanning && sess.HasPlan()
+		return !sess.IsDrafting() && sess.HasPlan()
 	})
 
 	if got := sess.LifecyclePhase(); got != LifecyclePlanning {
-		t.Errorf("phase after success = %v, want LifecyclePlanning", got)
+		t.Errorf("phase after success = %v, want LifecyclePlanning (drafting never touches lifecycle)", got)
 	}
 	body, err := sess.ReadPlan()
 	if err != nil {
@@ -117,7 +117,7 @@ func TestManager_StartDraft_Success(t *testing.T) {
 	}
 }
 
-func TestManager_StartDraft_TransitionsToDraftingImmediately(t *testing.T) {
+func TestManager_StartDraft_SetsDraftingImmediately(t *testing.T) {
 	repo := setupTestRepo(t)
 	mgr := NewManager(repo, defaultTestSettings())
 	defer mgr.Shutdown()
@@ -143,9 +143,10 @@ func TestManager_StartDraft_TransitionsToDraftingImmediately(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Drafting is set synchronously by StartDraft before returning.
-	if got := sess.LifecyclePhase(); got != LifecycleDrafting {
-		t.Errorf("phase after StartDraft = %v, want LifecycleDrafting", got)
+	// Drafting is set synchronously by StartDraft before returning; the
+	// lifecycle phase is never touched (rollback design §4.5).
+	if got := sess.LifecyclePhase(); got != LifecyclePlanning {
+		t.Errorf("phase after StartDraft = %v, want LifecyclePlanning (unchanged)", got)
 	}
 	if !sess.IsDrafting() {
 		t.Error("IsDrafting() should be true while subprocess runs")
@@ -176,7 +177,7 @@ func TestManager_StartDraft_DrafterErrorLandsInPlanning(t *testing.T) {
 	waitForCondition(t, 2*time.Second, func() bool { return !sess.IsDrafting() })
 
 	if got := sess.LifecyclePhase(); got != LifecyclePlanning {
-		t.Errorf("phase after error = %v, want LifecyclePlanning", got)
+		t.Errorf("phase after error = %v, want LifecyclePlanning (unchanged)", got)
 	}
 	if sess.HasPlan() {
 		t.Error("plan file should not exist after drafter error")
@@ -208,7 +209,7 @@ func TestManager_StartDraft_EmptyPlanLandsInPlanningWithError(t *testing.T) {
 	waitForCondition(t, 2*time.Second, func() bool { return !sess.IsDrafting() })
 
 	if got := sess.LifecyclePhase(); got != LifecyclePlanning {
-		t.Errorf("phase after empty plan = %v, want LifecyclePlanning", got)
+		t.Errorf("phase after empty plan = %v, want LifecyclePlanning (unchanged)", got)
 	}
 	if sess.HasPlan() {
 		t.Error("plan file should not exist when planner returned empty body")
@@ -848,7 +849,7 @@ func TestManager_StartDraft_QuestionRoundTrip(t *testing.T) {
 	}
 
 	waitForCondition(t, 3*time.Second, func() bool {
-		return !sess.IsDrafting() && sess.LifecyclePhase() == LifecyclePlanning && sess.HasPlan()
+		return !sess.IsDrafting() && sess.HasPlan()
 	})
 	if sess.DraftError() != nil {
 		t.Fatalf("DraftError = %v, want nil", sess.DraftError())

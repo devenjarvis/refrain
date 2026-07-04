@@ -15,7 +15,7 @@ type Modals struct {
 	current panelFocus
 
 	review         *reviewPanelModel
-	shipping       *shippingPanelModel
+	prPanel        *prPanelModel
 	planEditor     *planEditorModel
 	config         *configForm
 	configRepo     string
@@ -44,7 +44,7 @@ func (m *Modals) IsList() bool { return m.current == focusList }
 func (m *Modals) Close() {
 	m.current = focusList
 	m.review = nil
-	m.shipping = nil
+	m.prPanel = nil
 	m.planEditor = nil
 	m.config = nil
 	m.configRepo = ""
@@ -62,11 +62,11 @@ func (m *Modals) OpenReview(p *reviewPanelModel) {
 	m.review = p
 }
 
-// OpenShipping opens the shipping panel.
-func (m *Modals) OpenShipping(p *shippingPanelModel) {
+// OpenPRPanel opens the PR panel.
+func (m *Modals) OpenPRPanel(p *prPanelModel) {
 	m.Close()
-	m.current = focusShipping
-	m.shipping = p
+	m.current = focusPRPanel
+	m.prPanel = p
 }
 
 // OpenPlanEditor opens the full-page plan editor.
@@ -129,10 +129,10 @@ func (m *Modals) Review() *reviewPanelModel {
 	return nil
 }
 
-// Shipping returns the shipping panel model if focusShipping is current.
-func (m *Modals) Shipping() *shippingPanelModel {
-	if m.current == focusShipping {
-		return m.shipping
+// PRPanel returns the PR panel model if focusPRPanel is current.
+func (m *Modals) PRPanel() *prPanelModel {
+	if m.current == focusPRPanel {
+		return m.prPanel
 	}
 	return nil
 }
@@ -229,11 +229,11 @@ func (m *Modals) CompareAndSetReview(old, fresh *reviewPanelModel) bool {
 	return true
 }
 
-// CompareAndSetShipping is the shipping panel's snapshot-and-swap variant.
-func (m *Modals) CompareAndSetShipping(old, fresh *shippingPanelModel) bool {
-	if m.current != focusShipping || m.shipping != old {
+// CompareAndSetPRPanel is the PR panel's snapshot-and-swap variant.
+func (m *Modals) CompareAndSetPRPanel(old, fresh *prPanelModel) bool {
+	if m.current != focusPRPanel || m.prPanel != old {
 		return false
 	}
-	m.shipping = fresh
+	m.prPanel = fresh
 	return true
 }

@@ -17,7 +17,7 @@ import tea "charm.land/bubbletea/v2"
 // SetSize uses a pointer receiver because it mutates stored dimensions.
 //
 // PanelModel (panel.go) is the pointer-receiver sibling of this contract for
-// the review/shipping panels: the same Update(tea.Msg)/View() shape, but the
+// the review/PR panels: the same Update(tea.Msg)/View() shape, but the
 // panels are nil-able pointer fields in Modals. They reach app-level state
 // through deps injected at construction and signal App-scalar mutations via
 // messages. Phase 5b completed this fold and removed the old per-tick services

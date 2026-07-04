@@ -19,7 +19,7 @@ func TestModals_ZeroValue(t *testing.T) {
 	if m.Review() != nil {
 		t.Error("Review() should be nil on zero value")
 	}
-	if m.Shipping() != nil {
+	if m.PRPanel() != nil {
 		t.Error("Shipping() should be nil on zero value")
 	}
 	if m.PlanEditor() != nil {
@@ -54,7 +54,7 @@ func TestModals_OpenReview_SetsCurrentAndPointer(t *testing.T) {
 		t.Error("Review() should return the opened panel")
 	}
 	// Every other accessor must return nil while review is active.
-	if m.Shipping() != nil {
+	if m.PRPanel() != nil {
 		t.Error("Shipping() should be nil when focusReview is current")
 	}
 	if m.PlanEditor() != nil {
@@ -80,7 +80,7 @@ func TestModals_Close_NilsEveryModel(t *testing.T) {
 		open func(*Modals)
 	}{
 		{"review", func(m *Modals) { m.OpenReview(&reviewPanelModel{}) }},
-		{"shipping", func(m *Modals) { m.OpenShipping(&shippingPanelModel{}) }},
+		{"shipping", func(m *Modals) { m.OpenPRPanel(&prPanelModel{}) }},
 		{"planEditor", func(m *Modals) { m.OpenPlanEditor(&planEditorModel{}) }},
 		{"config", func(m *Modals) { m.OpenConfig(&configForm{}, "/repo") }},
 		{"launch", func(m *Modals) { m.OpenLaunch(&agent.Session{}, &agent.Agent{}, "") }},
@@ -97,7 +97,7 @@ func TestModals_Close_NilsEveryModel(t *testing.T) {
 			if m.Review() != nil {
 				t.Error("Review() not nil after Close")
 			}
-			if m.Shipping() != nil {
+			if m.PRPanel() != nil {
 				t.Error("Shipping() not nil after Close")
 			}
 			if m.PlanEditor() != nil {
@@ -130,9 +130,9 @@ func TestModals_Close_NilsInternalState(t *testing.T) {
 	if m.review != nil {
 		t.Error("internal review pointer should be nil after Close")
 	}
-	m.OpenShipping(&shippingPanelModel{})
+	m.OpenPRPanel(&prPanelModel{})
 	m.Close()
-	if m.shipping != nil {
+	if m.prPanel != nil {
 		t.Error("internal shipping pointer should be nil after Close")
 	}
 	m.OpenPlanEditor(&planEditorModel{})
@@ -158,18 +158,18 @@ func TestModals_Close_NilsInternalState(t *testing.T) {
 func TestModals_OpenReplacesPrevious(t *testing.T) {
 	var m Modals
 	rp := &reviewPanelModel{}
-	sp := &shippingPanelModel{}
+	sp := &prPanelModel{}
 
 	m.OpenReview(rp)
-	m.OpenShipping(sp)
+	m.OpenPRPanel(sp)
 
-	if m.Current() != focusShipping {
-		t.Errorf("Current() = %d, want focusShipping", m.Current())
+	if m.Current() != focusPRPanel {
+		t.Errorf("Current() = %d, want focusPRPanel", m.Current())
 	}
 	if m.Review() != nil {
-		t.Error("Review() should be nil after OpenShipping replaces it")
+		t.Error("Review() should be nil after OpenPRPanel replaces it")
 	}
-	if m.Shipping() != sp {
+	if m.PRPanel() != sp {
 		t.Error("Shipping() should return the most recently opened panel")
 	}
 	// Internal state: the prior review pointer must also be cleared.
@@ -196,8 +196,8 @@ func TestModals_TableInvariant(t *testing.T) {
 		},
 		{
 			name:       "shipping",
-			open:       func(m *Modals) { m.OpenShipping(&shippingPanelModel{}) },
-			wantFocus:  focusShipping,
+			open:       func(m *Modals) { m.OpenPRPanel(&prPanelModel{}) },
+			wantFocus:  focusPRPanel,
 			wantNonNil: "shipping",
 		},
 		{
@@ -228,7 +228,7 @@ func TestModals_TableInvariant(t *testing.T) {
 			}
 			accessors := map[string]bool{
 				"review":     m.Review() != nil,
-				"shipping":   m.Shipping() != nil,
+				"shipping":   m.PRPanel() != nil,
 				"planEditor": m.PlanEditor() != nil,
 				"config":     m.Config() != nil,
 				"launch":     m.LaunchAgent() != nil && m.LaunchSession() != nil,
@@ -272,20 +272,20 @@ func TestModals_CompareAndSetReview(t *testing.T) {
 // TestModals_CompareAndSetShipping mirrors the review CAS test for shipping.
 func TestModals_CompareAndSetShipping(t *testing.T) {
 	var m Modals
-	original := &shippingPanelModel{}
-	fresh := &shippingPanelModel{}
-	m.OpenShipping(original)
+	original := &prPanelModel{}
+	fresh := &prPanelModel{}
+	m.OpenPRPanel(original)
 
-	if !m.CompareAndSetShipping(original, fresh) {
-		t.Fatal("CompareAndSetShipping should succeed when pointer matches")
+	if !m.CompareAndSetPRPanel(original, fresh) {
+		t.Fatal("CompareAndSetPRPanel should succeed when pointer matches")
 	}
-	if m.Shipping() != fresh {
+	if m.PRPanel() != fresh {
 		t.Error("Shipping() should return fresh after successful swap")
 	}
 
 	m.Close()
-	if m.CompareAndSetShipping(fresh, &shippingPanelModel{}) {
-		t.Error("CompareAndSetShipping should fail when focus changed")
+	if m.CompareAndSetPRPanel(fresh, &prPanelModel{}) {
+		t.Error("CompareAndSetPRPanel should fail when focus changed")
 	}
 }
 

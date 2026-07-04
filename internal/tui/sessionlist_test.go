@@ -377,7 +377,7 @@ func TestSessionList_JKMovesFlatCursor(t *testing.T) {
 
 func TestSessionList_EnterOpensTerminalForAnySession(t *testing.T) {
 	// Even a Shipping-phase session opens the terminal — the old per-phase
-	// dispatch (review panel / shipping panel) is gone (§4.2).
+	// dispatch (review panel / PR panel) is gone (§4.2).
 	sess := agent.NewSessionForTest("s", "shipping-s")
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	ag := sess.AddTestAgent("ag-1", false, agent.StatusIdle)
@@ -448,8 +448,8 @@ func TestSessionList_PKeyWithCachedPROpensPRPanel(t *testing.T) {
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	app = model.(App)
-	if app.modals.Current() != focusShipping {
-		t.Fatalf("expected PR panel (focusShipping) after p with cached PR, got %v", app.modals.Current())
+	if app.modals.Current() != focusPRPanel {
+		t.Fatalf("expected PR panel (focusPRPanel) after p with cached PR, got %v", app.modals.Current())
 	}
 }
 
@@ -466,6 +466,77 @@ func TestSessionList_PKeyBusySessionRefusesDraft(t *testing.T) {
 	}
 	if app.err == "" {
 		t.Fatal("expected a transient error explaining why the draft was refused")
+	}
+}
+
+// TestSessionList_PlanKeyOnPlannedSessionOpensPlanEditor: `P` on a session
+// that already has a plan opens the plan editor directly (rollback design
+// §4.5 — plan is an action bound to a key, not a phase).
+func TestSessionList_PlanKeyOnPlannedSessionOpensPlanEditor(t *testing.T) {
+	sess := agent.NewSessionForTestWithPath("p", "planned", t.TempDir())
+	if err := sess.WritePlan("# Goal\n"); err != nil {
+		t.Fatal(err)
+	}
+	app := newListApp(t, sess)
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'P', Text: "P"})
+	app = model.(App)
+	if app.modals.Current() != focusPlanEditor {
+		t.Fatalf("expected focusPlanEditor after P on a planned session, got %v", app.modals.Current())
+	}
+	if app.planGoal.Active() {
+		t.Fatal("goal modal must not open when a plan already exists")
+	}
+}
+
+// TestSessionList_PlanKeyOnPlanlessSessionOpensGoalModal: `P` with no plan
+// prompts for a goal; esc dismisses without side effects.
+func TestSessionList_PlanKeyOnPlanlessSessionOpensGoalModal(t *testing.T) {
+	sess := agent.NewSessionForTest("s", "no-plan")
+	app := newListApp(t, sess)
+
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'P', Text: "P"})
+	app = model.(App)
+	if !app.planGoal.Active() {
+		t.Fatal("expected the plan-goal modal to open on P with no plan")
+	}
+	if app.modals.Current() == focusPlanEditor {
+		t.Fatal("plan editor must not open before a goal is submitted")
+	}
+
+	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEscape, Text: ""})
+	app = model.(App)
+	if app.planGoal.Active() {
+		t.Fatal("esc should close the goal modal")
+	}
+	if app.modals.Current() == focusPlanEditor {
+		t.Fatal("dismissing the goal modal must not open the plan editor")
+	}
+}
+
+// TestSessionListView_MergedBadgeAndCleanupHint: a merged PR renders the
+// Merged phrase plus the "X to clean up" hint on the session's row — merged
+// sessions park in the list until the user removes them (§4.7).
+func TestSessionListView_MergedBadgeAndCleanupHint(t *testing.T) {
+	sess := agent.NewSessionForTest("m", "merged-work")
+	items := listItems{
+		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
+		{kind: listItemSession, repoPath: "/r", session: sess},
+	}
+	props := listPropsFor(items)
+	props.prCache[cacheKey("/r", "m")] = &prCacheEntry{
+		pr: &github.PRState{Number: 9, State: "merged"},
+	}
+
+	m := newSessionListModel()
+	m.SetSize(120, 30)
+	m.now = time.Now()
+	out := ansi.Strip(m.View(props))
+
+	for _, want := range []string{"#9", "Merged", "X to clean up"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view missing %q:\n%s", want, out)
+		}
 	}
 }
 

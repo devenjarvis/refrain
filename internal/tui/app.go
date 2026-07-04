@@ -98,25 +98,23 @@ type resumeDoneMsg struct {
 // prDraftReadyMsg carries the result of the async push+draft pipeline.
 // On success Title/Body are non-empty. On error Err is set.
 type prDraftReadyMsg struct {
-	sessionID          string
-	title              string
-	body               string
-	owner              string
-	repo               string
-	head               string
-	base               string
-	repoPath           string
-	transitionShipping bool
-	err                error
+	sessionID string
+	title     string
+	body      string
+	owner     string
+	repo      string
+	head      string
+	base      string
+	repoPath  string
+	err       error
 }
 
 // prCreatedMsg carries the result of the async github.Client.CreatePR call.
 type prCreatedMsg struct {
-	sessionID          string
-	repoPath           string
-	pr                 *github.PRState
-	transitionShipping bool
-	err                error
+	sessionID string
+	repoPath  string
+	pr        *github.PRState
+	err       error
 }
 
 // mergePRMsg carries the result of an async PR merge attempt.
@@ -198,8 +196,8 @@ type App struct {
 	// modals owns panel focus and the lifetime of every overlay model. The
 	// invariant "the model for panelFocus X is non-nil iff modals.Current() == X"
 	// is enforced by the Modals type; see internal/tui/modals.go. App callers
-	// must reach overlay models via modals.Review(), modals.Shipping(), etc.,
-	// and must transition via app.openReview / openShipping / openPlanEditor /
+	// must reach overlay models via modals.Review(), modals.PRPanel(), etc.,
+	// and must transition via app.openReview / openPRPanel / openPlanEditor /
 	// openConfig / openLaunch / closeModal helpers. The dashboard reads this
 	// state live each frame via dashboardProps(); there is no mirror to sync.
 	modals          Modals
@@ -241,6 +239,10 @@ type App struct {
 	// and future rebinding flows can swap a non-default map.
 	keys KeyMap
 
+	// planGoal is the small overlay the `P` action opens on a plan-less
+	// session to collect the goal a plan should be drafted against.
+	planGoal planGoalModal
+
 	// PR compose modal and its associated session context.
 	prComposeModal   prComposeModal
 	prModalSessionID string
@@ -249,10 +251,6 @@ type App struct {
 	prModalRepo      string
 	prModalHead      string
 	prModalBase      string
-	// prModalTransitionShipping is true when the modal was opened from the
-	// review panel (p key), where confirming the PR should transition the
-	// session to LifecycleShipping and close the review panel.
-	prModalTransitionShipping bool
 }
 
 // The modal helpers below are thin forwards to a.modals.*. They survive as
@@ -276,16 +274,16 @@ func (a *App) openReviewPanel(sess *agent.Session, repoPath string) {
 	a.modals.OpenReview(rp)
 }
 
-// openShipping opens the shipping panel.
-func (a *App) openShipping(sp *shippingPanelModel) {
-	a.modals.OpenShipping(sp)
+// openPRPanel opens the PR panel.
+func (a *App) openPRPanel(sp *prPanelModel) {
+	a.modals.OpenPRPanel(sp)
 }
 
-// openShippingPanel constructs a shipping panel for sess (deps bound) and opens
-// it. The single shipping-panel entry point.
-func (a *App) openShippingPanel(sess *agent.Session, repoPath string) {
-	sp := newShippingPanel(sess, repoPath, a.width, a.height-statusBarHeight, a.buildShippingDeps())
-	a.modals.OpenShipping(sp)
+// openPRPanelForSession constructs a PR panel for sess (deps bound) and opens
+// it. The single PR-panel entry point.
+func (a *App) openPRPanelForSession(sess *agent.Session, repoPath string) {
+	sp := newPRPanel(sess, repoPath, a.width, a.height-statusBarHeight, a.buildPRPanelDeps())
+	a.modals.OpenPRPanel(sp)
 }
 
 // openPlanEditorPanel installs an existing plan editor model. The high-level
@@ -349,6 +347,7 @@ func NewApp() App {
 		feedbackTriage:   make(map[string]map[string]*feedbackTriageEntry),
 		pendingOverrides: make(map[string]sessionOverrides),
 		newSession:       newNewSessionModel(),
+		planGoal:         newPlanGoalModal(),
 		prComposeModal:   newPRComposeModal(),
 	}
 }
@@ -410,8 +409,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case reviewReworkRequestMsg:
 		return a.handleReviewReworkRequest(msg)
-	case shippingFeedbackRequestMsg:
-		return a.handleShippingFeedbackRequest(msg)
+	case prFeedbackRequestMsg:
+		return a.handlePRFeedbackRequest(msg)
 	case feedbackNoteSubmitMsg:
 		return a.handleFeedbackNoteSubmit(msg)
 	case panelCloseMsg:
@@ -458,6 +457,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handlePlanEditorRetry(msg)
 	case planEditorApproveMsg:
 		return a.approvePlanAndSpawn(msg)
+	case planGoalSubmitMsg:
+		return a.handlePlanGoalSubmit(msg)
 	case promptModalCancelMsg:
 		// Restore whichever view was active before the new-session screen opened.
 		a.view = a.newSession.returnTo
@@ -618,9 +619,8 @@ func (a App) handleSetError(msg setErrorMsg) (tea.Model, tea.Cmd) {
 // session. App owns the prDraft* scalar flags, so the panel signals intent
 // rather than flipping them itself (§4).
 type startPRDraftRequestMsg struct {
-	session            *agent.Session
-	repoPath           string
-	transitionShipping bool
+	session  *agent.Session
+	repoPath string
 }
 
 // handleStartPRDraftRequest sets the in-flight draft flags and kicks off the
@@ -632,9 +632,8 @@ func (a App) handleStartPRDraftRequest(msg startPRDraftRequestMsg) (tea.Model, t
 	a.prDraftInFlight = true
 	a.prDraftSessionID = msg.session.ID
 	a.prDraftRepoPath = msg.repoPath
-	a.prModalTransitionShipping = msg.transitionShipping
 	a.syncReviewDrafting()
-	return a, a.startPRDraftCmd(msg.session, msg.repoPath, msg.transitionShipping)
+	return a, a.startPRDraftCmd(msg.session, msg.repoPath)
 }
 
 // openAgentTerminalRequestMsg asks App to open the session's most-active agent
@@ -716,13 +715,13 @@ func (a *App) buildReviewDeps() reviewDeps {
 	}
 }
 
-// buildShippingDeps binds the shipping panel's reference-typed handles. The
+// buildPRPanelDeps binds the PR panel's reference-typed handles. The
 // feedback setters are free functions over the feedbackTriage map so they stay
 // live across App value-copies.
-func (a *App) buildShippingDeps() shippingDeps {
+func (a *App) buildPRPanelDeps() prPanelDeps {
 	prCache := a.prCache
 	feedbackTriage := a.feedbackTriage
-	return shippingDeps{
+	return prPanelDeps{
 		PRCache: func(repoPath, sessionID string) *prCacheEntry {
 			return prCache[cacheKey(repoPath, sessionID)]
 		},
@@ -895,7 +894,7 @@ func (a App) View() tea.View {
 			v.AltScreen = true
 			return v
 		}
-		if sp := a.modals.Shipping(); sp != nil {
+		if sp := a.modals.PRPanel(); sp != nil {
 			panel := sp.View()
 			if sp.NoteActive() {
 				panel = placeCentered(a.width, a.height, sp.NoteView())
@@ -913,6 +912,10 @@ func (a App) View() tea.View {
 		// PR compose modal overlay.
 		if a.prComposeModal.Active() {
 			body = a.prComposeModal.View()
+		}
+		// Plan-goal overlay (`P` on a plan-less session).
+		if a.planGoal.Active() {
+			body = placeCentered(a.width, a.height-statusBarHeight, a.planGoal.View())
 		}
 		statusbar := renderStatusBar(hints, a.width)
 		content = lipgloss.JoinVertical(lipgloss.Left, body, statusbar)
@@ -1193,8 +1196,8 @@ func panelFocusName(f panelFocus) string {
 		return "plan-editor"
 	case focusRepoChecks:
 		return "repo-checks"
-	case focusShipping:
-		return "shipping"
+	case focusPRPanel:
+		return "pr-panel"
 	default:
 		return fmt.Sprintf("unknown(%d)", int(f))
 	}

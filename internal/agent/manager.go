@@ -307,9 +307,12 @@ func (m *Manager) dispatchHookEvents() {
 		sessID := sess.ID
 		if changed := a.OnHookEvent(e); changed {
 			// Refresh commit task count synchronously before emitting the
-			// status-change event so the TUI has current values when it
-			// evaluates auto-promotion.
-			if e.Kind == hook.KindStop && sess.LifecyclePhase() == LifecycleInProgress {
+			// status-change event so the TUI renders current plan-progress
+			// values. Gated on plan presence (not lifecycle phase — rollback
+			// design §4.1): only planned sessions have Plan-Task trailers to
+			// count, and the gate keeps plan-less sessions free of a git call
+			// per Stop hook.
+			if e.Kind == hook.KindStop && sess.HasPlan() {
 				if err := sess.RefreshCommitTaskCount(); err != nil {
 					fmt.Fprintf(os.Stderr, "refrain: refresh commit task count: %v\n", err)
 				}
@@ -575,15 +578,15 @@ func WithPlanModel(model string) DraftOption {
 func (m *Manager) PlannerQuestions() <-chan PlannerQuestion { return m.plannerQuestions }
 
 // StartDraft begins async drafting of a plan for sessionID with the given
-// user prompt. Transitions the session to LifecycleDrafting, then spawns a
-// goroutine that calls PlanDrafter.Draft, writes the result via
-// Session.WritePlan, and transitions to LifecyclePlanning on success or
-// LifecyclePlanning(error) on failure. The goroutine is tracked in
-// m.watchers so Shutdown drains cleanly; cancellation occurs when m.done
-// closes (manager shutdown), KillSession is called, or CancelDraft is
-// called directly. Drafting subprocesses are NOT counted against
-// MaxConcurrentSessions — they are transient text-generation calls, not
-// long-lived agents.
+// user prompt. Spawns a goroutine that calls PlanDrafter.Draft and writes
+// the result via Session.WritePlan; the in-flight state is observable via
+// Session.IsDrafting and the outcome via Session.DraftError — there is no
+// lifecycle transition (rollback design §4.5: planning is an action, not a
+// phase). The goroutine is tracked in m.watchers so Shutdown drains
+// cleanly; cancellation occurs when m.done closes (manager shutdown),
+// KillSession is called, or CancelDraft is called directly. Drafting
+// subprocesses are NOT counted against MaxConcurrentSessions — they are
+// transient text-generation calls, not long-lived agents.
 //
 // StartDraft also spawns a per-session planner.Server bound to a unix socket
 // under .refrain/ so the planner Sonnet subprocess can call ask_user back into
@@ -624,7 +627,6 @@ func (m *Manager) StartDraft(sessionID, prompt string, opts ...DraftOption) erro
 	}
 
 	sess.SetOriginalPrompt(prompt)
-	sess.SetLifecyclePhase(LifecycleDrafting)
 	sess.SetDraftError(nil)
 	m.emit(Event{Type: EventStatusChanged, SessionID: sessionID})
 
@@ -707,11 +709,10 @@ func plannerQuestionSocketPath(repoPath, sessionID string) string {
 
 // runDraft executes a Draft call against drafter and writes the resulting
 // plan markdown via sess.WritePlan. Any failure path (drafter error, empty
-// output, write error) lands the session in LifecyclePlanning with
-// DraftError set so the Planning card can render a useful error badge —
-// the user can then retry via the editor's revise flow or by pressing
-// `n` again. Always emits EventStatusChanged on transition so the UI
-// repaints.
+// output, write error) sets DraftError so the session row can render a
+// useful error badge — the user can then retry via the editor's revise
+// flow or by pressing `n` again. Always emits EventStatusChanged on
+// completion so the UI repaints.
 //
 // qServer is the per-draft planner.Server (may be nil if startup failed);
 // it is closed after the drafter returns so a wedged ask_user handler
@@ -766,7 +767,6 @@ func (m *Manager) runDraft(ctx context.Context, sess *Session, drafter PlanDraft
 	}
 
 	sess.SetDraftError(err)
-	sess.SetLifecyclePhase(LifecyclePlanning)
 	m.emit(Event{Type: EventStatusChanged, SessionID: sess.ID})
 }
 

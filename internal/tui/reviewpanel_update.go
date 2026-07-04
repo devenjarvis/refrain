@@ -123,10 +123,12 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 		m.session.SetLifecyclePhase(agent.LifecycleReadyForReview)
 		return m, closeReviewPanel()
 	case "p":
+		// Ship: open the PR when one exists, otherwise push + draft one.
+		// An action, not a transition — the session's lifecycle is untouched
+		// (rollback design §4.5/§4.7).
 		sess := m.session
 		entry := m.deps.PRCache(m.repoPath, sess.ID)
 		if entry != nil && entry.pr != nil && entry.pr.URL != "" {
-			sess.SetLifecyclePhase(agent.LifecycleShipping)
 			return m, tea.Batch(openURLRequestCmd(entry.pr.URL), closeReviewPanel())
 		}
 		gh := m.deps.GHClient()
@@ -135,7 +137,7 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 		}
 		repoPath := m.repoPath
 		return m, func() tea.Msg {
-			return startPRDraftRequestMsg{session: sess, repoPath: repoPath, transitionShipping: true}
+			return startPRDraftRequestMsg{session: sess, repoPath: repoPath}
 		}
 	case "t":
 		sess := m.session

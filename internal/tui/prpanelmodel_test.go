@@ -11,9 +11,9 @@ import (
 	"github.com/devenjarvis/refrain/internal/github"
 )
 
-// testShippingSvcState records the side effects a shipping-panel test wants to
+// testShippingSvcState records the side effects a PR-panel test wants to
 // assert on. Post-§3-fold (panel.go), reference-typed handles are injected via
-// shippingDeps at construction and recorded here; the scalar effects that used
+// prPanelDeps at construction and recorded here; the scalar effects that used
 // to run through service closures (close, error, open-URL, open-in-launch) now
 // flow as messages the panel returns, so those are asserted on the emitted
 // tea.Cmd via runCmdAll/findMsg rather than recorded here.
@@ -24,15 +24,15 @@ type testShippingSvcState struct {
 	mergeForce     bool
 }
 
-// newTestShippingDeps returns a stub shippingDeps for shipping-panel tests plus
+// newTestShippingDeps returns a stub prPanelDeps for PR-panel tests plus
 // a state value the test can inspect after Update. The PR cache and feedback
 // triage map are read through the deps closures; verdict/note setters and the
 // merge cmd record into state.
-func newTestShippingDeps() (shippingDeps, *testShippingSvcState) {
+func newTestShippingDeps() (prPanelDeps, *testShippingSvcState) {
 	state := &testShippingSvcState{
 		triage: map[string]*feedbackTriageEntry{},
 	}
-	deps := shippingDeps{
+	deps := prPanelDeps{
 		PRCache: func(string, string) *prCacheEntry { return state.pr },
 		FeedbackTriage: func(string, string) map[string]*feedbackTriageEntry {
 			return state.triage
@@ -84,7 +84,7 @@ func cmdShippingError(t *testing.T, cmd tea.Cmd) string {
 func TestShippingPanelModel_EscCloses(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, _ := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !cmdClosesShipping(t, cmd) {
@@ -97,7 +97,7 @@ func TestShippingPanelModel_EscCloses(t *testing.T) {
 func TestShippingPanelModel_MergeBlockedWhenNotReady(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, state := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 	// No PR entry => not merge-ready.
 
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
@@ -114,7 +114,7 @@ func TestShippingPanelModel_MergeBlockedWhenNotReady(t *testing.T) {
 func TestShippingPanelModel_ForceMergeBypasses(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, state := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 	state.pr = &prCacheEntry{pr: &github.PRState{Number: 1}}
 
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'M', Text: "M"})
@@ -132,7 +132,7 @@ func TestShippingPanelModel_ForceMergeBypasses(t *testing.T) {
 func TestShippingPanelModel_PKeyOpensPRURL(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, state := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 	state.pr = &prCacheEntry{pr: &github.PRState{URL: "https://example/pr/1"}}
 
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
@@ -143,10 +143,10 @@ func TestShippingPanelModel_PKeyOpensPRURL(t *testing.T) {
 
 // shippingPanelWithFeedback returns a panel + deps + state where the cache has
 // three feedback items so cursor/verdict/note keys can be exercised.
-func shippingPanelWithFeedback() (*shippingPanelModel, shippingDeps, *testShippingSvcState) {
+func shippingPanelWithFeedback() (*prPanelModel, prPanelDeps, *testShippingSvcState) {
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, state := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 	state.pr = &prCacheEntry{
 		pr: &github.PRState{Number: 1, URL: "https://example/pr/1"},
 		threads: []github.ReviewThread{
@@ -280,7 +280,7 @@ func TestShippingPanelModel_AXU_NoItems_NoOp(t *testing.T) {
 	// crashes or off-by-one writes.
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, state := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 	for _, k := range []rune{'a', 'x', 'u'} {
 		_, _ = panel.Update(tea.KeyPressMsg{Code: k, Text: string(k)})
 	}
@@ -303,7 +303,7 @@ func TestShippingPanelModel_NKey_OpensFeedbackNoteModal(t *testing.T) {
 func TestShippingPanelModel_NKey_NoItems_DoesNotOpenModal(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, _ := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 	_, _ = panel.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if panel.NoteActive() {
 		t.Error("n with no items should not open the note modal")
@@ -322,10 +322,10 @@ func TestShippingPanelModel_NoteModalInterceptsKeys(t *testing.T) {
 	if panel.FeedbackCursor() != cursorBefore {
 		t.Error("j while note modal active moved feedback cursor")
 	}
-	// Esc cancels and does NOT close the shipping panel.
+	// Esc cancels and does NOT close the PR panel.
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if cmdClosesShipping(t, cmd) {
-		t.Error("esc inside note modal closed the shipping panel")
+		t.Error("esc inside note modal closed the PR panel")
 	}
 	if panel.NoteActive() {
 		t.Error("esc should close the note modal")
@@ -361,7 +361,7 @@ func TestShippingPanelModel_TKey_OpensInLaunch(t *testing.T) {
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
 	msgs := runCmdAll(t, cmd)
 	if _, ok := findMsg[panelCloseMsg](msgs); !ok {
-		t.Error("t should close the shipping panel")
+		t.Error("t should close the PR panel")
 	}
 	req, ok := findMsg[openAgentTerminalRequestMsg](msgs)
 	if !ok {
@@ -395,7 +395,7 @@ func TestShippingPanelModel_TKey_OpenFail_SetsError(t *testing.T) {
 func TestShippingPanelModel_PKey_NoURL_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, _ := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 	// No PR entry => no URL.
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	msgs := runCmdAll(t, cmd)
@@ -410,7 +410,7 @@ func TestShippingPanelModel_PKey_NoURL_SetsError(t *testing.T) {
 func TestShippingPanelModel_MergeReady_CallsMergeCmd(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, state := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 	state.pr = &prCacheEntry{
 		pr:      &github.PRState{Number: 1, MergeableState: "clean"},
 		checks:  &github.CheckStatus{State: "success", Total: 3},
@@ -432,7 +432,7 @@ func TestShippingPanelModel_MergeReady_CallsMergeCmd(t *testing.T) {
 func TestShippingPanelModel_ForceMerge_NoPR_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "ship")
 	deps, state := newTestShippingDeps()
-	panel := newShippingPanel(sess, "", 120, 40, deps)
+	panel := newPRPanel(sess, "", 120, 40, deps)
 	// No PR entry.
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'M', Text: "M"})
 	if state.mergeRequested {
@@ -449,9 +449,9 @@ func TestShippingPanelModel_RKey_EmitsFeedbackRequestMsg(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected cmd from r")
 	}
-	msg, ok := cmd().(shippingFeedbackRequestMsg)
+	msg, ok := cmd().(prFeedbackRequestMsg)
 	if !ok {
-		t.Fatalf("got %T, want shippingFeedbackRequestMsg", cmd())
+		t.Fatalf("got %T, want prFeedbackRequestMsg", cmd())
 	}
 	if msg.sessionID != "s1" {
 		t.Errorf("sessionID = %q, want s1", msg.sessionID)
@@ -499,7 +499,7 @@ func TestShippingPanel_MergeKey_UsesPinnedRepoPath(t *testing.T) {
 		recordedRepoPath = repoPath
 		return func() tea.Msg { return nil }
 	}
-	panel := newShippingPanel(sess, "/repoB", 120, 40, deps)
+	panel := newPRPanel(sess, "/repoB", 120, 40, deps)
 	state.pr = &prCacheEntry{
 		pr:      &github.PRState{Number: 1, MergeableState: "clean"},
 		checks:  &github.CheckStatus{State: "success", Total: 1},
@@ -515,25 +515,25 @@ func TestShippingPanel_MergeKey_UsesPinnedRepoPath(t *testing.T) {
 }
 
 // TestShippingPanel_FeedbackKey_EmitsRepoPath verifies that 'r' embeds the
-// panel's pinned repoPath in the emitted shippingFeedbackRequestMsg.
+// panel's pinned repoPath in the emitted prFeedbackRequestMsg.
 func TestShippingPanel_FeedbackKey_EmitsRepoPath(t *testing.T) {
 	sess := agent.NewSessionForTest("session-1", "ship")
 	deps, _ := newTestShippingDeps()
-	panel := newShippingPanel(sess, "/repoB", 120, 40, deps)
+	panel := newPRPanel(sess, "/repoB", 120, 40, deps)
 	_, cmd := panel.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if cmd == nil {
 		t.Fatal("expected cmd from r")
 	}
-	msg, ok := cmd().(shippingFeedbackRequestMsg)
+	msg, ok := cmd().(prFeedbackRequestMsg)
 	if !ok {
-		t.Fatalf("got %T, want shippingFeedbackRequestMsg", cmd())
+		t.Fatalf("got %T, want prFeedbackRequestMsg", cmd())
 	}
 	if msg.repoPath != "/repoB" {
 		t.Errorf("repoPath = %q, want /repoB (pinned)", msg.repoPath)
 	}
 }
 
-// TestShippingPanel_View_FooterOnLastRow verifies that renderShippingPanel always
+// TestShippingPanel_View_FooterOnLastRow verifies that renderPRPanel always
 // returns exactly height rows with the ESC hint on the last row.
 func TestShippingPanel_View_FooterOnLastRow(t *testing.T) {
 	const w, h = 120, 40
@@ -554,7 +554,7 @@ func TestShippingPanel_View_FooterOnLastRow(t *testing.T) {
 		sess := agent.NewSessionForTest("s1", "ship")
 		deps, _ := newTestShippingDeps()
 		// state.pr is nil → PRCache returns nil → loading path
-		panel := newShippingPanel(sess, "", w, h, deps)
+		panel := newPRPanel(sess, "", w, h, deps)
 		assertFooter(t, panel.View())
 	})
 
@@ -562,7 +562,7 @@ func TestShippingPanel_View_FooterOnLastRow(t *testing.T) {
 		sess := agent.NewSessionForTest("s2", "ship")
 		deps, state := newTestShippingDeps()
 		state.pr = &prCacheEntry{pr: &github.PRState{Number: 42, Title: "fix bug"}}
-		panel := newShippingPanel(sess, "", w, h, deps)
+		panel := newPRPanel(sess, "", w, h, deps)
 		assertFooter(t, panel.View())
 	})
 
@@ -575,7 +575,7 @@ func TestShippingPanel_View_FooterOnLastRow(t *testing.T) {
 				{Reviewer: "alice", State: "CHANGES_REQUESTED", Body: "please fix this thing"},
 			},
 		}
-		panel := newShippingPanel(sess, "", w, h, deps)
+		panel := newPRPanel(sess, "", w, h, deps)
 		assertFooter(t, panel.View())
 	})
 }

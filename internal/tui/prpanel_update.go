@@ -4,15 +4,15 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// shippingFeedbackRequestMsg is emitted by the panel when the user presses
+// prFeedbackRequestMsg is emitted by the panel when the user presses
 // 'r' to address feedback. App handles the cross-cutting effects.
-type shippingFeedbackRequestMsg struct {
+type prFeedbackRequestMsg struct {
 	sessionID string
 	repoPath  string
 }
 
 // feedbackNoteSubmitMsg is emitted by the embedded feedbackNoteModal when the
-// user saves a note (enter). It is owned and handled here (§4): the shipping
+// user saves a note (enter). It is owned and handled here (§4): the PR
 // panel persists the note via deps.SetFeedbackNote one Update cycle after the
 // modal closes.
 type feedbackNoteSubmitMsg struct {
@@ -20,14 +20,14 @@ type feedbackNoteSubmitMsg struct {
 	note    string
 }
 
-// closeShippingPanel returns a tea.Cmd yielding panelCloseMsg. Returns the cmd
-// for inline `return m, closeShippingPanel()`.
-func closeShippingPanel() tea.Cmd {
+// closePRPanel returns a tea.Cmd yielding panelCloseMsg. Returns the cmd
+// for inline `return m, closePRPanel()`.
+func closePRPanel() tea.Cmd {
 	return func() tea.Msg { return panelCloseMsg{} }
 }
 
-// Update dispatches the shipping panel's key handling.
-func (m *shippingPanelModel) Update(msg tea.Msg) (PanelModel, tea.Cmd) {
+// Update dispatches the PR panel's key handling.
+func (m *prPanelModel) Update(msg tea.Msg) (PanelModel, tea.Cmd) {
 	if m == nil || m.session == nil {
 		return m, nil
 	}
@@ -48,7 +48,7 @@ func (m *shippingPanelModel) Update(msg tea.Msg) (PanelModel, tea.Cmd) {
 
 // handleKey is the per-key dispatch. The nested feedback-note modal
 // intercepts all keys when active.
-func (m *shippingPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) {
+func (m *prPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) {
 	if m.feedbackNote.Active() {
 		var cmd tea.Cmd
 		m.feedbackNote, cmd = m.feedbackNote.Update(msg)
@@ -115,12 +115,12 @@ func (m *shippingPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd
 			return m, m.feedbackNote.Open(key, existing)
 		}
 	case "esc":
-		return m, closeShippingPanel()
+		return m, closePRPanel()
 	case "t":
 		sess := m.session
 		repoPath := m.repoPath
 		return m, tea.Batch(
-			closeShippingPanel(),
+			closePRPanel(),
 			func() tea.Msg {
 				return openAgentTerminalRequestMsg{
 					session:       sess,
@@ -148,7 +148,7 @@ func (m *shippingPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd
 		sessID := m.session.ID
 		repoPath := m.repoPath
 		return m, func() tea.Msg {
-			return shippingFeedbackRequestMsg{sessionID: sessID, repoPath: repoPath}
+			return prFeedbackRequestMsg{sessionID: sessID, repoPath: repoPath}
 		}
 	}
 	return m, nil

@@ -9,11 +9,11 @@ import (
 	"github.com/devenjarvis/refrain/internal/github"
 )
 
-// shippingPanelModel owns key/view dispatch for the shipping panel (PR
+// prPanelModel owns key/view dispatch for the PR panel (PR
 // status, CI failures, review threads, merge gate). Per-panel state
 // (cursor, scroll, feedback-note modal) lives here; feedbackTriage stays on
 // App because it survives panel close/reopen.
-type shippingPanelModel struct {
+type prPanelModel struct {
 	session        *agent.Session
 	repoPath       string
 	feedbackCursor int
@@ -22,15 +22,15 @@ type shippingPanelModel struct {
 
 	// deps carries the App-level reference handles the panel reaches through
 	// for lookups and cmd factories. Bound once at construction (§3 fold).
-	deps shippingDeps
+	deps prPanelDeps
 
 	width, height int
 }
 
-// shippingDeps holds the reference-typed App handles the shipping panel needs.
+// prPanelDeps holds the reference-typed App handles the PR panel needs.
 // Bound at construction to the App's maps/pointers (never to App itself) so the
 // closures stay live across App value-copies (App.Update is a value receiver).
-type shippingDeps struct {
+type prPanelDeps struct {
 	PRCache            func(repoPath, sessionID string) *prCacheEntry
 	FeedbackTriage     func(repoPath, sessionID string) map[string]*feedbackTriageEntry
 	SetFeedbackVerdict func(repoPath, sessionID, itemKey string, v feedbackVerdict)
@@ -103,15 +103,15 @@ func feedbackItemKey(item feedbackItem) string {
 	return "thread:" + item.Reviewer
 }
 
-// newShippingPanel constructs a shipping panel for sess. repoPath pins which
+// newPRPanel constructs a PR panel for sess. repoPath pins which
 // repo's manager is used for merge and feedback key handlers, preventing
 // multi-repo session-ID collisions from routing operations to the wrong repo.
 // The nested feedbackNote modal is initialised but inactive until the user
 // presses 'n'.
-func newShippingPanel(sess *agent.Session, repoPath string, width, height int, deps shippingDeps) *shippingPanelModel {
+func newPRPanel(sess *agent.Session, repoPath string, width, height int, deps prPanelDeps) *prPanelModel {
 	note := newFeedbackNoteModal()
 	note.SetSize(width, height+1)
-	return &shippingPanelModel{
+	return &prPanelModel{
 		session:      sess,
 		repoPath:     repoPath,
 		feedbackNote: note,
@@ -122,7 +122,7 @@ func newShippingPanel(sess *agent.Session, repoPath string, width, height int, d
 }
 
 // SessionID returns the bound session's ID or "" when unbound.
-func (m *shippingPanelModel) SessionID() string {
+func (m *prPanelModel) SessionID() string {
 	if m == nil || m.session == nil {
 		return ""
 	}
@@ -130,7 +130,7 @@ func (m *shippingPanelModel) SessionID() string {
 }
 
 // Session returns the bound session, or nil.
-func (m *shippingPanelModel) Session() *agent.Session {
+func (m *prPanelModel) Session() *agent.Session {
 	if m == nil {
 		return nil
 	}
@@ -138,7 +138,7 @@ func (m *shippingPanelModel) Session() *agent.Session {
 }
 
 // FeedbackCursor exposes the cursor row for tests and View rendering.
-func (m *shippingPanelModel) FeedbackCursor() int {
+func (m *prPanelModel) FeedbackCursor() int {
 	if m == nil {
 		return 0
 	}
@@ -146,7 +146,7 @@ func (m *shippingPanelModel) FeedbackCursor() int {
 }
 
 // DetailScroll exposes the detail-pane scroll for tests and View rendering.
-func (m *shippingPanelModel) DetailScroll() int {
+func (m *prPanelModel) DetailScroll() int {
 	if m == nil {
 		return 0
 	}
@@ -154,7 +154,7 @@ func (m *shippingPanelModel) DetailScroll() int {
 }
 
 // SetSize updates layout dimensions and forwards to the nested modal.
-func (m *shippingPanelModel) SetSize(w, h int) {
+func (m *prPanelModel) SetSize(w, h int) {
 	if m == nil {
 		return
 	}
@@ -165,12 +165,12 @@ func (m *shippingPanelModel) SetSize(w, h int) {
 
 // NoteActive reports whether the feedback-note modal is currently active.
 // App's View uses this to overlay the modal above the panel.
-func (m *shippingPanelModel) NoteActive() bool {
+func (m *prPanelModel) NoteActive() bool {
 	return m != nil && m.feedbackNote.Active()
 }
 
 // NoteView returns the rendered feedback-note modal for overlaying.
-func (m *shippingPanelModel) NoteView() string {
+func (m *prPanelModel) NoteView() string {
 	if m == nil {
 		return ""
 	}

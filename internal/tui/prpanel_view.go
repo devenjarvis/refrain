@@ -11,25 +11,25 @@ import (
 	"github.com/devenjarvis/refrain/internal/github"
 )
 
-// View renders the shipping panel. Modal precedence: if the feedback-note
+// View renders the PR panel. Modal precedence: if the feedback-note
 // modal is active, render it overlaid; otherwise render the panel proper.
-func (m *shippingPanelModel) View() string {
+func (m *prPanelModel) View() string {
 	if m == nil || m.session == nil {
 		return ""
 	}
 	entry := m.deps.PRCache(m.repoPath, m.session.ID)
 	triage := m.deps.FeedbackTriage(m.repoPath, m.session.ID)
-	return renderShippingPanel(m.session, entry, m.width, m.height, m.feedbackCursor, m.detailScroll, triage)
+	return renderPRPanel(m.session, entry, m.width, m.height, m.feedbackCursor, m.detailScroll, triage)
 }
 
-// renderShippingPanel renders the fullscreen shipping panel for a session.
+// renderPRPanel renders the fullscreen PR panel for a session.
 // entry may be nil while the first PR poll is in flight (shows loading state).
 // cursor and scroll control the feedback two-pane UI; triage holds user verdicts.
-func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height, cursor, scroll int, triage map[string]*feedbackTriageEntry) string {
+func renderPRPanel(sess *agent.Session, entry *prCacheEntry, width, height, cursor, scroll int, triage map[string]*feedbackTriageEntry) string {
 	var lines []string
 
 	// ── Header ────────────────────────────────────────────────────────────────
-	headerLeft := StyleHeading.Foreground(ColorShipping).Render("SHIPPING") +
+	headerLeft := StyleHeading.Foreground(ColorShipping).Render("PULL REQUEST") +
 		"  " + StyleSubtle.Render("›") +
 		"  " + lipgloss.NewStyle().Render(sess.GetDisplayName())
 	var headerRight string
@@ -49,7 +49,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 		body := fillHeight(strings.Join(lines, "\n"), width, height-2)
 		lines = strings.Split(body, "\n")
 		lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
-		lines = append(lines, shippingHints(false))
+		lines = append(lines, prPanelHints(false))
 		return strings.Join(lines, "\n")
 	}
 
@@ -154,7 +154,7 @@ func renderShippingPanel(sess *agent.Session, entry *prCacheEntry, width, height
 	body := fillHeight(strings.Join(lines, "\n"), width, height-2)
 	lines = strings.Split(body, "\n")
 	lines = append(lines, StyleSubtle.Render(strings.Repeat("─", innerWidth(width))))
-	lines = append(lines, shippingHints(isMergeReady(entry)))
+	lines = append(lines, prPanelHints(isMergeReady(entry)))
 
 	return strings.Join(lines, "\n")
 }
@@ -373,8 +373,8 @@ func renderCheckRow(run github.CheckRun, width int) string {
 	return row
 }
 
-// shippingHints returns the action hint line for the shipping panel footer.
-func shippingHints(mergeReady bool) string {
+// prPanelHints returns the action hint line for the PR panel footer.
+func prPanelHints(mergeReady bool) string {
 	mKey := StyleAccent.Foreground(ColorShipping).Render("m")
 	mDesc := StyleSubtle.Render(" — merge")
 	if !mergeReady {

@@ -47,7 +47,8 @@ func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 			pe.SetSize(msg.Width, msg.Height-1)
 		}
 		a.prComposeModal.SetSize(msg.Width, msg.Height-1)
-		if sp := a.modals.Shipping(); sp != nil {
+		a.planGoal.SetSize(msg.Width, msg.Height-1)
+		if sp := a.modals.PRPanel(); sp != nil {
 			sp.SetSize(msg.Width, msg.Height-1)
 		}
 		if cf := a.modals.Config(); cf != nil {

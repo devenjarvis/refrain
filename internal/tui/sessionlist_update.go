@@ -107,6 +107,12 @@ func (a App) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.prComposeModal, cmd = a.prComposeModal.Update(msg)
 			return a, cmd
 		}
+		// Plan-goal modal likewise owns the keyboard while open.
+		if a.planGoal.Active() {
+			var cmd tea.Cmd
+			a.planGoal, cmd = a.planGoal.Update(msg)
+			return a, cmd
+		}
 		// Fullscreen agent terminal owns the keyboard while it's up.
 		if a.modals.Is(focusLaunch) {
 			return a.handleLaunchKeys(msg)
@@ -131,7 +137,7 @@ func (a App) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if newA, cmd, handled := a.handleKeysReviewPanel(msg); handled {
 			return newA, cmd
 		}
-		if newA, cmd, handled := a.handleKeysShippingPanel(msg); handled {
+		if newA, cmd, handled := a.handleKeysPRPanel(msg); handled {
 			return newA, cmd
 		}
 
@@ -398,6 +404,22 @@ func (a App) handleSessionKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		a.diff = newDiffModel(row.session.GetDisplayName(), m, a.width, a.height-statusBarHeight)
 		return a, nil, true
 
+	case "P":
+		// Plan action (rollback design §4.5): open the plan editor when a
+		// plan exists or a draft/revise is in flight; otherwise prompt for a
+		// goal and draft one against the session's directory.
+		row, ok := a.selectedSessionRow()
+		if !ok {
+			a.setError("No session selected")
+			return a, nil, true
+		}
+		sess := row.session
+		if sess.IsDrafting() || sess.IsRevising() || sess.HasPlan() {
+			a.openPlanEditor(sess, row.repoPath)
+			return a, nil, true
+		}
+		return a, a.planGoal.Open(sess.ID, row.repoPath, sess.GetDisplayName()), true
+
 	case "r":
 		// Review panel for the cursor-selected session. The flat list has no
 		// review queue: any session's work can be reviewed from its row.
@@ -407,9 +429,6 @@ func (a App) handleSessionKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			return a, nil, true
 		}
 		sess := row.session
-		if sess.LifecyclePhase() == agent.LifecycleReadyForReview {
-			sess.SetLifecyclePhase(agent.LifecycleInReview)
-		}
 		a.openReviewPanel(sess, row.repoPath)
 		if _, cached := a.reviewDiffCache[cacheKey(row.repoPath, sess.ID)]; !cached {
 			return a, tea.Batch(
@@ -431,7 +450,7 @@ func (a App) handleSessionKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		}
 		sess := row.session
 		if entry := a.prCache[cacheKey(row.repoPath, sess.ID)]; entry != nil && entry.pr != nil {
-			a.openShippingPanel(sess, row.repoPath)
+			a.openPRPanelForSession(sess, row.repoPath)
 			return a, nil, true
 		}
 		if a.ghClient == nil {
@@ -448,7 +467,7 @@ func (a App) handleSessionKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		a.prDraftInFlight = true
 		a.prDraftSessionID = sess.ID
 		a.prDraftRepoPath = row.repoPath
-		return a, a.startPRDraftCmd(sess, row.repoPath, false), true
+		return a, a.startPRDraftCmd(sess, row.repoPath), true
 
 	case "x":
 		// Kill the cursor-selected session's primary agent.
