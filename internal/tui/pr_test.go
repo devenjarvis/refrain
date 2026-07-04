@@ -67,29 +67,24 @@ func TestPrPollInterval_Matrix(t *testing.T) {
 	}
 }
 
-// TestCachedPRNumberForFallback covers the Shipping-gated fallback-number
-// extraction: only Shipping sessions with a cached open PR yield a number.
+// TestCachedPRNumberForFallback covers the fallback-number extraction: any
+// cached open PR yields its number regardless of session state (phases no
+// longer scope the merged-fallback lookup — rollback design §4.7).
 func TestCachedPRNumberForFallback(t *testing.T) {
-	shipping := agent.NewSessionForTest("s1", "shipping")
-	shipping.SetLifecyclePhase(agent.LifecycleShipping)
-	building := agent.NewSessionForTest("s2", "building")
-	building.SetLifecyclePhase(agent.LifecycleInProgress)
 	withPR := &prCacheEntry{pr: &github.PRState{Number: 42}}
 
 	cases := []struct {
 		name  string
-		sess  *agent.Session
 		entry *prCacheEntry
 		want  int
 	}{
-		{"shipping with cached PR", shipping, withPR, 42},
-		{"shipping, nil entry", shipping, nil, 0},
-		{"shipping, entry without pr", shipping, &prCacheEntry{}, 0},
-		{"non-shipping with cached PR", building, withPR, 0},
+		{"cached PR", withPR, 42},
+		{"nil entry", nil, 0},
+		{"entry without pr", &prCacheEntry{}, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := cachedPRNumberForFallback(tc.sess, tc.entry); got != tc.want {
+			if got := cachedPRNumberForFallback(tc.entry); got != tc.want {
 				t.Fatalf("cachedPRNumberForFallback = %d, want %d", got, tc.want)
 			}
 		})
@@ -393,6 +388,22 @@ func TestRowStatePhrase(t *testing.T) {
 				reviews: &github.ReviewStatus{State: "approved", Approved: 1},
 			},
 			want: "Ready",
+		},
+		{
+			// Terminal states outrank everything, including a stale merge-ready
+			// snapshot of checks/reviews taken before the merge landed.
+			name: "merged outranks ready",
+			entry: &prCacheEntry{
+				pr:      &github.PRState{State: "merged", MergeableState: "clean"},
+				checks:  &github.CheckStatus{State: "success", Total: 1, Passed: 1},
+				reviews: &github.ReviewStatus{State: "approved", Approved: 1},
+			},
+			want: "Merged",
+		},
+		{
+			name:  "closed",
+			entry: &prCacheEntry{pr: &github.PRState{State: "closed"}},
+			want:  "Closed",
 		},
 		{
 			name: "conflicts",

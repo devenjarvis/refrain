@@ -709,8 +709,9 @@ func TestReviewPanelModel_PKey_WithCachedPR_OpensURL(t *testing.T) {
 	if openedURL != "https://example.com/pr/1" {
 		t.Errorf("openURL got %q, want %q", openedURL, "https://example.com/pr/1")
 	}
-	if sess.LifecyclePhase() != agent.LifecycleShipping {
-		t.Errorf("p with existing PR should transition to Shipping, got %v", sess.LifecyclePhase())
+	// Ship is an action, not a transition — the phase must be untouched.
+	if sess.LifecyclePhase() != agent.LifecycleInReview {
+		t.Errorf("p with existing PR must not change the phase, got %v", sess.LifecyclePhase())
 	}
 	if _, closed := findMsg[panelCloseMsg](msgs); !closed {
 		t.Error("p with existing PR should close the panel")

@@ -19,6 +19,7 @@ var (
 		{"j/k", "navigate"},
 		{"⏎", "open"},
 		{"n", "session"},
+		{"P", "plan"},
 		{"r", "review"},
 		{"p", "PR"},
 		{"c", "agent"},

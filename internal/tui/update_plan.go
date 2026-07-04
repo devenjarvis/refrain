@@ -277,8 +277,7 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	if !msg.planFirst {
 		// Raw session (the default `enter`): spawn claude immediately with
 		// the prompt as its task. An empty prompt opens a blank REPL — the
-		// everyday case for debugging and exploring. Lifecycle starts at
-		// InProgress so downstream review/PR flows treat it as active work.
+		// everyday case for debugging and exploring.
 		a.view = ViewDashboard
 		cfg := agent.Config{
 			Rows:              rows,
@@ -300,7 +299,6 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 					}
 					return createResultMsg{err: err}
 				}
-				sess.SetLifecyclePhase(agent.LifecycleInProgress)
 				return createResultMsg{sessionID: sess.ID, agentID: ag.ID, isNewSession: true}
 			}
 		}
@@ -309,7 +307,6 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				return createResultMsg{err: err}
 			}
-			sess.SetLifecyclePhase(agent.LifecycleInProgress)
 			return createResultMsg{sessionID: sess.ID, agentID: ag.ID, isNewSession: true}
 		}
 	}
@@ -358,6 +355,30 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// handlePlanGoalSubmit dispatches the goal collected by the plan-goal modal
+// (`P` on a plan-less session): kicks off StartDraft against the session's
+// directory and opens the plan editor showing the drafting placeholder.
+// Drafting mid-conversation is safe — DraftRequest.Cwd is the session's
+// worktree, and the drafter runs read-only alongside any live agents.
+func (a App) handlePlanGoalSubmit(msg planGoalSubmitMsg) (tea.Model, tea.Cmd) {
+	mgr := a.managers[msg.repoPath]
+	if mgr == nil {
+		a.setError("session manager not found")
+		return a, nil
+	}
+	sess := mgr.GetSession(msg.sessionID)
+	if sess == nil {
+		a.setError("session not found")
+		return a, nil
+	}
+	if err := mgr.StartDraft(msg.sessionID, msg.goal); err != nil {
+		a.setError("start draft: " + err.Error())
+		return a, nil
+	}
+	a.openPlanEditor(sess, msg.repoPath)
+	return a, nil
+}
+
 // openPlanEditor switches the dashboard into the plan-editor overlay for
 // sess. Caller is responsible for marking the session as drafting if a
 // background draft is in flight.
@@ -373,10 +394,10 @@ func (a *App) openPlanEditor(sess *agent.Session, repoPath string) {
 	a.openPlanEditorPanel(&editor)
 }
 
-// approvePlanAndSpawn handles a planEditorApproveMsg: closes the editor,
-// transitions the session to LifecycleInProgress, and spawns the real
-// agent with the configured BuildFromPlanPrompt. The plan text is already
-// on disk by the time this fires (the editor's `a` handler writes it).
+// approvePlanAndSpawn handles a planEditorApproveMsg: closes the editor and
+// spawns the real agent with the configured BuildFromPlanPrompt — an action,
+// not a transition (rollback design §4.5). The plan text is already on disk
+// by the time this fires (the editor's `a` handler writes it).
 func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd) {
 	repoPath := msg.repoPath
 	if repoPath == "" && a.modals.PlanEditor() != nil {
@@ -437,15 +458,11 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 
 	a.closeModal()
 	sessID := sess.ID
-	// Phase transition is intentionally inside the closure: if AddAgent
-	// fails, the session stays in LifecyclePlanning so the user can retry
-	// from the plan editor instead of seeing an orphan row in BUILDING.
 	return a, func() tea.Msg {
 		ag, err := mgr.AddAgent(sessID, cfg)
 		if err != nil {
 			return createResultMsg{err: err}
 		}
-		sess.SetLifecyclePhase(agent.LifecycleInProgress)
 		// isNewSession=true: from the wellness counter's perspective, an
 		// approved plan is when a session "starts" — submitPromptModal
 		// deliberately doesn't increment on plan creation, since the user

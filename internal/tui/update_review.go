@@ -168,7 +168,7 @@ func reviewTaskCount(entry *reviewDiffEntry) int {
 }
 
 // setFeedbackVerdictOn applies a triage verdict to the given triage map. It is
-// a free function over the map (not a method) so the shipping panel can bind it
+// a free function over the map (not a method) so the PR panel can bind it
 // at construction and stay live across App value-copies (§3 fold).
 func setFeedbackVerdictOn(triage map[string]map[string]*feedbackTriageEntry, repoPath, sessID, itemKey string, v feedbackVerdict) {
 	key := cacheKey(repoPath, sessID)
@@ -211,25 +211,25 @@ func setFeedbackNoteOn(triage map[string]map[string]*feedbackTriageEntry, repoPa
 }
 
 // handleFeedbackNoteSubmit forwards a feedbackNoteSubmitMsg to the active
-// shipping panel so it can persist the note via its injected SetFeedbackNote
-// dep. The message is otherwise local to the shipping panel.
+// PR panel so it can persist the note via its injected SetFeedbackNote
+// dep. The message is otherwise local to the PR panel.
 func (a App) handleFeedbackNoteSubmit(msg feedbackNoteSubmitMsg) (tea.Model, tea.Cmd) {
-	snapshot := a.modals.Shipping()
+	snapshot := a.modals.PRPanel()
 	if snapshot == nil {
 		return a, nil
 	}
 	updated, cmd := snapshot.Update(msg)
-	if sp, ok := updated.(*shippingPanelModel); ok {
-		a.modals.CompareAndSetShipping(snapshot, sp)
+	if sp, ok := updated.(*prPanelModel); ok {
+		a.modals.CompareAndSetPRPanel(snapshot, sp)
 	}
 	return a, cmd
 }
 
-// handleShippingFeedbackRequest spawns a new agent in the session's existing
+// handlePRFeedbackRequest spawns a new agent in the session's existing
 // worktree, synthesised from failing CI checks and unresolved review
-// comments, and transitions the session back to LifecycleInProgress. The
-// PR stays open.
-func (a App) handleShippingFeedbackRequest(req shippingFeedbackRequestMsg) (tea.Model, tea.Cmd) {
+// comments. The PR stays open and the session's lifecycle is untouched —
+// addressing feedback is an action, not a transition (rollback design §4.7).
+func (a App) handlePRFeedbackRequest(req prFeedbackRequestMsg) (tea.Model, tea.Cmd) {
 	repoPath := req.repoPath
 	if repoPath == "" {
 		repoPath = a.activeRepo
@@ -284,7 +284,6 @@ func (a App) handleShippingFeedbackRequest(req shippingFeedbackRequestMsg) (tea.
 		if err != nil {
 			return createResultMsg{err: err}
 		}
-		sess.SetLifecyclePhase(agent.LifecycleInProgress)
 		return createResultMsg{sessionID: sessID, agentID: ag.ID}
 	}
 }

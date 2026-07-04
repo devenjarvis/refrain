@@ -2326,8 +2326,8 @@ func TestTaskSummarizerSucceedsAfterTransientError(t *testing.T) {
 }
 
 // TestManager_StopHookRefreshesCommitTaskCount verifies that a KindStop event
-// for a LifecycleInProgress session triggers a background refresh of the
-// commit-task cache and that CommitTaskCount() converges to the correct values.
+// for a session with a plan triggers a background refresh of the commit-task
+// cache and that CommitTaskCount() converges to the correct values.
 func TestManager_StopHookRefreshesCommitTaskCount(t *testing.T) {
 	repo := setupTestRepo(t)
 	mgr := NewManager(repo, defaultTestSettings())
@@ -2341,8 +2341,11 @@ func TestManager_StopHookRefreshesCommitTaskCount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Advance to Building so the Stop handler fires the refresh.
-	sess.SetLifecyclePhase(LifecycleInProgress)
+	// Write a plan so the Stop handler fires the refresh (the gate is plan
+	// presence, not lifecycle phase — rollback design §4.1).
+	if err := sess.WritePlan("# Goal\nx\n\n## Tasks\n- [ ] first\n- [ ] second\n"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Make two task commits in the worktree.
 	makeTestCommitWithTaskTrailer(t, sess.Worktree.Path, "feat: first", 1)

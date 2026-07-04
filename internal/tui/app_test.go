@@ -1007,8 +1007,10 @@ func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
 		t.Fatalf("expected reviewSession=sessR, got %v", app.modals.Review())
 	}
-	if sessR.LifecyclePhase() != agent.LifecycleInReview {
-		t.Errorf("expected sessR phase=InReview, got %v", sessR.LifecyclePhase())
+	// Opening the review panel is an action, not a transition — the phase
+	// must be untouched (rollback design §4.5).
+	if sessR.LifecyclePhase() != agent.LifecycleReadyForReview {
+		t.Errorf("expected sessR phase unchanged (ReadyForReview), got %v", sessR.LifecyclePhase())
 	}
 
 	view := app.View()
@@ -2041,345 +2043,186 @@ func TestHandleReviewDiff_UsesRepoPathFromMsg_NotFirstMatch(t *testing.T) {
 	}
 }
 
-// TestMergePRMsg_ClosesPanel verifies that a successful mergePRMsg closes the
-// shipping panel, clears shippingSession, and triggers async session cleanup.
-func TestMergePRMsg_ClosesPanel(t *testing.T) {
+// TestMergePRMsg_MarksDoneAndClosesPanel verifies that a successful
+// mergePRMsg closes the PR panel, marks the session done, flips the cached PR
+// state to merged, and does NOT tear the session down — it stays in the list
+// until the user removes it (rollback design §4.7).
+func TestMergePRMsg_MarksDoneAndClosesPanel(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTest("sess-1", "ship")
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
 
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 	defer mgr.Shutdown()
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, dir, app.width, app.height, app.buildShippingDeps()))
+	app.openPRPanel(newPRPanel(sess, dir, app.width, app.height, app.buildPRPanelDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+	app.prCache[cacheKey(dir, "sess-1")] = &prCacheEntry{pr: &github.PRState{Number: 7, State: "open"}}
 
 	model, cmd := app.Update(mergePRMsg{sessionID: "sess-1", repoPath: dir})
 	got := model.(App)
 
-	if got.modals.Current() == focusShipping {
-		t.Error("shipping panel should close after successful merge")
+	if got.modals.Current() == focusPRPanel {
+		t.Error("PR panel should close after successful merge")
 	}
-	if got.modals.Shipping() != nil {
-		t.Error("shippingSession should be nil after merge")
+	if got.modals.PRPanel() != nil {
+		t.Error("PR panel model should be nil after merge")
 	}
-	if cmd == nil {
-		t.Fatal("expected a cmd to trigger async session cleanup after merge")
+	if cmd != nil {
+		t.Error("merge must not trigger session cleanup — the session stays until the user presses X")
 	}
-
-	// Run the cleanup cmd and dispatch the resulting killResultMsg.
-	killMsg := cmd()
-	model2, _ := got.Update(killMsg)
-	got2 := model2.(App)
-
-	if mgr.GetSession("sess-1") != nil {
-		t.Error("session should be removed from manager after merge cleanup")
+	if sess.DoneAt().IsZero() {
+		t.Error("session should be marked done after merge")
 	}
-	if got2.closingSessions["sess-1"] {
-		t.Error("closingSessions should be cleared after killResultMsg")
+	if entry := got.prCache[cacheKey(dir, "sess-1")]; entry == nil || entry.pr == nil || entry.pr.State != "merged" {
+		t.Error("cached PR state should flip to merged immediately")
+	}
+	if mgr.GetSession("sess-1") == nil {
+		t.Error("session should still exist in the manager after merge")
+	}
+	if got.closingSessions[cacheKey(dir, "sess-1")] {
+		t.Error("closingSessions must not be set by a merge")
 	}
 }
 
-// TestPRPollMsg_ExternalMergeClosesPanelAndTransitions verifies that when the
-// PR poller detects an external merge while the shipping panel is open, the
-// panel closes and async session cleanup is triggered.
-func TestPRPollMsg_ExternalMergeClosesPanelAndTransitions(t *testing.T) {
+// TestPRPollMsg_ExternalMergeMarksDone verifies that when the PR poller
+// detects an external merge, the session is marked done and nothing else
+// happens: no panel close, no teardown, no lifecycle mutation.
+func TestPRPollMsg_ExternalMergeMarksDone(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTest("sess-ext", "ship")
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
+	phaseBefore := sess.LifecyclePhase()
 
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 	defer mgr.Shutdown()
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, "", app.width, app.height, app.buildShippingDeps()))
+	app.openPRPanel(newPRPanel(sess, dir, app.width, app.height, app.buildPRPanelDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
 	msg := prPollMsg{
 		sessionID: "sess-ext",
+		repoPath:  dir,
 		pr:        &github.PRState{State: "merged"},
 	}
 	model, cmd := app.Update(msg)
 	got := model.(App)
 
-	if got.modals.Current() == focusShipping {
-		t.Error("shipping panel should close when external merge is detected")
+	if sess.DoneAt().IsZero() {
+		t.Error("session should be marked done when the poller sees a merged PR")
 	}
-	if got.modals.Shipping() != nil {
-		t.Error("shippingSession should be nil after external merge")
+	if sess.LifecyclePhase() != phaseBefore {
+		t.Errorf("poller must not mutate lifecycle: got %v, want %v", sess.LifecyclePhase(), phaseBefore)
 	}
-	if cmd == nil {
-		t.Fatal("expected a cmd to trigger async session cleanup after external merge")
+	if cmd != nil {
+		t.Error("external merge must not trigger session cleanup")
 	}
-
-	// Run the cleanup cmd and dispatch the resulting killResultMsg.
-	killMsg := cmd()
-	model2, _ := got.Update(killMsg)
-	got2 := model2.(App)
-
-	if mgr.GetSession("sess-ext") != nil {
-		t.Error("session should be removed from manager after external merge cleanup")
+	if got.modals.PRPanel() == nil {
+		t.Error("PR panel should stay open — it renders the merged state")
 	}
-	if got2.closingSessions["sess-ext"] {
-		t.Error("closingSessions should be cleared after killResultMsg")
+	if mgr.GetSession("sess-ext") == nil {
+		t.Error("session should still exist in the manager after external merge")
 	}
 }
 
-// TestPRPollMsg_ExternalCloseCleansSession verifies that a "closed" PR state
-// triggers the same async session cleanup as a "merged" state.
-func TestPRPollMsg_ExternalCloseCleansSession(t *testing.T) {
+// TestPRPollMsg_ExternalCloseLeavesSession verifies that a "closed" PR state
+// neither marks the session done nor tears anything down — the row shows a
+// Closed badge and the session stays fully live (the PR can be reopened).
+func TestPRPollMsg_ExternalCloseLeavesSession(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTest("sess-closed", "ship")
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
 
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 	defer mgr.Shutdown()
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, "", app.width, app.height, app.buildShippingDeps()))
+	app.openPRPanel(newPRPanel(sess, dir, app.width, app.height, app.buildPRPanelDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
 	msg := prPollMsg{
 		sessionID: "sess-closed",
+		repoPath:  dir,
 		pr:        &github.PRState{State: "closed"},
 	}
 	model, cmd := app.Update(msg)
 	got := model.(App)
 
-	if got.modals.Current() == focusShipping {
-		t.Error("shipping panel should close when PR is closed")
+	if !sess.DoneAt().IsZero() {
+		t.Error("a closed (not merged) PR must not mark the session done")
 	}
-	if got.modals.Shipping() != nil {
-		t.Error("shippingSession should be nil after PR close")
+	if cmd != nil {
+		t.Error("PR close must not trigger session cleanup")
 	}
-	if cmd == nil {
-		t.Fatal("expected a cmd to trigger async session cleanup after PR close")
+	if got.modals.PRPanel() == nil {
+		t.Error("PR panel should stay open after PR close")
 	}
-
-	killMsg := cmd()
-	model2, _ := got.Update(killMsg)
-	got2 := model2.(App)
-
-	if mgr.GetSession("sess-closed") != nil {
-		t.Error("session should be removed from manager after PR close cleanup")
-	}
-	if got2.closingSessions["sess-closed"] {
-		t.Error("closingSessions should be cleared after killResultMsg")
+	if mgr.GetSession("sess-closed") == nil {
+		t.Error("session should still exist in the manager after PR close")
 	}
 }
 
-// TestPRPollMsg_ExternalOpenPRPromotesBuildingToShipping verifies that a
-// session in LifecycleInProgress transitions to LifecycleShipping when the PR
-// poller discovers an open PR opened outside refrain.
-func TestPRPollMsg_ExternalOpenPRPromotesBuildingToShipping(t *testing.T) {
-	dir := t.TempDir()
-	sess := agent.NewSessionForTest("sess-build", "branch")
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
-
-	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
-	defer mgr.Shutdown()
-	mgr.AddSessionForTest(sess)
-
-	app := NewApp()
-	app.managers[dir] = mgr
-	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-
-	msg := prPollMsg{
-		sessionID: "sess-build",
-		pr:        &github.PRState{State: "open", Number: 7},
+// TestPRPollMsg_OpenPRNeverMutatesSession verifies that discovering an open PR
+// — externally opened or otherwise — never changes a session's lifecycle and
+// never closes an open review panel. The poller only writes the badge cache
+// (rollback design §4.7).
+func TestPRPollMsg_OpenPRNeverMutatesSession(t *testing.T) {
+	phases := []agent.LifecyclePhase{
+		agent.LifecyclePlanning,
+		agent.LifecycleInProgress,
+		agent.LifecycleReadyForReview,
+		agent.LifecycleInReview,
 	}
-	app.Update(msg)
+	for _, phase := range phases {
+		t.Run(phase.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			sess := agent.NewSessionForTest("sess-x", "branch")
+			sess.SetLifecyclePhase(phase)
 
-	if sess.LifecyclePhase() != agent.LifecycleShipping {
-		t.Errorf("session lifecycle = %v, want LifecycleShipping", sess.LifecyclePhase())
-	}
-}
+			mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+			defer mgr.Shutdown()
+			mgr.AddSessionForTest(sess)
 
-// TestPRPollMsg_ExternalOpenPRPromotesReadyForReviewToShipping verifies that a
-// session in LifecycleReadyForReview transitions to LifecycleShipping when the
-// PR poller discovers an open PR.
-func TestPRPollMsg_ExternalOpenPRPromotesReadyForReviewToShipping(t *testing.T) {
-	dir := t.TempDir()
-	sess := agent.NewSessionForTest("sess-rfr", "branch")
-	sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
+			app := NewApp()
+			app.openReview(newReviewPanel(sess, dir, app.width, app.height, app.buildReviewDeps()))
+			app.managers[dir] = mgr
+			app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 
-	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
-	defer mgr.Shutdown()
-	mgr.AddSessionForTest(sess)
+			msg := prPollMsg{
+				sessionID: "sess-x",
+				repoPath:  dir,
+				pr:        &github.PRState{State: "open", Number: 7},
+			}
+			model, _ := app.Update(msg)
+			got := model.(App)
 
-	app := NewApp()
-	app.managers[dir] = mgr
-	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-
-	msg := prPollMsg{
-		sessionID: "sess-rfr",
-		pr:        &github.PRState{State: "open", Number: 7},
-	}
-	app.Update(msg)
-
-	if sess.LifecyclePhase() != agent.LifecycleShipping {
-		t.Errorf("session lifecycle = %v, want LifecycleShipping", sess.LifecyclePhase())
+			if sess.LifecyclePhase() != phase {
+				t.Errorf("lifecycle = %v, want %v (poller must not mutate sessions)", sess.LifecyclePhase(), phase)
+			}
+			if got.modals.Review() == nil {
+				t.Error("review panel should stay open when an open PR is discovered")
+			}
+			if entry := got.prCache[cacheKey(dir, "sess-x")]; entry == nil || entry.pr == nil || entry.pr.Number != 7 {
+				t.Error("badge cache should be updated with the discovered PR")
+			}
+		})
 	}
 }
 
-// TestPRPollMsg_ExternalOpenPRPromotesInReviewToShipping_ClosesReviewPanel
-// verifies that a session in LifecycleInReview transitions to LifecycleShipping
-// and that the review panel closes if it was open for that session.
-func TestPRPollMsg_ExternalOpenPRPromotesInReviewToShipping_ClosesReviewPanel(t *testing.T) {
-	dir := t.TempDir()
-	sess := agent.NewSessionForTest("sess-ir", "branch")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
-
-	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
-	defer mgr.Shutdown()
-	mgr.AddSessionForTest(sess)
-
-	app := NewApp()
-	app.openReview(newReviewPanel(sess, dir, app.width, app.height, app.buildReviewDeps()))
-	app.managers[dir] = mgr
-	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-
-	msg := prPollMsg{
-		sessionID: "sess-ir",
-		pr:        &github.PRState{State: "open", Number: 7},
-	}
-	model, _ := app.Update(msg)
-	got := model.(App)
-
-	if sess.LifecyclePhase() != agent.LifecycleShipping {
-		t.Errorf("session lifecycle = %v, want LifecycleShipping", sess.LifecyclePhase())
-	}
-	if got.modals.Current() != focusList {
-		t.Errorf("panelFocus = %v, want focusList", got.modals.Current())
-	}
-	if got.modals.Review() != nil {
-		t.Error("reviewSession should be nil after auto-promotion closes the panel")
-	}
-}
-
-// TestPRPollMsg_PlanningNotPromoted verifies that a session in
-// LifecyclePlanning does not transition when an open PR is discovered.
-func TestPRPollMsg_PlanningNotPromoted(t *testing.T) {
-	dir := t.TempDir()
-	sess := agent.NewSessionForTest("sess-plan", "branch")
-	// LifecyclePlanning is the default; set explicitly for clarity.
-	sess.SetLifecyclePhase(agent.LifecyclePlanning)
-
-	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
-	defer mgr.Shutdown()
-	mgr.AddSessionForTest(sess)
-
-	app := NewApp()
-	app.managers[dir] = mgr
-	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-
-	msg := prPollMsg{
-		sessionID: "sess-plan",
-		pr:        &github.PRState{State: "open", Number: 7},
-	}
-	app.Update(msg)
-
-	if sess.LifecyclePhase() != agent.LifecyclePlanning {
-		t.Errorf("session lifecycle = %v, want LifecyclePlanning (no skip-ahead)", sess.LifecyclePhase())
-	}
-}
-
-// TestPRPollMsg_DraftingNotPromoted verifies that a session in
-// LifecycleDrafting does not transition when an open PR is discovered.
-func TestPRPollMsg_DraftingNotPromoted(t *testing.T) {
-	dir := t.TempDir()
-	sess := agent.NewSessionForTest("sess-draft", "branch")
-	sess.SetLifecyclePhase(agent.LifecycleDrafting)
-
-	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
-	defer mgr.Shutdown()
-	mgr.AddSessionForTest(sess)
-
-	app := NewApp()
-	app.managers[dir] = mgr
-	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-
-	msg := prPollMsg{
-		sessionID: "sess-draft",
-		pr:        &github.PRState{State: "open", Number: 7},
-	}
-	app.Update(msg)
-
-	if sess.LifecyclePhase() != agent.LifecycleDrafting {
-		t.Errorf("session lifecycle = %v, want LifecycleDrafting (no skip-ahead)", sess.LifecyclePhase())
-	}
-}
-
-// TestPRPollMsg_AlreadyShippingNoOpOnOpenPR verifies that a session already in
-// LifecycleShipping is not re-transitioned (no-op) when an open PR arrives.
-func TestPRPollMsg_AlreadyShippingNoOpOnOpenPR(t *testing.T) {
-	dir := t.TempDir()
-	sess := agent.NewSessionForTest("sess-ship", "branch")
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
-
-	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
-	defer mgr.Shutdown()
-	mgr.AddSessionForTest(sess)
-
-	app := NewApp()
-	app.managers[dir] = mgr
-	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-
-	msg := prPollMsg{
-		sessionID: "sess-ship",
-		pr:        &github.PRState{State: "open", Number: 7},
-	}
-	app.Update(msg)
-
-	if sess.LifecyclePhase() != agent.LifecycleShipping {
-		t.Errorf("session lifecycle = %v, want LifecycleShipping (unchanged)", sess.LifecyclePhase())
-	}
-}
-
-// TestPRPollMsg_CompleteNotPromoted verifies that a session in
-// LifecycleComplete is not re-transitioned when an open PR arrives.
-func TestPRPollMsg_CompleteNotPromoted(t *testing.T) {
-	dir := t.TempDir()
-	sess := agent.NewSessionForTest("sess-done", "branch")
-	sess.SetLifecyclePhase(agent.LifecycleComplete)
-
-	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
-	defer mgr.Shutdown()
-	mgr.AddSessionForTest(sess)
-
-	app := NewApp()
-	app.managers[dir] = mgr
-	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-
-	msg := prPollMsg{
-		sessionID: "sess-done",
-		pr:        &github.PRState{State: "open", Number: 7},
-	}
-	app.Update(msg)
-
-	if sess.LifecyclePhase() != agent.LifecycleComplete {
-		t.Errorf("session lifecycle = %v, want LifecycleComplete (unchanged)", sess.LifecyclePhase())
-	}
-}
-
-// TestHandlePRPoll_MultiRepo_DoesNotPromoteWrongSession verifies that when two
-// managers both have a session with the same ID, a prPollMsg carrying repoPath
-// for repo B only transitions repo B's session — not repo A's.
-func TestHandlePRPoll_MultiRepo_DoesNotPromoteWrongSession(t *testing.T) {
+// TestHandlePRPoll_MultiRepo_MergeMarksDoneCorrectSession verifies that a
+// merged prPollMsg with a repoPath only marks the named repo's session done,
+// leaving the other repo's identically-named session untouched.
+func TestHandlePRPoll_MultiRepo_MergeMarksDoneCorrectSession(t *testing.T) {
 	repoA := t.TempDir()
 	repoB := t.TempDir()
 
 	sessA := agent.NewSessionForTest("session-1", "branch-a")
-	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
 	sessB := agent.NewSessionForTest("session-1", "branch-b")
-	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
 
 	mgrA := agent.NewManager(repoA, config.Resolve(nil, nil))
 	defer mgrA.Shutdown()
@@ -2390,48 +2233,7 @@ func TestHandlePRPoll_MultiRepo_DoesNotPromoteWrongSession(t *testing.T) {
 	mgrB.AddSessionForTest(sessB)
 
 	app := NewApp()
-	// repoA listed first so sessionByID (first-match) would return repoA's session.
-	app.cfg = &config.Config{Repos: []config.Repo{{Path: repoA}, {Path: repoB}}}
-	app.managers[repoA] = mgrA
-	app.managers[repoB] = mgrB
-
-	// Poll message carries repoB's path — only repoB's session should transition.
-	msg := prPollMsg{
-		sessionID: "session-1",
-		repoPath:  repoB,
-		pr:        &github.PRState{State: "open", Number: 42},
-	}
-	app.Update(msg)
-
-	if sessB.LifecyclePhase() != agent.LifecycleShipping {
-		t.Errorf("repoB session-1 phase = %v, want LifecycleShipping", sessB.LifecyclePhase())
-	}
-	if sessA.LifecyclePhase() != agent.LifecycleInProgress {
-		t.Errorf("repoA session-1 phase = %v, want LifecycleInProgress (should be unchanged)", sessA.LifecyclePhase())
-	}
-}
-
-// TestHandlePRPoll_MultiRepo_MergeKillsCorrectSession verifies that a
-// merged prPollMsg with a repoPath only triggers cleanup on the named repo's
-// manager, leaving the other repo's identically-named session untouched.
-func TestHandlePRPoll_MultiRepo_MergeKillsCorrectSession(t *testing.T) {
-	repoA := t.TempDir()
-	repoB := t.TempDir()
-
-	sessA := agent.NewSessionForTest("session-1", "branch-a")
-	sessA.SetLifecyclePhase(agent.LifecycleShipping)
-	sessB := agent.NewSessionForTest("session-1", "branch-b")
-	sessB.SetLifecyclePhase(agent.LifecycleShipping)
-
-	mgrA := agent.NewManager(repoA, config.Resolve(nil, nil))
-	defer mgrA.Shutdown()
-	mgrA.AddSessionForTest(sessA)
-
-	mgrB := agent.NewManager(repoB, config.Resolve(nil, nil))
-	defer mgrB.Shutdown()
-	mgrB.AddSessionForTest(sessB)
-
-	app := NewApp()
+	// repoA listed first so a first-match session lookup would find repoA's.
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: repoA}, {Path: repoB}}}
 	app.managers[repoA] = mgrA
 	app.managers[repoB] = mgrB
@@ -2443,14 +2245,14 @@ func TestHandlePRPoll_MultiRepo_MergeKillsCorrectSession(t *testing.T) {
 	}
 	_, cmd := app.Update(msg)
 
-	if cmd == nil {
-		t.Fatal("expected a kill cmd for repoB's session")
+	if cmd != nil {
+		t.Error("merge must not trigger session cleanup")
 	}
-	if sessB.LifecyclePhase() != agent.LifecycleComplete {
-		t.Errorf("repoB session-1 phase = %v, want LifecycleComplete", sessB.LifecyclePhase())
+	if sessB.DoneAt().IsZero() {
+		t.Error("repoB session-1 should be marked done")
 	}
-	if sessA.LifecyclePhase() != agent.LifecycleShipping {
-		t.Errorf("repoA session-1 phase = %v, want LifecycleShipping (should be unchanged)", sessA.LifecyclePhase())
+	if !sessA.DoneAt().IsZero() {
+		t.Error("repoA session-1 must not be marked done")
 	}
 }
 
@@ -2514,12 +2316,12 @@ func TestHandlePRCreated_UsesMsgRepoPath_ForAutoOpen(t *testing.T) {
 // TestMergePRMsg_ErrorSetsError verifies that a mergePRMsg error is surfaced.
 func TestMergePRMsg_ErrorSetsError(t *testing.T) {
 	app := NewApp()
-	app.openShipping(newShippingPanel(agent.NewSessionForTest("s", "ship"), "", app.width, app.height, app.buildShippingDeps()))
+	app.openPRPanel(newPRPanel(agent.NewSessionForTest("s", "ship"), "", app.width, app.height, app.buildPRPanelDeps()))
 
 	model, _ := app.Update(mergePRMsg{sessionID: "s", err: errors.New("403 forbidden")})
 	got := model.(App)
 
-	if got.modals.Current() != focusShipping {
+	if got.modals.Current() != focusPRPanel {
 		t.Error("panel should stay open on merge error")
 	}
 	if got.err == "" {
@@ -2534,11 +2336,11 @@ func TestShippingPanel_MKeyGatedOnReady(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 
 	app := NewApp()
-	// Seed the cache BEFORE building deps: the shipping panel binds its PRCache
+	// Seed the cache BEFORE building deps: the PR panel binds its PRCache
 	// handle to this map at construction (post-§3 fold), so the entry must be
-	// present (and repo-keyed) before newShippingPanel captures it.
+	// present (and repo-keyed) before newPRPanel captures it.
 	app.prCache[cacheKey("", sess.ID)] = &prCacheEntry{pr: &github.PRState{Number: 1, MergeableState: "dirty"}}
-	app.openShipping(newShippingPanel(sess, "", app.width, app.height, app.buildShippingDeps()))
+	app.openPRPanel(newPRPanel(sess, "", app.width, app.height, app.buildPRPanelDeps()))
 
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 	got := model.(App)
@@ -2546,7 +2348,7 @@ func TestShippingPanel_MKeyGatedOnReady(t *testing.T) {
 	got = pumpPanelCmd(t, got, cmd)
 
 	// Panel stays open, error is shown.
-	if got.modals.Current() != focusShipping {
+	if got.modals.Current() != focusPRPanel {
 		t.Errorf("panel should stay open; got %v", got.modals.Current())
 	}
 	if got.err == "" {
@@ -3266,9 +3068,14 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 session after planning path, got %d", len(sessions))
 	}
-	// StartDraft sets LifecycleDrafting synchronously before the goroutine runs.
-	if sessions[0].LifecyclePhase() != agent.LifecycleDrafting {
-		t.Errorf("session phase: got %v, want LifecycleDrafting", sessions[0].LifecyclePhase())
+	// StartDraft accepted: the session carries the submitted prompt, and the
+	// draft either is still in flight or has already produced a plan (the
+	// stub drafter completes near-instantly, so IsDrafting alone is racy).
+	if sessions[0].OriginalPrompt() != "write the feature" {
+		t.Errorf("OriginalPrompt = %q, want the submitted prompt", sessions[0].OriginalPrompt())
+	}
+	if !sessions[0].IsDrafting() && !sessions[0].HasPlan() && sessions[0].DraftError() == nil {
+		t.Error("expected an in-flight or completed draft after planning-path submit")
 	}
 	if app.cursor.Section() != focusSectionPlanning {
 		t.Errorf("cursor section: got %v, want focusSectionPlanning", app.cursor.Section())
@@ -3631,7 +3438,7 @@ func TestShippingPanel_CursorAndScrollKeys(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
 	const repo = "/repo"
-	app.openShipping(newShippingPanel(sess, repo, app.width, app.height, app.buildShippingDeps()))
+	app.openPRPanel(newPRPanel(sess, repo, app.width, app.height, app.buildPRPanelDeps()))
 	app.width = 120
 	app.height = 40
 	app.prCache[cacheKey(repo, sess.ID)] = &prCacheEntry{
@@ -3646,47 +3453,47 @@ func TestShippingPanel_CursorAndScrollKeys(t *testing.T) {
 	// j moves cursor down.
 	m, _ := app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got := m.(App)
-	if got.modals.Shipping().feedbackCursor != 1 {
-		t.Errorf("after j: cursor = %d, want 1", got.modals.Shipping().feedbackCursor)
+	if got.modals.PRPanel().feedbackCursor != 1 {
+		t.Errorf("after j: cursor = %d, want 1", got.modals.PRPanel().feedbackCursor)
 	}
-	if got.modals.Shipping().detailScroll != 0 {
-		t.Errorf("after j: scroll should reset to 0, got %d", got.modals.Shipping().detailScroll)
+	if got.modals.PRPanel().detailScroll != 0 {
+		t.Errorf("after j: scroll should reset to 0, got %d", got.modals.PRPanel().detailScroll)
 	}
 
 	// j again.
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got = m.(App)
-	if got.modals.Shipping().feedbackCursor != 2 {
-		t.Errorf("after j×2: cursor = %d, want 2", got.modals.Shipping().feedbackCursor)
+	if got.modals.PRPanel().feedbackCursor != 2 {
+		t.Errorf("after j×2: cursor = %d, want 2", got.modals.PRPanel().feedbackCursor)
 	}
 
 	// j past end clamps.
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got = m.(App)
-	if got.modals.Shipping().feedbackCursor != 2 {
-		t.Errorf("j past end: cursor = %d, want 2 (clamped)", got.modals.Shipping().feedbackCursor)
+	if got.modals.PRPanel().feedbackCursor != 2 {
+		t.Errorf("j past end: cursor = %d, want 2 (clamped)", got.modals.PRPanel().feedbackCursor)
 	}
 
 	// k moves cursor up.
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	got = m.(App)
-	if got.modals.Shipping().feedbackCursor != 1 {
-		t.Errorf("after k: cursor = %d, want 1", got.modals.Shipping().feedbackCursor)
+	if got.modals.PRPanel().feedbackCursor != 1 {
+		t.Errorf("after k: cursor = %d, want 1", got.modals.PRPanel().feedbackCursor)
 	}
 
 	// pgdn increments detail scroll.
-	got.modals.Shipping().detailScroll = 0
+	got.modals.PRPanel().detailScroll = 0
 	m, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	got = m.(App)
-	if got.modals.Shipping().detailScroll <= 0 {
-		t.Errorf("pgdn: scroll = %d, want >0", got.modals.Shipping().detailScroll)
+	if got.modals.PRPanel().detailScroll <= 0 {
+		t.Errorf("pgdn: scroll = %d, want >0", got.modals.PRPanel().detailScroll)
 	}
 
 	// j resets detail scroll to 0.
 	m, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got = m.(App)
-	if got.modals.Shipping().detailScroll != 0 {
-		t.Errorf("j after scroll: scroll should reset to 0, got %d", got.modals.Shipping().detailScroll)
+	if got.modals.PRPanel().detailScroll != 0 {
+		t.Errorf("j after scroll: scroll should reset to 0, got %d", got.modals.PRPanel().detailScroll)
 	}
 }
 
@@ -3695,7 +3502,7 @@ func TestShippingPanel_VerdictKeys(t *testing.T) {
 	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
 	const repo = "/repo"
-	app.openShipping(newShippingPanel(sess, repo, app.width, app.height, app.buildShippingDeps()))
+	app.openPRPanel(newPRPanel(sess, repo, app.width, app.height, app.buildPRPanelDeps()))
 	app.width = 120
 	app.height = 40
 	sessKey := cacheKey(repo, sess.ID)
@@ -3746,7 +3553,7 @@ func TestAddressFeedback_ClearsTriage(t *testing.T) {
 	mgr.AddSessionForTest(sess)
 
 	app := NewApp()
-	app.openShipping(newShippingPanel(sess, dir, app.width, app.height, app.buildShippingDeps()))
+	app.openPRPanel(newPRPanel(sess, dir, app.width, app.height, app.buildPRPanelDeps()))
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 	app.width = 120
@@ -3765,7 +3572,7 @@ func TestAddressFeedback_ClearsTriage(t *testing.T) {
 		"thread:alice": {Verdict: feedbackDisagreed, Note: "n/a"},
 	}
 
-	// Press 'r' → panel emits shippingFeedbackRequestMsg → App handles it
+	// Press 'r' → panel emits prFeedbackRequestMsg → App handles it
 	// (clears triage, spawns agent). The cmd dispatch must run for state
 	// to settle, so execute the cmd and feed the message back through Update.
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
@@ -3806,7 +3613,7 @@ func TestAddressFeedback_RefusesOnMergedPR(t *testing.T) {
 			mgr.AddSessionForTest(sess)
 
 			app := NewApp()
-			app.openShipping(newShippingPanel(sess, dir, app.width, app.height, app.buildShippingDeps()))
+			app.openPRPanel(newPRPanel(sess, dir, app.width, app.height, app.buildPRPanelDeps()))
 			app.managers[dir] = mgr
 			app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 			app.width = 120
@@ -4494,35 +4301,74 @@ func TestAgentEvent_IdleLeavesShippingPhaseAlone(t *testing.T) {
 	}
 }
 
-// TestPollAllSessions_PassesCachedPRNumberForShippingOnly verifies that
-// cachedPRNumberForFallback returns the cached PR number only for Shipping
-// sessions, and 0 for all other lifecycle phases.
-func TestPollAllSessions_PassesCachedPRNumberForShippingOnly(t *testing.T) {
+// TestPollAllSessions_PassesCachedPRNumberForAnySession verifies that
+// cachedPRNumberForFallback returns the cached PR number for any session with
+// a cached PR — the merged-fallback lookup is no longer phase-scoped.
+func TestPollAllSessions_PassesCachedPRNumberForAnySession(t *testing.T) {
 	dir := t.TempDir()
 
-	shipping := agent.NewSessionForTest("ship-sess", "ship-branch")
-	shipping.SetLifecyclePhase(agent.LifecycleShipping)
-
-	building := agent.NewSessionForTest("build-sess", "build-branch")
-	building.SetLifecyclePhase(agent.LifecycleInProgress)
+	sessA := agent.NewSessionForTest("sess-a", "branch-a")
+	sessB := agent.NewSessionForTest("sess-b", "branch-b")
 
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 	defer mgr.Shutdown()
-	mgr.AddSessionForTest(shipping)
-	mgr.AddSessionForTest(building)
+	mgr.AddSessionForTest(sessA)
+	mgr.AddSessionForTest(sessB)
 
 	app := NewApp()
 	app.managers[dir] = mgr
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-	app.prCache[cacheKey(dir, shipping.ID)] = &prCacheEntry{pr: &github.PRState{Number: 42}}
-	app.prCache[cacheKey(dir, building.ID)] = &prCacheEntry{pr: &github.PRState{Number: 99}}
+	app.prCache[cacheKey(dir, sessA.ID)] = &prCacheEntry{pr: &github.PRState{Number: 42}}
 
-	if got := cachedPRNumberForFallback(shipping, app.prCache[cacheKey(dir, shipping.ID)]); got != 42 {
-		t.Errorf("Shipping session: got %d, want 42", got)
+	if got := cachedPRNumberForFallback(app.prCache[cacheKey(dir, sessA.ID)]); got != 42 {
+		t.Errorf("session with cached PR: got %d, want 42", got)
 	}
-	if got := cachedPRNumberForFallback(building, app.prCache[cacheKey(dir, building.ID)]); got != 0 {
-		t.Errorf("InProgress session: got %d, want 0", got)
+	if got := cachedPRNumberForFallback(app.prCache[cacheKey(dir, sessB.ID)]); got != 0 {
+		t.Errorf("session without cached PR: got %d, want 0", got)
 	}
+}
+
+// TestHandlePlanGoalSubmit_StartsDraftAndOpensEditor verifies the `P` flow's
+// second half: submitting a goal from the plan-goal modal dispatches
+// StartDraft with that goal and opens the plan editor in its drafting state.
+func TestHandlePlanGoalSubmit_StartsDraftAndOpensEditor(t *testing.T) {
+	dir := t.TempDir()
+	sess := agent.NewSessionForTestWithPath("sess-1", "no-plan", t.TempDir())
+
+	drafter := &recordingDrafter{}
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+	mgr.SetPlanDrafter(drafter)
+	mgr.AddSessionForTest(sess)
+
+	app := NewApp()
+	app.width = 120
+	app.height = 40
+	app.managers[dir] = mgr
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+
+	model, _ := app.Update(planGoalSubmitMsg{sessionID: "sess-1", repoPath: dir, goal: "add dark mode"})
+	app = model.(App)
+
+	if app.modals.Current() != focusPlanEditor {
+		t.Fatalf("expected focusPlanEditor after goal submit, got %v", app.modals.Current())
+	}
+	if got := sess.OriginalPrompt(); got != "add dark mode" {
+		t.Errorf("OriginalPrompt = %q, want the submitted goal", got)
+	}
+
+	// The drafter goroutine starts asynchronously; poll for the forwarded goal.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if calls := drafter.Calls(); len(calls) > 0 {
+			if calls[0] != "add dark mode" {
+				t.Fatalf("drafter prompt = %q, want %q", calls[0], "add dark mode")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("drafter was never invoked after planGoalSubmitMsg")
 }
 
 // recordingDrafter records the prompt passed to Draft so tests can assert
@@ -4584,17 +4430,12 @@ func TestApp_PlanEditorRetryMsg_CallsStartDraftWithOriginalPrompt(t *testing.T) 
 	editor := newPlanEditor(sess, dir, 80, 30)
 	app.openPlanEditorPanel(&editor)
 
-	// Dispatch planEditorRetryMsg — this should call StartDraft.
+	// Dispatch planEditorRetryMsg — this should call StartDraft. The drafting
+	// flag is set synchronously, but the stub drafter completes near-instantly,
+	// so the reliable signal that StartDraft accepted is the recorded call
+	// below (IsDrafting may already be false again by the time we check).
 	model, _ := app.Update(planEditorRetryMsg{sessionID: sess.ID, repoPath: dir})
 	app = model.(App)
-
-	// StartDraft sets LifecycleDrafting synchronously before the goroutine runs.
-	if got := sess.LifecyclePhase(); got != agent.LifecycleDrafting {
-		t.Errorf("LifecyclePhase after retry = %v, want LifecycleDrafting", got)
-	}
-	if !sess.IsDrafting() {
-		t.Error("IsDrafting() should be true after planEditorRetryMsg")
-	}
 
 	// Verify the stub was invoked with the correct prompt. The goroutine starts
 	// asynchronously so poll briefly.

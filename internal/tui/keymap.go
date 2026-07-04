@@ -14,6 +14,7 @@ type KeyMap struct {
 	NextRepo     []string // cycle active repo
 	NewSession   []string // create a new session
 	AddAgent     []string // add an agent to the cursor's session
+	Plan         []string // plan action: draft if none, else open the plan editor
 	OpenReview   []string // open the review panel
 	OpenTerminal []string // open or focus shell terminal
 	OpenIDE      []string // open worktree in IDE
@@ -38,6 +39,7 @@ func DefaultKeyMap() KeyMap {
 		NextRepo:     []string{"N"},
 		NewSession:   []string{"n"},
 		AddAgent:     []string{"c"},
+		Plan:         []string{"P"},
 		OpenReview:   []string{"r"},
 		OpenTerminal: []string{"t"},
 		OpenIDE:      []string{"e"},
@@ -86,7 +88,7 @@ const (
 	focusReview                       // overlay: review panel
 	focusLaunch                       // overlay: fullscreen agent terminal
 	focusPlanEditor                   // overlay: full-page plan editor (.claude/plan.md)
-	focusShipping                     // overlay: shipping panel (CI + review threads + merge)
+	focusPRPanel                      // overlay: PR panel (CI + review threads + merge)
 )
 
 // focusSection identifies which row group the fullscreen focus-mode cursor is

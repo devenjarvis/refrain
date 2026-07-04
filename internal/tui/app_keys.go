@@ -42,16 +42,16 @@ func (a App) handleKeysReviewPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 	return a, cmd, true
 }
 
-// handleKeysShippingPanel forwards a keypress to the shipping panel. Mirrors the
+// handleKeysPRPanel forwards a keypress to the PR panel. Mirrors the
 // review-panel snapshot-and-restore pattern.
-func (a App) handleKeysShippingPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
-	snapshot := a.modals.Shipping()
+func (a App) handleKeysPRPanel(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
+	snapshot := a.modals.PRPanel()
 	if snapshot == nil {
 		return a, nil, false
 	}
 	updated, cmd := snapshot.Update(msg)
-	if sp, ok := updated.(*shippingPanelModel); ok {
-		a.modals.CompareAndSetShipping(snapshot, sp)
+	if sp, ok := updated.(*prPanelModel); ok {
+		a.modals.CompareAndSetPRPanel(snapshot, sp)
 	}
 	return a, cmd, true
 }
@@ -102,12 +102,18 @@ func (a App) handleConfigFormSave() (tea.Model, tea.Cmd) {
 }
 
 // handleDashboardPaste routes a paste event to whichever modal owns focus:
-// the PR compose modal or the fullscreen agent terminal. When no consumer is
-// active the paste is dropped (the session list consumes no arbitrary text).
+// the PR compose modal, the plan-goal modal, or the fullscreen agent
+// terminal. When no consumer is active the paste is dropped (the session
+// list consumes no arbitrary text).
 func (a App) handleDashboardPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if a.prComposeModal.Active() {
 		var cmd tea.Cmd
 		a.prComposeModal, cmd = a.prComposeModal.Update(msg)
+		return a, cmd
+	}
+	if a.planGoal.Active() {
+		var cmd tea.Cmd
+		a.planGoal, cmd = a.planGoal.Update(msg)
 		return a, cmd
 	}
 	if ag := a.modals.LaunchAgent(); ag != nil {

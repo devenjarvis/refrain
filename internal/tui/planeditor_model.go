@@ -94,7 +94,7 @@ type planEditorModel struct {
 	saveNoteVisible bool // saveNote still within its 3s display window; refreshed on tick
 
 	reviseInput     textinput.Model
-	drafting        bool // session is currently in LifecycleDrafting; show placeholder
+	drafting        bool // a draft call is in flight (Session.IsDrafting); show placeholder
 	revising        bool // a revise call is in flight; lock i/a/ctrl+s
 	revisingFor     time.Time
 	revisingElapsed int    // whole seconds since revisingFor; refreshed on tick

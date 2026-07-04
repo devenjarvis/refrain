@@ -32,7 +32,6 @@ func (a App) handlePRDraftReady(msg prDraftReadyMsg) (tea.Model, tea.Cmd) {
 	a.prModalRepo = msg.repo
 	a.prModalHead = msg.head
 	a.prModalBase = msg.base
-	a.prModalTransitionShipping = msg.transitionShipping
 	resolved := a.resolvedCache[msg.repoPath]
 	var sessName string
 	if sess := a.sessionByIDInRepo(msg.repoPath, msg.sessionID); sess != nil {
@@ -57,15 +56,6 @@ func (a App) handlePRCreated(msg prCreatedMsg) (tea.Model, tea.Cmd) {
 	}
 	key := cacheKey(repoPath, msg.sessionID)
 	a.prCache[key] = &prCacheEntry{pr: msg.pr}
-	if msg.transitionShipping {
-		sess := a.sessionByIDInRepo(repoPath, msg.sessionID)
-		if sess != nil {
-			sess.SetLifecyclePhase(agent.LifecycleShipping)
-			if rp := a.modals.Review(); rp != nil && rp.SessionID() == msg.sessionID {
-				a.closeModal()
-			}
-		}
-	}
 	// Re-arm a burst poll so the new PR is discovered quickly.
 	if ps := a.prPollStates[key]; ps != nil {
 		ps.burstUntil = time.Now().Add(PRPollBurstAfterCreate)
@@ -154,50 +144,14 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 			ps.burstUntil = newBurst
 		}
 	}
-	// Auto-promote to Shipping when an open PR is discovered externally.
-	if msg.pr.State == "open" {
-		sess := a.sessionByIDInRepo(repoPath, msg.sessionID)
-		if sess != nil {
-			switch sess.LifecyclePhase() {
-			case agent.LifecycleInProgress, agent.LifecycleReadyForReview, agent.LifecycleInReview:
-				sess.SetLifecyclePhase(agent.LifecycleShipping)
-				if rp := a.modals.Review(); rp != nil && rp.SessionID() == msg.sessionID {
-					a.closeModal()
-				}
-			}
-		}
-	}
-	// Detect PR merge/close and trigger async session cleanup.
-	var cmds []tea.Cmd
-	if msg.pr.State == "merged" || msg.pr.State == "closed" {
-		if mgr := a.managers[repoPath]; mgr != nil {
-			if sess := mgr.GetSession(msg.sessionID); sess != nil {
-				if sess.LifecyclePhase() == agent.LifecycleShipping {
-					sessID := msg.sessionID
-					if !a.closingSessions[key] {
-						sess.SetLifecyclePhase(agent.LifecycleComplete)
-						// Close the shipping panel if this session is currently open in it.
-						if sp := a.modals.Shipping(); sp != nil && sp.SessionID() == sessID {
-							a.closeModal()
-						}
-						var agentIDs []string
-						for _, ag := range sess.Agents() {
-							agentIDs = append(agentIDs, ag.ID)
-							a.closingAgents[agentCacheKey(repoPath, ag.ID)] = true
-						}
-						a.closingSessions[key] = true
-						cmds = append(cmds, func() tea.Msg {
-							return killResultMsg{
-								scope:     killScopeSession,
-								repoPath:  repoPath,
-								sessionID: sessID,
-								agentIDs:  agentIDs,
-								err:       filterNotFound(mgr.KillSession(sessID)),
-							}
-						})
-					}
-				}
-			}
+	// The poller never mutates lifecycle or tears sessions down (rollback
+	// design §4.7): PR presence/state is a badge. The one session fact it
+	// records is "this session's work landed" — merge (internal or external)
+	// marks the session done, which the list renders as a merged badge plus
+	// an "X to clean up" hint. The session stays until the user removes it.
+	if msg.pr.State == "merged" {
+		if sess := a.sessionByIDInRepo(repoPath, msg.sessionID); sess != nil {
+			sess.MarkDone()
 		}
 	}
 	// Detect check state transitions and fire notifications.
@@ -220,9 +174,13 @@ func (a App) handlePRPoll(msg prPollMsg) (tea.Model, tea.Cmd) {
 		}
 		ps.lastCheckState = newState
 	}
-	return a, tea.Batch(cmds...)
+	return a, nil
 }
 
+// handleMergePR records a successful merge: the session is marked done (badge
+// + "X to clean up" hint on its row) and the cached PR state flips to merged
+// so the badge is immediate rather than waiting a poll. No teardown — the
+// session stays in the list until the user removes it (rollback design §4.7).
 func (a App) handleMergePR(msg mergePRMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		a.setError("merge failed: " + msg.err.Error())
@@ -233,33 +191,13 @@ func (a App) handleMergePR(msg mergePRMsg) (tea.Model, tea.Cmd) {
 	if repoPath == "" {
 		repoPath = a.activeRepo
 	}
-	mgr := a.managers[repoPath]
-	if mgr == nil {
-		return a, nil
+	if entry := a.prCache[cacheKey(repoPath, msg.sessionID)]; entry != nil && entry.pr != nil {
+		entry.pr.State = "merged"
 	}
-	sess := mgr.GetSession(msg.sessionID)
-	sessKey := cacheKey(repoPath, msg.sessionID)
-	if sess == nil || a.closingSessions[sessKey] {
-		return a, nil
+	if sess := a.sessionByIDInRepo(repoPath, msg.sessionID); sess != nil {
+		sess.MarkDone()
 	}
-	sess.SetLifecyclePhase(agent.LifecycleComplete)
-	agents := sess.Agents()
-	agentIDs := make([]string, 0, len(agents))
-	for _, ag := range agents {
-		agentIDs = append(agentIDs, ag.ID)
-		a.closingAgents[agentCacheKey(repoPath, ag.ID)] = true
-	}
-	sessID := msg.sessionID
-	a.closingSessions[sessKey] = true
-	return a, func() tea.Msg {
-		return killResultMsg{
-			scope:     killScopeSession,
-			repoPath:  repoPath,
-			sessionID: sessID,
-			agentIDs:  agentIDs,
-			err:       filterNotFound(mgr.KillSession(sessID)),
-		}
-	}
+	return a, nil
 }
 
 func (a *App) pollAllSessions() []tea.Cmd {
@@ -289,6 +227,13 @@ outer:
 				a.prPollStates[key] = ps
 			}
 			if ps.inFlight {
+				continue
+			}
+
+			// Merged is terminal: stop polling once the cached PR is merged so
+			// a done session parked in the list (awaiting the user's X) doesn't
+			// burn API calls. Closed PRs keep polling — they can be reopened.
+			if entry := a.prCache[key]; entry != nil && entry.pr != nil && entry.pr.State == "merged" {
 				continue
 			}
 
@@ -329,23 +274,25 @@ outer:
 			ps.lastPoll = now
 			ps.inFlight = true
 			a.prPollsInFlight++
-			fetchThreads := sess.LifecyclePhase() == agent.LifecycleShipping
-			cachedPRNumber := cachedPRNumberForFallback(sess, a.prCache[key])
+			// Threads feed the PR panel; fetch them whenever an open PR is
+			// cached (the panel opens on demand via `p`, not via phase).
+			entry := a.prCache[key]
+			fetchThreads := entry != nil && entry.pr != nil && entry.pr.State == "open"
+			cachedPRNumber := cachedPRNumberForFallback(entry)
 			cmds = append(cmds, a.refreshPRStatusForSession(sess.ID, sess.Branch(), repo.Path, sess.Worktree.Path, fetchThreads, cachedPRNumber))
 		}
 	}
 	return cmds
 }
 
-// cachedPRNumberForFallback returns the cached PR number for a Shipping session
-// so the poll cmd can call resolveMergedFallback when the open-only lookup
-// returns nil. entry is the session's prCache entry (nil-safe). Returns 0 for
-// non-Shipping sessions, preserving today's 2-consecutive-nil eviction
-// behaviour for Building/Reviewing sessions.
-func cachedPRNumberForFallback(sess *agent.Session, entry *prCacheEntry) int {
-	if sess.LifecyclePhase() != agent.LifecycleShipping {
-		return 0
-	}
+// cachedPRNumberForFallback returns the cached PR number for a session so the
+// poll cmd can call resolveMergedFallback when the open-only lookup returns
+// nil. entry is the session's prCache entry (nil-safe). Any session with a
+// cached PR qualifies — externally merged/closed PRs must surface as badges
+// for every session now that no Shipping phase exists to scope the check.
+// The 2-consecutive-nil eviction still applies when the fallback finds the
+// PR is neither merged nor closed (e.g. a force-push window).
+func cachedPRNumberForFallback(entry *prCacheEntry) int {
 	if entry == nil || entry.pr == nil {
 		return 0
 	}
@@ -420,8 +367,8 @@ func getLocalHeadSHA(worktreePath string) string {
 
 // refreshPRStatusForSession returns a Cmd that polls PR, check, and review status for a single session.
 // worktreePath is used as a fallback SHA source when the branch hasn't been pushed under its current name.
-// cachedPRNumber, when > 0 and the session is in LifecycleShipping, enables a merged-fallback lookup
-// via resolveMergedFallback so externally-merged/closed PRs are detected and the session is cleaned up.
+// cachedPRNumber, when > 0, enables a merged-fallback lookup via resolveMergedFallback so
+// externally-merged/closed PRs are detected and surfaced as badges.
 func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePath string, fetchThreads bool, cachedPRNumber int) tea.Cmd {
 	// Guard: ensure the caller passed the repo that actually owns this session.
 	// This catches programming errors (e.g. passing cfg.Repos[0].Path for a
@@ -471,8 +418,8 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 				return prPollMsg{sessionID: sessionID, repoPath: repoPath, err: err}
 			}
 		}
-		// Shipping sessions: if the open-only lookups all returned nil, check
-		// whether the cached PR was merged or closed externally.
+		// If the open-only lookups all returned nil, check whether the cached
+		// PR was merged or closed externally.
 		if pr == nil && cachedPRNumber > 0 {
 			pr = resolveMergedFallback(ctx, owner, repo, cachedPRNumber, ghClient.RefreshPR)
 		}
@@ -495,7 +442,7 @@ func (a *App) refreshPRStatusForSession(sessionID, branch, repoPath, worktreePat
 			if err != nil {
 				return prPollMsg{sessionID: sessionID, repoPath: repoPath, err: err}
 			}
-			// Threads are only needed for the shipping panel — skip the fetch for
+			// Threads are only needed for the PR panel — skip the fetch for
 			// building/reviewing sessions to avoid doubling review API calls.
 			if fetchThreads {
 				threads, _ = ghClient.GetReviewThreads(ctx, owner, repo, pr.Number)
@@ -550,10 +497,10 @@ func entryThreads(entry *prCacheEntry) []github.ReviewThread {
 	return entry.threads
 }
 
-// mergePRCmdFor returns the shipping panel's MergePRCmd dep. It closes over the
+// mergePRCmdFor returns the PR panel's MergePRCmd dep. It closes over the
 // shared GitHub client, PR cache, and resolved-settings map (reference-typed
 // App fields) rather than a value copy of App, mirroring buildReviewDeps /
-// buildShippingDeps. Capturing the maps/pointer keeps the returned factory live
+// buildPRPanelDeps. Capturing the maps/pointer keeps the returned factory live
 // across the App value-copies that flow through Update, and avoids pinning a
 // whole stale App (including frozen scalars) for the panel's lifetime.
 func (a *App) mergePRCmdFor() func(sessionID, repoPath string, force bool) tea.Cmd {
@@ -566,10 +513,10 @@ func (a *App) mergePRCmdFor() func(sessionID, repoPath string, force bool) tea.C
 }
 
 // mergePRCmdWithMode builds the async merge Cmd for the cached PR of
-// (repoPath, sessionID). The shipping panel always supplies a non-empty,
+// (repoPath, sessionID). The PR panel always supplies a non-empty,
 // repo-pinned repoPath, so this reads only the passed references — no App.
 func mergePRCmdWithMode(ghClient *github.Client, prCache map[string]*prCacheEntry, resolved map[string]config.ResolvedSettings, sessionID, repoPath string, force bool) tea.Cmd {
-	// Precondition: the shipping panel always supplies its pinned, non-empty
+	// Precondition: the PR panel always supplies its pinned, non-empty
 	// repoPath. Guarding up front (rather than after the cache lookup) keeps the
 	// check live instead of dead behind the nil-entry branch below.
 	if repoPath == "" {
@@ -632,7 +579,7 @@ func mergePRCmdWithMode(ghClient *github.Client, prCache map[string]*prCacheEntr
 	}
 }
 
-func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionShipping bool) tea.Cmd {
+func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string) tea.Cmd {
 	if sess == nil || sess.Worktree == nil {
 		return func() tea.Msg {
 			return prDraftReadyMsg{err: fmt.Errorf("no worktree for session")}
@@ -733,15 +680,14 @@ func (a *App) startPRDraftCmd(sess *agent.Session, repoPath string, transitionSh
 		}
 
 		return prDraftReadyMsg{
-			sessionID:          sessionID,
-			title:              draft.Title,
-			body:               draft.Body,
-			owner:              owner,
-			repo:               repo,
-			head:               branch,
-			base:               base,
-			repoPath:           repoPath,
-			transitionShipping: transitionShipping,
+			sessionID: sessionID,
+			title:     draft.Title,
+			body:      draft.Body,
+			owner:     owner,
+			repo:      repo,
+			head:      branch,
+			base:      base,
+			repoPath:  repoPath,
 		}
 	}
 }
@@ -761,7 +707,6 @@ func (a *App) submitPRComposeModal(msg prComposeSubmitMsg) (tea.Model, tea.Cmd) 
 	base := a.prModalBase
 	sessionID := a.prModalSessionID
 	repoPath := a.prModalRepoPath
-	transitionShipping := a.prModalTransitionShipping
 	return a, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -769,7 +714,7 @@ func (a *App) submitPRComposeModal(msg prComposeSubmitMsg) (tea.Model, tea.Cmd) 
 		if err != nil {
 			return prCreatedMsg{sessionID: sessionID, repoPath: repoPath, err: err}
 		}
-		return prCreatedMsg{sessionID: sessionID, repoPath: repoPath, pr: pr, transitionShipping: transitionShipping}
+		return prCreatedMsg{sessionID: sessionID, repoPath: repoPath, pr: pr}
 	}
 }
 
