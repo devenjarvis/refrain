@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -250,13 +251,10 @@ func (a App) handlePlanEditorRetry(msg planEditorRetryMsg) (tea.Model, tea.Cmd) 
 
 func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	prompt := strings.TrimSpace(msg.prompt)
-	if prompt == "" {
-		return a, nil
-	}
-	// The `n` handler / repo picker that opened this modal already resolved
+	// The `n` handler / repo picker that opened this screen already resolved
 	// the target repo and stored it in a.activeRepo. Trust that rather than
-	// re-deriving from the pipeline cursor, which may sit on an unrelated
-	// repo's session and would pin the new session to the wrong repo.
+	// re-deriving from the list cursor, which may sit on an unrelated repo's
+	// session and would pin the new session to the wrong repo.
 	repoPath := a.activeRepo
 	if repoPath == "" {
 		a.setError("no repo selected")
@@ -269,27 +267,42 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	}
 
 	resolved := a.resolvedCache[repoPath]
-	fixedW := a.dashboard.fixedTermWidth()
-	fixedH := a.dashboard.fixedTermHeight()
-	if fixedW <= 0 || fixedH <= 0 {
+	rows := a.agentTermRows()
+	cols := a.agentTermCols()
+	if rows <= 0 || cols <= 0 {
 		a.setError("Terminal size not yet known; try again")
 		return a, nil
 	}
 
-	if msg.skipPlanning {
-		// Skip path: identical to today's `n` flow — create the session and
-		// spawn the real agent immediately with the user's prompt as the
-		// initial Task. Lifecycle starts at LifecycleInProgress so the row
-		// shows up in BUILDING, not Planning.
+	if !msg.planFirst {
+		// Raw session (the default `enter`): spawn claude immediately with
+		// the prompt as its task. An empty prompt opens a blank REPL — the
+		// everyday case for debugging and exploring. Lifecycle starts at
+		// InProgress so downstream review/PR flows treat it as active work.
 		a.view = ViewDashboard
 		cfg := agent.Config{
-			Rows:              fixedH,
-			Cols:              fixedW,
+			Rows:              rows,
+			Cols:              cols,
 			BypassPermissions: applyOverrideBool(msg.overrides.BypassPermissions, resolved.BypassPermissions),
 			AgentProgram:      resolved.AgentProgram,
 			AgentModel:        applyOverrideString(msg.overrides.AgentModel, resolved.AgentModel),
 			BuildSystemPrompt: resolved.BuildSystemPrompt,
 			Task:              prompt,
+		}
+		if msg.context == contextCheckout {
+			return a, func() tea.Msg {
+				sess, ag, err := mgr.CreateSessionInDir(cfg)
+				if err != nil {
+					if errors.Is(err, agent.ErrCheckoutSessionExists) {
+						// One checkout session per repo: two agent groups in
+						// one working tree would fight over the same files.
+						return createResultMsg{err: errors.New("a checkout session already exists — press c on it to add an agent")}
+					}
+					return createResultMsg{err: err}
+				}
+				sess.SetLifecyclePhase(agent.LifecycleInProgress)
+				return createResultMsg{sessionID: sess.ID, agentID: ag.ID, isNewSession: true}
+			}
 		}
 		return a, func() tea.Msg {
 			sess, ag, err := mgr.CreateSession(cfg)
@@ -301,13 +314,20 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Planning path: create the session worktree with no real agent yet,
-	// kick off the draft subprocess in the background, and open the editor
-	// with a "Drafting…" placeholder. The editor reloads itself when the
-	// draft lands (via the EventStatusChanged emitted by runDraft).
+	// Plan-first path (ctrl+p): create the session worktree with no real
+	// agent yet, kick off the draft subprocess in the background, and land
+	// back on the session list with a "drafting…" badge. The plan editor
+	// opens from the row (or auto-opens on a planner question).
+	if msg.context == contextCheckout {
+		// CreateSessionNoAgent is worktree-only; a no-agent checkout session
+		// has no manager primitive yet (rollback design §9.5 — later phase).
+		a.view = ViewDashboard
+		a.setError("plan-first isn't available for checkout sessions yet")
+		return a, nil
+	}
 	cfg := agent.Config{
-		Rows:              fixedH,
-		Cols:              fixedW,
+		Rows:              rows,
+		Cols:              cols,
 		BypassPermissions: applyOverrideBool(msg.overrides.BypassPermissions, resolved.BypassPermissions),
 		AgentProgram:      resolved.AgentProgram,
 		AgentModel:        applyOverrideString(msg.overrides.AgentModel, resolved.AgentModel),
@@ -321,29 +341,20 @@ func (a *App) submitPromptModal(msg promptModalSubmitMsg) (tea.Model, tea.Cmd) {
 	if err := mgr.StartDraft(sess.ID, prompt, planModelOpts(msg.overrides)...); err != nil {
 		a.setError("start draft: " + err.Error())
 		// No fallback to openPlanEditor on error — the session stays on the
-		// dashboard in the planning card; the user can press enter to open the
-		// editor and edit or abandon the plan by hand.
+		// list; the user can press enter to open the editor and edit or
+		// abandon the plan by hand.
 	}
 	// Store overrides for the approve path to read.
 	a.pendingOverrides[sess.ID] = msg.overrides
 	// sessionsCreatedCount is intentionally NOT incremented here. The user
 	// hasn't committed to this session yet — they could abandon it from the
 	// editor (`q`) before any real agent spawns. We count the session only
-	// when approvePlanAndSpawn fires (and the skip path counts via its own
-	// createResultMsg with isNewSession=true), so each approved/skipped
-	// session is logged exactly once.
+	// when approvePlanAndSpawn fires (and the raw path counts via its own
+	// createResultMsg with isNewSession=true), so each session is logged
+	// exactly once.
 	a.view = ViewDashboard
 	a.clampCursor()
-	// Stay on the dashboard while the draft runs in the background — the
-	// planning card shows the "drafting…" badge. The user can press
-	// enter/space on the card to open the editor when ready, or the editor
-	// auto-opens if the planner raises a clarifying question.
-	for idx, item := range a.listItems().planningSessions() {
-		if item.session != nil && item.session.ID == sess.ID {
-			a.cursor.JumpTo(focusSectionPlanning, idx)
-			break
-		}
-	}
+	a.selectSessionRow(repoPath, sess.ID)
 	return a, nil
 }
 
@@ -360,7 +371,6 @@ func (a *App) openPlanEditor(sess *agent.Session, repoPath string) {
 		editor.SetDrafting(true)
 	}
 	a.openPlanEditorPanel(&editor)
-	a.dashboard.scrollOffset = 0
 }
 
 // approvePlanAndSpawn handles a planEditorApproveMsg: closes the editor,
@@ -404,9 +414,9 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 		prompt = config.DefaultBuildFromPlanPrompt
 	}
 
-	fixedW := a.dashboard.fixedTermWidth()
-	fixedH := a.dashboard.fixedTermHeight()
-	if fixedW <= 0 || fixedH <= 0 {
+	rows := a.agentTermRows()
+	cols := a.agentTermCols()
+	if rows <= 0 || cols <= 0 {
 		a.setError("Terminal size not yet known; try again")
 		return a, nil
 	}
@@ -416,8 +426,8 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 	delete(a.pendingOverrides, sess.ID)
 
 	cfg := agent.Config{
-		Rows:              fixedH,
-		Cols:              fixedW,
+		Rows:              rows,
+		Cols:              cols,
 		BypassPermissions: applyOverrideBool(over.BypassPermissions, resolved.BypassPermissions),
 		AgentProgram:      resolved.AgentProgram,
 		AgentModel:        applyOverrideString(over.AgentModel, resolved.AgentModel),

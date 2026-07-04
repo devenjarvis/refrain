@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/devenjarvis/refrain/internal/agent"
 	"github.com/devenjarvis/refrain/internal/config"
 )
 
@@ -22,41 +21,12 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.activeRepo = repoPath
 		a.clampCursor()
-		fixedW := a.dashboard.fixedTermWidth()
-		fixedH := a.dashboard.fixedTermHeight()
-		if fixedW <= 0 || fixedH <= 0 {
-			a.setError("Terminal size not yet known; try again")
+		if a.managers[repoPath] == nil {
 			return a, nil
 		}
-		resolved := a.resolvedCache[repoPath]
-		mgr := a.managers[repoPath]
-		if mgr == nil {
-			return a, nil
-		}
-		// Plan-first flow: same gate as the single-repo `n` keybind. Without
-		// this branch, multi-repo users would silently bypass PlanFirstEnabled
-		// and spawn the real agent immediately.
-		if resolved.PlanFirstEnabled {
-			return a, a.openNewSession(ViewRepoPicker)
-		}
-		pickerCfg := agent.Config{
-			Rows:              fixedH,
-			Cols:              fixedW,
-			BypassPermissions: resolved.BypassPermissions,
-			AgentProgram:      resolved.AgentProgram,
-			AgentModel:        resolved.AgentModel,
-			BuildSystemPrompt: resolved.BuildSystemPrompt,
-		}
-		return a, func() tea.Msg {
-			sess, ag, err := mgr.CreateSession(pickerCfg)
-			if err != nil {
-				return createResultMsg{err: err}
-			}
-			// Repo-picker sessions spawn an agent immediately; they
-			// belong in BUILDING. See the legacy n path for rationale.
-			sess.SetLifecyclePhase(agent.LifecycleInProgress)
-			return createResultMsg{sessionID: sess.ID, agentID: ag.ID, isNewSession: true}
-		}
+		// Every new session composes through the full-viewport screen: it
+		// carries the raw/plan-first submit pair and the context toggle.
+		return a, a.openNewSession(ViewRepoPicker)
 
 	case repoPickerSwitchActiveMsg:
 		if msg.path == "" {

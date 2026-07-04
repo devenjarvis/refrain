@@ -77,9 +77,14 @@ func TestNewSession_View_WideTerminal_RendersSidebar(t *testing.T) {
 	if !strings.Contains(view, "Bypass Permissions") {
 		t.Error("wide view OVERRIDES block should contain 'Bypass Permissions'")
 	}
-	if !strings.Contains(view, "Plan") || !strings.Contains(view, "Build") ||
-		!strings.Contains(view, "Review") || !strings.Contains(view, "Ship") {
-		t.Error("wide view should contain FLOW block with Plan/Build/Review/Ship")
+	if !strings.Contains(view, "CONTEXT") {
+		t.Error("wide view should contain the CONTEXT block")
+	}
+	if !strings.Contains(view, "Worktree (new branch)") {
+		t.Error("wide view CONTEXT block should default to 'Worktree (new branch)'")
+	}
+	if strings.Contains(view, "Plan → Build → Review → Ship") {
+		t.Error("wide view should NOT contain the retired FLOW pipeline block")
 	}
 }
 
@@ -123,7 +128,7 @@ func TestNewSession_View_WideTerminal_SeedsOverridesFromDefaults(t *testing.T) {
 	}
 }
 
-func TestNewSession_EnterSubmitsPlanning(t *testing.T) {
+func TestNewSession_EnterSubmitsRaw(t *testing.T) {
 	m := newNewSessionModel()
 	m.SetSize(120, 40)
 	m.Open(ViewDashboard)
@@ -138,8 +143,11 @@ func TestNewSession_EnterSubmitsPlanning(t *testing.T) {
 	if !ok {
 		t.Fatalf("got %T, want promptModalSubmitMsg", got)
 	}
-	if submit.skipPlanning {
-		t.Error("plain enter should NOT set skipPlanning")
+	if submit.planFirst {
+		t.Error("plain enter is the raw path; planFirst must be false")
+	}
+	if submit.context != contextWorktree {
+		t.Errorf("default context = %v, want contextWorktree", submit.context)
 	}
 	if !strings.Contains(submit.prompt, "dark mode") {
 		t.Errorf("prompt = %q", submit.prompt)
@@ -149,26 +157,74 @@ func TestNewSession_EnterSubmitsPlanning(t *testing.T) {
 	}
 }
 
-func TestNewSession_CtrlEnterSubmitsSkip(t *testing.T) {
+func TestNewSession_CtrlPSubmitsPlanFirst(t *testing.T) {
 	m := newNewSessionModel()
 	m.SetSize(120, 40)
 	m.Open(ViewDashboard)
 	m.textarea.SetValue("trivial fix")
 
-	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl, Text: "ctrl+enter"})
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if cmd == nil {
-		t.Fatal("expected cmd from ctrl+enter")
+		t.Fatal("expected cmd from ctrl+p")
 	}
 	got := cmd()
 	submit, ok := got.(promptModalSubmitMsg)
 	if !ok {
 		t.Fatalf("got %T, want promptModalSubmitMsg", got)
 	}
-	if !submit.skipPlanning {
-		t.Error("ctrl+enter MUST set skipPlanning=true")
+	if !submit.planFirst {
+		t.Error("ctrl+p MUST set planFirst=true")
 	}
 	if submit.prompt != "trivial fix" {
 		t.Errorf("prompt = %q", submit.prompt)
+	}
+}
+
+func TestNewSession_CtrlPEmptyPromptIsNoop(t *testing.T) {
+	m := newNewSessionModel()
+	m.SetSize(120, 40)
+	m.Open(ViewDashboard)
+	m.textarea.SetValue("   ")
+
+	m, cmd := m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	if cmd != nil {
+		t.Fatal("ctrl+p with an empty prompt should be a no-op — there is nothing to plan")
+	}
+	if !m.active {
+		t.Error("model should stay active on empty plan-first submit")
+	}
+}
+
+func TestNewSession_ContextToggleCarriedInSubmit(t *testing.T) {
+	m := openModelWithDefaults()
+	m.textarea.SetValue("debug the crash")
+
+	// Tab to the Context row (index 0) and cycle to "Current checkout".
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight, Text: "right"})
+	if m.selectedContext() != contextCheckout {
+		t.Fatalf("selectedContext = %v, want contextCheckout", m.selectedContext())
+	}
+
+	// Back to the textarea and submit.
+	for m.overrideFocus != -1 {
+		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
+	}
+	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
+	_ = m
+	if cmd == nil {
+		t.Fatal("expected cmd on enter")
+	}
+	submit, ok := cmd().(promptModalSubmitMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want promptModalSubmitMsg", cmd())
+	}
+	if submit.context != contextCheckout {
+		t.Errorf("submit.context = %v, want contextCheckout", submit.context)
+	}
+	// The Context row must not leak into the model overrides.
+	if submit.overrides.PlanModel != "" || submit.overrides.AgentModel != "" {
+		t.Errorf("context toggle leaked into overrides: %+v", submit.overrides)
 	}
 }
 
@@ -191,18 +247,28 @@ func TestNewSession_EscEmitsCancel(t *testing.T) {
 	}
 }
 
-func TestNewSession_EmptyEnterIsNoop(t *testing.T) {
+func TestNewSession_EmptyEnterSubmitsBlankREPL(t *testing.T) {
 	m := newNewSessionModel()
 	m.SetSize(120, 40)
 	m.Open(ViewDashboard)
 	m.textarea.SetValue("   \n\t")
 
 	m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"})
-	if cmd != nil {
-		t.Fatal("empty/whitespace enter should be a no-op")
+	if cmd == nil {
+		t.Fatal("empty enter must submit — a blank claude REPL is the everyday case")
 	}
-	if !m.active {
-		t.Error("model should stay active on empty submit")
+	submit, ok := cmd().(promptModalSubmitMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want promptModalSubmitMsg", cmd())
+	}
+	if submit.prompt != "" {
+		t.Errorf("prompt = %q, want empty", submit.prompt)
+	}
+	if submit.planFirst {
+		t.Error("empty enter is the raw path; planFirst must be false")
+	}
+	if m.active {
+		t.Error("model should deactivate on submit")
 	}
 }
 
@@ -334,7 +400,7 @@ func TestNewSession_ShiftTabReverses(t *testing.T) {
 
 func TestNewSession_LeftRight_CyclesSelectOption(t *testing.T) {
 	m := openModelWithDefaults()
-	// Tab to Plan Model (index 0, a select field).
+	// Tab to Context (index 0, a select field).
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
 	if m.overrideFocus != 0 {
 		t.Fatalf("overrideFocus = %d, want 0", m.overrideFocus)
@@ -410,7 +476,8 @@ func TestNewSession_SubmitCarriesOverrides_PlanModel(t *testing.T) {
 	m.Open(ViewDashboard)
 	m.textarea.SetValue("my goal")
 
-	// Tab to Plan Model, cycle right to select a different value.
+	// Tab past Context to Plan Model, cycle right to select a different value.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"})
 	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight, Text: "right"})
 	wantPlan := config.KnownModels[1]

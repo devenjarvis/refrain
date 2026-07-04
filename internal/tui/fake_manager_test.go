@@ -31,6 +31,7 @@ type fakeManager struct {
 
 	// Recorded configs for assertion in override tests.
 	lastCreateSessionCfg        agent.Config
+	lastCreateSessionInDirCfg   agent.Config
 	lastCreateSessionNoAgentCfg agent.Config
 	lastAddAgentCfg             agent.Config
 	// nextPlanningSession, when non-nil, is returned by CreateSessionNoAgent.
@@ -131,6 +132,13 @@ func (f *fakeManager) CreateSessionWithCommand(_ agent.Config, _ func(string) *e
 
 func (f *fakeManager) CreateSessionOnBranch(_, _ string, _ agent.Config) (*agent.Session, *agent.Agent, error) {
 	return nil, nil, nil
+}
+
+func (f *fakeManager) CreateSessionInDir(cfg agent.Config) (*agent.Session, *agent.Agent, error) {
+	f.lastCreateSessionInDirCfg = cfg
+	sess := agent.NewSessionForTest("fake-checkout-sess", "fake-branch")
+	ag := sess.AddTestAgent("fake-ag", false, agent.StatusIdle)
+	return sess, ag, nil
 }
 
 func (f *fakeManager) CreateSessionNoAgent(cfg agent.Config) (*agent.Session, error) {

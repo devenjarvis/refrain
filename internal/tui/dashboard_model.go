@@ -198,21 +198,6 @@ func (d dashboardModel) contentHeight() int {
 	return d.height - statusBarHeight - titleHeight
 }
 
-// fixedTermWidth returns the terminal column count that all agents should use.
-// Held constant across panel focus changes so transitions never trigger a
-// resize.
-func (d dashboardModel) fixedTermWidth() int {
-	return previewTermWidth(d.width, d.listWidth())
-}
-
-// fixedTermHeight returns the terminal row count that all agents should use.
-// Held constant across panel focus changes. It intentionally does NOT deduct
-// the PR line — accepting 1 row of clipping when PR is visible is better than
-// per-session resize churn.
-func (d dashboardModel) fixedTermHeight() int {
-	return d.contentHeight() - 2 - 2*borderWidth // 2 metadata rows (sessionInfo + blank) + 2 border rows
-}
-
 // sessionsInPhase returns listItems for sessions whose lifecycle phase matches
 // any of the given phases. Repo filtering is intentionally NOT applied here
 // because the pipeline shows cross-repo work; callers that want a per-repo
@@ -298,17 +283,6 @@ func (items listItems) sectionItems(s focusSection) []listItem {
 		return items.shippingSessions()
 	}
 	panic(fmt.Sprintf("listItems.sectionItems: unknown focusSection %d", s))
-}
-
-// sectionCounts returns the number of rows in each fullscreen-focus section,
-// indexed by focusSection. Used by FocusedCursor navigation methods.
-func (items listItems) sectionCounts() [4]int {
-	return [4]int{
-		focusSectionPlanning: len(items.planningSessions()),
-		focusSectionBuilding: len(items.buildingSessions()),
-		focusSectionReview:   len(items.reviewQueueSessions()),
-		focusSectionShipping: len(items.shippingSessions()),
-	}
 }
 
 // sessionFocusPriority returns an integer priority for sorting sessions in the

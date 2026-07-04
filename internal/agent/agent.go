@@ -734,10 +734,15 @@ func (a *Agent) Snapshot(width, height int) (scrollback []string, viewport strin
 	return a.terminal.Snapshot(width, height)
 }
 
-// Resize updates both the VT terminal and PTY dimensions.
+// Resize updates both the VT terminal and PTY dimensions. Nil-safe on both so
+// synthetic test agents (no PTY/VT) can flow through UI paths that resize.
 func (a *Agent) Resize(rows, cols int) {
-	a.terminal.Resize(cols, rows)
-	_ = a.pty.Resize(uint16(rows), uint16(cols))
+	if a.terminal != nil {
+		a.terminal.Resize(cols, rows)
+	}
+	if a.pty != nil {
+		_ = a.pty.Resize(uint16(rows), uint16(cols))
+	}
 }
 
 // Status returns the current agent status.

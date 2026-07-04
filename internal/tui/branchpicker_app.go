@@ -20,17 +20,17 @@ func (a App) updateBranchPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		fixedW := a.dashboard.fixedTermWidth()
-		fixedH := a.dashboard.fixedTermHeight()
-		if fixedW <= 0 || fixedH <= 0 {
+		rows := a.agentTermRows()
+		cols := a.agentTermCols()
+		if rows <= 0 || cols <= 0 {
 			a.setError("Terminal size not yet known; try again")
 			return a, nil
 		}
 
 		resolved := a.resolvedCache[repoPath]
 		cfg := agent.Config{
-			Rows:              fixedH,
-			Cols:              fixedW,
+			Rows:              rows,
+			Cols:              cols,
 			BypassPermissions: resolved.BypassPermissions,
 			AgentProgram:      resolved.AgentProgram,
 			AgentModel:        resolved.AgentModel,

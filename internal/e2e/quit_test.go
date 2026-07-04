@@ -10,7 +10,7 @@ func TestQuitNoAgents(t *testing.T) {
 	s := newScrimSession(t)
 	s.Start()
 
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	s.Press("q")
 
@@ -29,13 +29,12 @@ func TestQuitConfirmation(t *testing.T) {
 	s := newScrimSession(t)
 	s.Start()
 
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	s.Press("n")
-	s.WaitForText("back", 10000)
+	createBlankSession(t, s)
 
 	s.Press("Escape")
-	s.WaitForText("navigate", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	s.Press("q")
 	s.WaitForText("Agents are running", 5000)

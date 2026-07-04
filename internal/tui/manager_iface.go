@@ -34,6 +34,7 @@ type SessionManager interface {
 	CreateSession(cfg agent.Config) (*agent.Session, *agent.Agent, error)
 	CreateSessionWithCommand(cfg agent.Config, cmd func(name string) *exec.Cmd) (*agent.Session, *agent.Agent, error)
 	CreateSessionOnBranch(branch, baseBranch string, cfg agent.Config) (*agent.Session, *agent.Agent, error)
+	CreateSessionInDir(cfg agent.Config) (*agent.Session, *agent.Agent, error)
 	CreateSessionNoAgent(cfg agent.Config) (*agent.Session, error)
 	AddAgent(sessionID string, cfg agent.Config) (*agent.Agent, error)
 	AddShell(sessionID string, cfg agent.Config) (*agent.Agent, error)

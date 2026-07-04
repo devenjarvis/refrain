@@ -7,13 +7,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// TestDashboardHints_FitIn120Cols verifies that the dashboard status bar fits
-// within 120 columns so that "q quit" is never truncated to a second line.
-func TestDashboardHints_FitIn120Cols(t *testing.T) {
-	out := renderStatusBar(dashboardHints, 120)
+// TestSessionListHints_FitIn120Cols verifies that the session-list status bar
+// fits within 120 columns so that "q quit" is never truncated to a second line.
+func TestSessionListHints_FitIn120Cols(t *testing.T) {
+	out := renderStatusBar(sessionListHints, 120)
 	lines := strings.Split(out, "\n")
 	if len(lines) > 1 {
-		t.Errorf("dashboardHints wrapped to %d lines at width=120; q quit may be truncated", len(lines))
+		t.Errorf("sessionListHints wrapped to %d lines at width=120; q quit may be truncated", len(lines))
 	}
 	w := lipgloss.Width(out)
 	if w > 120 {

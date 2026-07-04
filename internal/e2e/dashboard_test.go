@@ -7,18 +7,21 @@ import (
 	"testing"
 )
 
-func TestDashboardRendersOnStartup(t *testing.T) {
+func TestSessionListRendersOnStartup(t *testing.T) {
 	s := newScrimSession(t)
 	s.Start()
 
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	s.AssertScreenContains("FOCUS")
+	// Empty-state hint block.
+	s.AssertScreenContains("new session")
+	s.AssertScreenContains("add repo")
 
+	// Status bar.
 	s.AssertScreenContains("navigate")
-	s.AssertScreenContains("n session")
 	s.AssertScreenContains("quit")
 
+	// Repo header.
 	s.AssertScreenContains(filepath.Base(s.repoDir))
 }
 
@@ -26,19 +29,15 @@ func TestNavigationJK(t *testing.T) {
 	s := newScrimSession(t)
 	s.Start()
 
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	s.Press("n")
-	s.WaitForText("back", 10000)
-
+	createBlankSession(t, s)
 	s.Press("Escape")
-	s.WaitForText("navigate", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	s.Press("n")
-	s.WaitForText("back", 10000)
-
+	createBlankSession(t, s)
 	s.Press("Escape")
-	s.WaitForText("navigate", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	initial := s.Screenshot()
 

@@ -4,29 +4,18 @@ package e2e
 
 import "testing"
 
-// Anchor strings used to wait for specific TUI views to render.
-//
-//   - dashboardAnchor: only appears in the dashboard status bar (not in any
-//     overlay's hint set, all of which use "navigate" too).
-//   - listFocusAnchor: dashboard text shown only when focus is on the list.
-const (
-	dashboardAnchor = "n session"
-	listFocusAnchor = "n session"
-)
-
 func TestSettingsOverlay(t *testing.T) {
 	s := newScrimSession(t)
 	s.Start()
 
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	s.Press("s")
 	s.WaitForText("Audio Enabled", 5000)
 	s.AssertScreenContains("Bypass Permissions")
 
 	s.Press("Escape")
-	s.WaitForText(dashboardAnchor, 5000)
-	s.AssertScreenContains("FOCUS")
+	s.WaitForText(listAnchor, 5000)
 }
 
 var diffScenario = scenarioFile{
@@ -45,41 +34,41 @@ turns:
 `,
 }
 
+// TestDiffView drives a raw session end-to-end: blank REPL, a typed prompt in
+// the passthrough terminal, a commit made by the agent, and the diff viewer
+// over the result.
 func TestDiffView(t *testing.T) {
 	s := newScrimSession(t, diffScenario)
 	s.Start()
 
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
-	s.Press("n")
-	s.WaitForText("back", 10000)
+	createBlankSession(t, s)
 
 	s.Type("go\n")
 	s.WaitForText("COMMIT_DONE", 10000)
 
 	s.Press("Escape")
-	s.WaitForText(listFocusAnchor, 5000)
+	s.WaitForText(listAnchor, 5000)
 
 	s.Press("d")
 	s.WaitForText("side-by-side", 5000)
 	s.AssertScreenContains("file.txt")
 
 	s.Press("Escape")
-	s.WaitForText(dashboardAnchor, 5000)
-	s.AssertScreenContains("FOCUS")
+	s.WaitForText(listAnchor, 5000)
 }
 
 func TestFileBrowser(t *testing.T) {
 	s := newScrimSession(t)
 	s.Start()
 
-	s.WaitForText("FOCUS", 10000)
+	s.WaitForText(listAnchor, 10000)
 
 	s.Press("a")
 	s.WaitForText("DIRECTORIES", 5000)
 	s.AssertScreenContains("DETAILS")
 
 	s.Press("Escape")
-	s.WaitForText(dashboardAnchor, 5000)
-	s.AssertScreenContains("FOCUS")
+	s.WaitForText(listAnchor, 5000)
 }
