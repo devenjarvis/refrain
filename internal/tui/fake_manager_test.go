@@ -30,10 +30,10 @@ type fakeManager struct {
 	updateSettings   []config.ResolvedSettings
 
 	// Recorded configs for assertion in override tests.
-	lastCreateSessionCfg            agent.Config
-	lastCreateSessionForPlanningCfg agent.Config
-	lastAddAgentCfg                 agent.Config
-	// nextPlanningSession, when non-nil, is returned by CreateSessionForPlanning.
+	lastCreateSessionCfg        agent.Config
+	lastCreateSessionNoAgentCfg agent.Config
+	lastAddAgentCfg             agent.Config
+	// nextPlanningSession, when non-nil, is returned by CreateSessionNoAgent.
 	nextPlanningSession *agent.Session
 }
 
@@ -133,8 +133,8 @@ func (f *fakeManager) CreateSessionOnBranch(_, _ string, _ agent.Config) (*agent
 	return nil, nil, nil
 }
 
-func (f *fakeManager) CreateSessionForPlanning(cfg agent.Config) (*agent.Session, error) {
-	f.lastCreateSessionForPlanningCfg = cfg
+func (f *fakeManager) CreateSessionNoAgent(cfg agent.Config) (*agent.Session, error) {
+	f.lastCreateSessionNoAgentCfg = cfg
 	if f.nextPlanningSession != nil {
 		return f.nextPlanningSession, nil
 	}

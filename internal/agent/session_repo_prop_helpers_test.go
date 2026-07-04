@@ -45,7 +45,7 @@ func createTestSession(t fataler, mgr *Manager) (*Session, *Agent) {
 // createTestSessionPlanOnly creates a planning-only session (no agent process).
 func createTestSessionPlanOnly(t fataler, mgr *Manager) *Session {
 	cfg := Config{Task: "prop-test-plan", Rows: 24, Cols: 80}
-	sess, err := mgr.CreateSessionForPlanning(cfg)
+	sess, err := mgr.CreateSessionNoAgent(cfg)
 	if err != nil {
 		t.Fatalf("createTestSessionPlanOnly: %v", err)
 	}

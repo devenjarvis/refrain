@@ -64,7 +64,12 @@ type Manager struct {
 	// block on git I/O; this set lets concurrent callers see the reservation
 	// and pick a different name.
 	pendingNames map[string]struct{}
-	nextID       int
+	// checkoutPending reserves the repo's single checkout-session slot while
+	// a CreateSessionInDir call is in flight but the session isn't yet in
+	// m.sessions. Mirrors pendingNames: without it, two concurrent calls
+	// could both pass the one-per-repo check before either publishes.
+	checkoutPending bool
+	nextID          int
 
 	events       chan Event
 	done         chan struct{}
@@ -1119,6 +1124,169 @@ func (m *Manager) CreateSessionOnBranchWithCommand(branch, baseBranch string, cf
 	return sess, a, nil
 }
 
+// ErrCheckoutSessionExists is returned by CreateSessionInDir when the repo
+// already has a live checkout session (or one is mid-creation). Two agent
+// groups sharing one working tree would fight over the same files; callers
+// should offer to add an agent to the existing session instead. Check with
+// errors.Is.
+var ErrCheckoutSessionExists = errors.New("checkout session already exists for this repo")
+
+// CreateSessionInDir starts a new checkout session: a session whose working
+// directory is the repo's main working tree, on whatever branch is currently
+// checked out. No worktree is created and no branch is owned — killing the
+// session kills agents only, and Session.Cleanup is a guaranteed no-op on
+// the tree. At most one checkout session may exist per repo
+// (ErrCheckoutSessionExists); multiple agents within it are fine.
+func (m *Manager) CreateSessionInDir(cfg Config) (*Session, *Agent, error) {
+	sess, err := m.createSessionCheckout(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	a, err := sess.AddAgentDefault(cfg)
+	if err != nil {
+		// No Cleanup: there is no worktree to remove and the tree must
+		// never be touched. Dropping the map entry frees the checkout slot.
+		m.mu.Lock()
+		delete(m.sessions, sess.ID)
+		m.mu.Unlock()
+		return nil, nil, err
+	}
+
+	m.emit(Event{Type: EventCreated, AgentID: a.ID, SessionID: sess.ID, Status: StatusStarting})
+
+	m.watchers.Add(1)
+	go func() {
+		defer m.watchers.Done()
+		m.watchAgent(a, sess.ID)
+	}()
+
+	return sess, a, nil
+}
+
+// CreateSessionInDirWithCommand starts a new checkout session with a custom
+// command. Mirrors CreateSessionInDir; used by tests that substitute bash
+// for claude.
+func (m *Manager) CreateSessionInDirWithCommand(cfg Config, cmd func(name string) *exec.Cmd) (*Session, *Agent, error) {
+	sess, err := m.createSessionCheckout(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	a, err := sess.AddAgent(cfg, cmd)
+	if err != nil {
+		m.mu.Lock()
+		delete(m.sessions, sess.ID)
+		m.mu.Unlock()
+		return nil, nil, err
+	}
+
+	m.emit(Event{Type: EventCreated, AgentID: a.ID, SessionID: sess.ID, Status: StatusStarting})
+
+	m.watchers.Add(1)
+	go func() {
+		defer m.watchers.Done()
+		m.watchAgent(a, sess.ID)
+	}()
+
+	return sess, a, nil
+}
+
+// createSessionCheckout creates a KindCheckout session rooted at the repo's
+// main working tree. A sibling of createSessionOnBranchWorktree, not of
+// createSessionWorktree: it never runs `git worktree add`.
+//
+// Safety properties (see the rollback design doc §4.3):
+//   - ownsBranch stays false and hasClaudeName is set at creation, so the
+//     first-prompt Haiku rename can never touch the user's real branch.
+//   - sess.kind = KindCheckout makes Cleanup a guaranteed no-op on the tree.
+//   - the one-per-repo slot is reserved (checkoutPending) before any git I/O
+//     so concurrent callers see the reservation.
+func (m *Manager) createSessionCheckout(cfg Config) (*Session, error) {
+	m.mu.Lock()
+	if m.checkoutPending {
+		m.mu.Unlock()
+		return nil, ErrCheckoutSessionExists
+	}
+	for _, s := range m.sessions {
+		if s.Kind() == KindCheckout {
+			m.mu.Unlock()
+			return nil, ErrCheckoutSessionExists
+		}
+	}
+	m.checkoutPending = true
+	m.mu.Unlock()
+
+	// Release the slot reservation on every path; on success the session is
+	// already published in m.sessions (which is what the one-per-repo check
+	// reads first), so there is no gap.
+	defer func() {
+		m.mu.Lock()
+		m.checkoutPending = false
+		m.mu.Unlock()
+	}()
+
+	// Current branch of the main working tree — the session runs on it as-is.
+	branch, err := git.BaseBranch(m.repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("detecting current branch: %w", err)
+	}
+
+	m.mu.Lock()
+	existing := m.allReservedNamesLocked()
+	name := slugifyBranchName(branch, existing)
+	m.pendingNames[name] = struct{}{}
+	m.nextID++
+	id := fmt.Sprintf("session-%d", m.nextID)
+	settings := m.settings
+	m.mu.Unlock()
+
+	defer func() {
+		m.mu.Lock()
+		delete(m.pendingNames, name)
+		m.mu.Unlock()
+	}()
+
+	cfg.RepoPath = m.repoPath
+	if cfg.AgentProgram == "" {
+		cfg.AgentProgram = settings.AgentProgram
+	}
+
+	// Detect a base branch for later diffing. Best-effort and read-only —
+	// unlike createSessionWorktree we deliberately skip the fetch/fast-forward,
+	// since a checkout session must not mutate the user's refs.
+	baseBranch := settings.DefaultBranch
+	if baseBranch == "" {
+		if detected, err := git.RemoteDefaultBranch(m.repoPath); err == nil {
+			baseBranch = detected
+		} else {
+			baseBranch = branch
+		}
+	}
+
+	wt := &git.WorktreeInfo{
+		Name:       name,
+		Path:       m.repoPath,
+		Branch:     branch,
+		BaseBranch: baseBranch,
+	}
+
+	sess := newSession(id, name, wt)
+	sess.hookSocketPath = m.hookSocketPath
+	sess.kind = KindCheckout
+	// ownsBranch stays false — the user's branch is never deleted.
+	// hasClaudeName suppresses the first-prompt Haiku branch rename exactly
+	// as the attach path does. Safety-critical: without it, the first prompt
+	// would rename the user's real branch.
+	sess.SetClaudeName(true)
+
+	m.mu.Lock()
+	m.sessions[id] = sess
+	m.mu.Unlock()
+
+	return sess, nil
+}
+
 // createSessionOnBranchWorktree creates a session attached to an existing branch.
 // The session does NOT own the branch — cleanup removes the worktree but preserves it.
 // If baseBranch is non-empty, it overrides the default base on the returned WorktreeInfo.
@@ -1283,12 +1451,11 @@ func (m *Manager) createSessionWorktree(cfg Config) (*Session, error) {
 	return sess, nil
 }
 
-// CreateSessionForPlanning creates a session with a worktree but no agent
-// process. The session starts at LifecyclePlanning so it shows up in the
-// pipeline immediately; callers typically follow with StartDraft to kick
-// off plan generation, then AddAgent on approval. Used by the plan-first
-// flow where the user reviews/approves a plan before any real agent runs.
-func (m *Manager) CreateSessionForPlanning(cfg Config) (*Session, error) {
+// CreateSessionNoAgent creates a session with a worktree but no agent
+// process — the "session exists before its first agent" primitive. Callers
+// typically follow with StartDraft to kick off plan generation, then
+// AddAgent on approval (the plan-first flow).
+func (m *Manager) CreateSessionNoAgent(cfg Config) (*Session, error) {
 	sess, err := m.createSessionWorktree(cfg)
 	if err != nil {
 		return nil, err
@@ -1682,6 +1849,7 @@ func (m *Manager) Detach() *state.RefrainState {
 				Branch:         s.Branch(),
 				BaseBranch:     s.Worktree.BaseBranch,
 				OwnsBranch:     s.ownsBranch,
+				Kind:           string(s.Kind()),
 				HasClaudeName:  s.HasClaudeName(),
 				LifecyclePhase: s.LifecyclePhase().String(),
 				OriginalPrompt: s.OriginalPrompt(),
@@ -1763,9 +1931,20 @@ func (m *Manager) ResumeSession(ss state.SessionState, cfg Config) error {
 		BaseBranch: ss.BaseBranch,
 	}
 
+	// A checkout session runs on whatever branch the user's main working
+	// tree has checked out, and that may have changed while refrain was
+	// detached. Re-read HEAD so the session reflects reality rather than
+	// the snapshot. Best-effort: on error the persisted branch stands.
+	if SessionKindFromString(ss.Kind) == KindCheckout {
+		if cur, err := git.BaseBranch(ss.WorktreePath); err == nil && cur != "" {
+			wt.Branch = cur
+		}
+	}
+
 	sess := newSession(ss.ID, ss.Name, wt)
 	sess.hookSocketPath = m.hookSocketPath
 	sess.ownsBranch = ss.OwnsBranch
+	sess.kind = SessionKindFromString(ss.Kind)
 	sess.SetClaudeName(ss.HasClaudeName)
 	if ss.DisplayName != "" && ss.DisplayName != ss.Name {
 		sess.SetDisplayName(ss.DisplayName)

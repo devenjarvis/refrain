@@ -23,13 +23,18 @@ type RefrainState struct {
 
 // SessionState captures the state of a single refrain session (worktree).
 type SessionState struct {
-	ID             string       `json:"id"`
-	Name           string       `json:"name"`
-	DisplayName    string       `json:"displayName,omitempty"`
-	WorktreePath   string       `json:"worktreePath"`
-	Branch         string       `json:"branch"`
-	BaseBranch     string       `json:"baseBranch"`
-	OwnsBranch     bool         `json:"ownsBranch"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	DisplayName  string `json:"displayName,omitempty"`
+	WorktreePath string `json:"worktreePath"`
+	Branch       string `json:"branch"`
+	BaseBranch   string `json:"baseBranch"`
+	OwnsBranch   bool   `json:"ownsBranch"`
+	// Kind records the session kind ("worktree" | "checkout"). Missing or
+	// empty means "worktree" — all sessions persisted before the field
+	// existed are worktree sessions, and encoding/json silently tolerates
+	// its absence in old files.
+	Kind           string       `json:"kind,omitempty"`
 	HasClaudeName  bool         `json:"hasClaudeName,omitempty"`
 	LifecyclePhase string       `json:"lifecyclePhase,omitempty"`
 	OriginalPrompt string       `json:"originalPrompt,omitempty"`

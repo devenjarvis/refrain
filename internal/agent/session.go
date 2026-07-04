@@ -18,6 +18,32 @@ import (
 	"github.com/devenjarvis/refrain/internal/git"
 )
 
+// SessionKind distinguishes how a session's working directory relates to the
+// repo. Worktree sessions own an isolated git worktree under
+// .refrain/worktrees; checkout sessions run directly in the repo's main
+// working tree and must never remove it on cleanup.
+type SessionKind string
+
+const (
+	// KindWorktree is the default: the session runs in an isolated git
+	// worktree created (or attached) for it.
+	KindWorktree SessionKind = "worktree"
+	// KindCheckout means the session runs in the repo's main working tree.
+	// No worktree was created, the session never owns the branch, and
+	// Cleanup is a guaranteed no-op on the tree.
+	KindCheckout SessionKind = "checkout"
+)
+
+// SessionKindFromString maps a persisted kind string back to a SessionKind.
+// Missing/empty and unrecognized values map to KindWorktree — all legacy
+// sessions predate the kind field and are worktree sessions.
+func SessionKindFromString(s string) SessionKind {
+	if s == string(KindCheckout) {
+		return KindCheckout
+	}
+	return KindWorktree
+}
+
 // Session owns a git worktree and holds one or more agents that share it.
 type Session struct {
 	ID        string
@@ -35,6 +61,10 @@ type Session struct {
 	doneAt         time.Time
 	ownsBranch     bool   // true if this session created the branch (cleanup should delete it)
 	hookSocketPath string // absolute path to the manager's hook socket ("" disables hooks)
+	// kind is set once at creation (before the session is published in the
+	// manager's map) and never mutated afterwards, so reads don't need s.mu.
+	// Zero value "" is treated as KindWorktree everywhere via Kind().
+	kind           SessionKind
 	taskSummary    string // short summary of the session's task, set once by the summarizer goroutine
 	hasTaskSummary bool   // true once SetTaskSummary has been called
 	// Async-task state. Each asyncJob tracks one in-flight goroutine and is
@@ -450,11 +480,28 @@ func (s *Session) KillAll() {
 // branch. Idempotent: a second call is a no-op and returns the same error
 // (if any) the first call returned — both Shutdown's teardown loop and
 // closeSession from a natural agent exit can race to clean the same session.
+//
+// SAFETY: for KindCheckout sessions this is a guaranteed no-op on the tree.
+// A checkout session's Worktree.Path IS the repo's main working tree; calling
+// git.RemoveWorktree on it would delete the user's checkout. Killing a
+// checkout session kills agents only.
 func (s *Session) Cleanup(repoPath string) error {
 	s.cleanupOnce.Do(func() {
+		if s.Kind() == KindCheckout {
+			return
+		}
 		s.cleanupErr = git.RemoveWorktree(repoPath, s.Worktree, s.ownsBranch)
 	})
 	return s.cleanupErr
+}
+
+// Kind returns the session's kind. The zero value (legacy sessions and
+// sessions constructed by test helpers) reads as KindWorktree.
+func (s *Session) Kind() SessionKind {
+	if s.kind == KindCheckout {
+		return KindCheckout
+	}
+	return KindWorktree
 }
 
 // SetDisplayName sets a human-readable display name for the session.
