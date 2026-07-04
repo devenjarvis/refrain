@@ -99,7 +99,6 @@ func TestReviewPanel_NoTabKeys(t *testing.T) {
 // (Checks tab no longer exists; j/k always move the task cursor.)
 func TestReviewPanelModel_ChecksTab_JKMovesCursor(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 
 	app := reviewTestApp()
 	app.reviewDiffCache[cacheKey("", sess.ID)] = &reviewDiffEntry{
@@ -131,7 +130,6 @@ func TestReviewPanelModel_ChecksTab_JKMovesCursor(t *testing.T) {
 // regardless of which section is active (there are no tabs anymore).
 func TestReviewPanelModel_ChecksTab_RKeyTriggersRerun(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 
 	app := reviewTestApp()
 	app.resolvedCache["/repo"] = config.ResolvedSettings{
@@ -257,10 +255,9 @@ func TestReviewPanelModel_NoDiffViewport(t *testing.T) {
 }
 
 // TestReviewPanelModel_EscCloses verifies that pressing esc emits a
-// panelCloseMsg and otherwise leaves session lifecycle untouched.
+// panelCloseMsg and otherwise leaves the session untouched.
 func TestReviewPanelModel_EscCloses(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	app := reviewTestApp()
 	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
@@ -269,16 +266,15 @@ func TestReviewPanelModel_EscCloses(t *testing.T) {
 	if !cmdClosesPanel(t, cmd) {
 		t.Fatal("expected panelCloseMsg on esc")
 	}
-	if sess.LifecyclePhase() != agent.LifecycleInReview {
-		t.Errorf("esc must preserve InReview phase, got %v", sess.LifecyclePhase())
+	if !sess.DoneAt().IsZero() {
+		t.Error("esc must not mark the session done")
 	}
 }
 
-// TestReviewPanelModel_DKeyDefers verifies that 'd' resets the session to
-// ReadyForReview and closes the panel.
+// TestReviewPanelModel_DKeyDefers verifies that 'd' (defer) just closes the
+// panel — nothing is recorded and the session stays untouched in the list.
 func TestReviewPanelModel_DKeyDefers(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	app := reviewTestApp()
 	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
@@ -287,8 +283,8 @@ func TestReviewPanelModel_DKeyDefers(t *testing.T) {
 	if !cmdClosesPanel(t, cmd) {
 		t.Fatal("expected panelCloseMsg on d")
 	}
-	if sess.LifecyclePhase() != agent.LifecycleReadyForReview {
-		t.Errorf("d must transition to ReadyForReview, got %v", sess.LifecyclePhase())
+	if !sess.DoneAt().IsZero() {
+		t.Error("d must not mark the session done")
 	}
 }
 
@@ -298,7 +294,6 @@ func TestReviewPanelModel_DKeyDefers(t *testing.T) {
 // whether the open succeeds.
 func TestReviewPanelModel_TKeyClosesEvenOnFailure(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	app := reviewTestApp()
 	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
@@ -317,11 +312,10 @@ func TestReviewPanelModel_TKeyClosesEvenOnFailure(t *testing.T) {
 	}
 }
 
-// TestReviewPanelModel_CKeyMarksComplete verifies 'c' transitions the
-// session to LifecycleComplete and triggers the kill-session command.
+// TestReviewPanelModel_CKeyMarksComplete verifies 'c' (approve) marks the
+// session done and triggers the kill-session command.
 func TestReviewPanelModel_CKeyMarksComplete(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	repo := "/repo"
 	app := reviewTestApp()
 	// Non-nil manager so the panel reaches the kill path; the fake records the
@@ -335,11 +329,11 @@ func TestReviewPanelModel_CKeyMarksComplete(t *testing.T) {
 	if !cmdClosesPanel(t, cmd) {
 		t.Fatal("expected panelCloseMsg on c")
 	}
-	if sess.LifecyclePhase() != agent.LifecycleComplete {
-		t.Errorf("c must transition to Complete, got %v", sess.LifecyclePhase())
+	if sess.DoneAt().IsZero() {
+		t.Error("c must mark the session done")
 	}
-	if cmd == nil {
-		t.Error("expected a cmd batch (close + kill); got nil")
+	if fake.killSessionCalls[sess.ID] != 1 {
+		t.Errorf("c must kill the session once, got %d calls", fake.killSessionCalls[sess.ID])
 	}
 }
 
@@ -347,7 +341,6 @@ func TestReviewPanelModel_CKeyMarksComplete(t *testing.T) {
 // and retreat the task cursor when the review cache has entries.
 func TestReviewPanelModel_TaskCursorMovesWithJK(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{
 			{Index: 1, Text: "task one"},
@@ -378,7 +371,6 @@ func TestReviewPanelModel_TaskCursorMovesWithJK(t *testing.T) {
 
 func TestReviewPanelModel_TaskCursorClampsAtTopAndBottom(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1}, {Index: 2}},
 	}
@@ -402,7 +394,6 @@ func TestReviewPanelModel_TaskCursorClampsAtTopAndBottom(t *testing.T) {
 
 func TestReviewPanelModel_FKey_TogglesUserFlag(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 7, Text: "task one"}},
 	}
@@ -434,7 +425,6 @@ func TestReviewPanelModel_FKey_NoCache_NoOp(t *testing.T) {
 
 func TestReviewPanelModel_BKey_NoFlags_SetsError(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1}},
 	}
@@ -452,7 +442,6 @@ func TestReviewPanelModel_BKey_NoFlags_SetsError(t *testing.T) {
 
 func TestReviewPanelModel_BKey_WithFlag_EmitsReworkMsg(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 1, Text: "task one"}},
 		verdicts: map[int]*taskVerdictRecord{
@@ -485,7 +474,6 @@ func TestReviewPanelModel_BKey_WithFlag_EmitsReworkMsg(t *testing.T) {
 // with a non-empty rawDiff returns a cmd that produces reviewOpenTaskDiffMsg.
 func TestReviewPanelModel_EnterEmitsDiffMsg(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	rawDiff := "diff --git a/a.go b/a.go\nindex 1234567..abcdefg 100644\n--- a/a.go\n+++ b/a.go\n@@ -1,3 +1,4 @@\n package main\n \n+// marker\n func A() {}\n"
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{{Index: 3, Text: "Add tab-switching keys"}},
@@ -524,7 +512,6 @@ func TestReviewPanelModel_EnterEmitsDiffMsg(t *testing.T) {
 // no rawDiff produces no command.
 func TestReviewPanelModel_EnterNoopOnEmptyDiff(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	entry := &reviewDiffEntry{
 		tasks:    []agent.PlanTask{{Index: 1, Text: "task one"}},
 		groups:   []taskReviewGroup{{taskIndex: 1, rawDiff: ""}},
@@ -543,7 +530,6 @@ func TestReviewPanelModel_EnterNoopOnEmptyDiff(t *testing.T) {
 // TestReviewPanelModel_SpaceIsNoOp verifies that space still produces no cmd.
 func TestReviewPanelModel_SpaceIsNoOp(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	app := reviewTestApp()
 	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
@@ -560,7 +546,6 @@ func TestReviewPanelModel_SpaceIsNoOp(t *testing.T) {
 // No tab bar → paneTop=3; listHeaderLines=2 → first task row at Y=5.
 func TestReviewPanelModel_ClickSetsTaskCursor(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{
 			{Index: 1, Text: "task one"},
@@ -673,7 +658,6 @@ func TestReviewPanelModel_SpecOverlay_OtherKeys_AreSwallowed(t *testing.T) {
 	if err := writePlanForTest(planDir, sess, "# Goal\n"); err != nil {
 		t.Fatalf("write plan: %v", err)
 	}
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	app := reviewTestApp()
 	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 	_, _ = panel.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
@@ -684,9 +668,6 @@ func TestReviewPanelModel_SpecOverlay_OtherKeys_AreSwallowed(t *testing.T) {
 	if cmdClosesPanel(t, cmd) {
 		t.Error("'d' while spec overlay open closed the panel — should be swallowed")
 	}
-	if sess.LifecyclePhase() != agent.LifecycleInReview {
-		t.Errorf("'d' while spec overlay open changed phase to %v", sess.LifecyclePhase())
-	}
 	if !panel.specOverlay {
 		t.Error("'d' while spec overlay open changed overlay state")
 	}
@@ -694,7 +675,6 @@ func TestReviewPanelModel_SpecOverlay_OtherKeys_AreSwallowed(t *testing.T) {
 
 func TestReviewPanelModel_PKey_WithCachedPR_OpensURL(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	app := reviewTestApp()
 	app.prCache[cacheKey("", sess.ID)] = &prCacheEntry{pr: &github.PRState{URL: "https://example.com/pr/1"}}
 
@@ -709,9 +689,9 @@ func TestReviewPanelModel_PKey_WithCachedPR_OpensURL(t *testing.T) {
 	if openedURL != "https://example.com/pr/1" {
 		t.Errorf("openURL got %q, want %q", openedURL, "https://example.com/pr/1")
 	}
-	// Ship is an action, not a transition — the phase must be untouched.
-	if sess.LifecyclePhase() != agent.LifecycleInReview {
-		t.Errorf("p with existing PR must not change the phase, got %v", sess.LifecyclePhase())
+	// Ship is an action, not a transition — the session must be untouched.
+	if !sess.DoneAt().IsZero() {
+		t.Error("p with existing PR must not mark the session done")
 	}
 	if _, closed := findMsg[panelCloseMsg](msgs); !closed {
 		t.Error("p with existing PR should close the panel")
@@ -744,15 +724,14 @@ func TestReviewPanelModel_EKey_NoIDECommand_SetsError(t *testing.T) {
 
 func TestReviewPanelModel_UnknownKey_NoOp(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	app := reviewTestApp()
 	panel := newReviewPanel(sess, "", 120, 40, app.buildReviewDeps())
 
 	before := struct {
 		cursor int
 		spec   bool
-		phase  agent.LifecyclePhase
-	}{panel.TaskCursor(), panel.specOverlay, sess.LifecyclePhase()}
+		done   bool
+	}{panel.TaskCursor(), panel.specOverlay, !sess.DoneAt().IsZero()}
 
 	for _, k := range []tea.KeyPressMsg{
 		{Code: 'z', Text: "z"},
@@ -768,8 +747,8 @@ func TestReviewPanelModel_UnknownKey_NoOp(t *testing.T) {
 	after := struct {
 		cursor int
 		spec   bool
-		phase  agent.LifecyclePhase
-	}{panel.TaskCursor(), panel.specOverlay, sess.LifecyclePhase()}
+		done   bool
+	}{panel.TaskCursor(), panel.specOverlay, !sess.DoneAt().IsZero()}
 
 	if before != after {
 		t.Errorf("unknown keys changed state: before=%+v after=%+v", before, after)
@@ -781,7 +760,6 @@ func TestReviewPanelModel_UnknownKey_NoOp(t *testing.T) {
 // repoPath, not a first-match repoPath — the multi-repo collision fix.
 func TestReviewPanel_PKey_UsesPinnedRepoPath_NotFirstMatch(t *testing.T) {
 	sess := agent.NewSessionForTest("session-1", "my-task")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	app := reviewTestApp()
 	app.ghClient = new(github.Client) // non-nil so the panel reaches the draft path
 	panel := newReviewPanel(sess, "/repoB", 120, 40, app.buildReviewDeps())
@@ -802,7 +780,6 @@ func TestReviewPanel_PKey_UsesPinnedRepoPath_NotFirstMatch(t *testing.T) {
 // manager, so a kill-result msg confirms the pinned lookup succeeded.
 func TestReviewPanel_CKey_UsesPinnedManager(t *testing.T) {
 	sess := agent.NewSessionForTest("session-1", "my-task")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	repo := "/repoB"
 	app := reviewTestApp()
 	fake := newFakeManager(repo, sess)
@@ -831,7 +808,6 @@ func writePlanForTest(planDir string, sess *agent.Session, content string) error
 // tab switch (there are no tabs anymore).
 func TestReviewPanel_RKeyRerunsChecksUnconditionally(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 
 	app := reviewTestApp()
 	app.resolvedCache["/repo"] = config.ResolvedSettings{

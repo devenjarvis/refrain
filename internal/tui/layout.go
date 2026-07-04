@@ -19,8 +19,6 @@ const (
 	separatorWidth = 1
 	// statusBarHeight is the height of the bottom status bar.
 	statusBarHeight = 1
-	// titleHeight is the height of a screen's top title row.
-	titleHeight = 1
 	// modalChrome is the total horizontal cost of a bordered, 1×2-padded modal
 	// box: 2 border columns + 2 padding columns.
 	modalChrome = 2*borderWidth + 2

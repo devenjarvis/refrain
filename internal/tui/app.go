@@ -34,12 +34,10 @@ type agentEventMsg struct {
 // isNewSession distinguishes "fresh session" call sites (CreateSession,
 // CreateSessionOnBranch, the plan-first skip path, and approvePlanAndSpawn's
 // first AddAgent) from "added an agent to an existing session" sites
-// (AddAgent via `c`, AddShell via `t`). The handler increments
-// sessionsCreatedCount only when isNewSession is true. We carry the bit on
-// the message rather than inferring it from sess.AgentCount() == 1, because
-// the plan-first approve path adds its first agent to a session that was
-// already created earlier — the heuristic would double-count if we
-// incremented on session creation as well.
+// (AddAgent via `c`, AddShell via `t`). We carry the bit on the message
+// rather than inferring it from sess.AgentCount() == 1, because the
+// plan-first approve path adds its first agent to a session that was
+// already created earlier.
 type createResultMsg struct {
 	sessionID       string
 	agentID         string
@@ -1114,7 +1112,6 @@ func (a *App) cleanStaleCaches() {
 		}
 	}
 }
-
 
 // plannerLogEntry is the JSON structure written on each planner question event.
 // PanelFocus is the human-readable name of the active panel at arrival time
