@@ -21,6 +21,7 @@ const (
 	GlyphFlagged  = "⚑" // user-flagged for rework
 	GlyphConcerns = "!" // verdict: concerns
 	GlyphNoDiff   = "⊘" // verdict: no diff found
+	GlyphManual   = "·" // AI verdict intentionally skipped — manual review
 
 	// ── Navigation / chrome ────────────────────────────────────────────────
 

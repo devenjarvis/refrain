@@ -142,6 +142,7 @@ Every single-rune marker the TUI emits is a token in
 | `GlyphFlagged` | `⚑` | flagged for rework | `verdictBadge` |
 | `GlyphConcerns` | `!` | verdict: concerns | `verdictBadge` |
 | `GlyphNoDiff` | `⊘` | verdict: no diff | `verdictBadge` |
+| `GlyphManual` | `·` | AI verdict skipped — manual review | `verdictBadge` |
 | `GlyphBranch` | `⎇` | git branch label | `renderBranchLabel` |
 | `GlyphStripe` | `▎` | card status stripe | `renderFocusSessionCard` |
 | `GlyphCursor` | `▍` | selected-row cursor | diff tree |

@@ -559,30 +559,63 @@ func TestReviewListPaneRowAt(t *testing.T) {
 	}
 }
 
-// TestRenderReviewPanel_NoPlanShowsOverview verifies the no-plan (overview) path.
-func TestRenderReviewPanel_NoPlanShowsOverview(t *testing.T) {
+// TestRenderReviewPanel_FileModeShowsPerFileCards verifies the file-mode path
+// (no plan, no commits — rollback design §4.6 mode 3): one card per changed
+// file under a CHANGED FILES header, with AI verdicts disabled.
+func TestRenderReviewPanel_FileModeShowsPerFileCards(t *testing.T) {
 	sess := agent.NewSessionForTest("sess-1", "fix-auth")
 	sess.SetOriginalPrompt("Fix the auth bug")
 	sess.MarkDone()
 
 	entry := &reviewDiffEntry{
+		mode: reviewModeFiles,
 		files: []git.FileStat{
 			{Path: "auth.go", Status: "M", Insertions: 10, Deletions: 2},
 			{Path: "auth_test.go", Status: "M", Insertions: 20, Deletions: 0},
 		},
 		aggregate: &git.DiffStats{Files: 2, Insertions: 30, Deletions: 2},
+		groups: []taskReviewGroup{
+			{taskIndex: 1, files: []git.FileStat{{Path: "auth.go", Status: "M", Insertions: 10, Deletions: 2}}, stats: &git.DiffStats{Files: 1, Insertions: 10, Deletions: 2}},
+			{taskIndex: 2, files: []git.FileStat{{Path: "auth_test.go", Status: "M", Insertions: 20, Deletions: 0}}, stats: &git.DiffStats{Files: 1, Insertions: 20, Deletions: 0}},
+		},
+		verdicts: map[int]*taskVerdictRecord{
+			1: {state: verdictSkipped},
+			2: {state: verdictSkipped},
+		},
 	}
 
 	output := renderReviewPanel(sess, entry, 120, 30, 0, false, nil, time.Now())
 
-	if !strings.Contains(output, "Overview") {
-		t.Error("must show 'Overview' card in task ledger for no-plan session")
+	if !strings.Contains(output, "CHANGED FILES") {
+		t.Error("file mode must show CHANGED FILES header")
 	}
-	if strings.Contains(output, "REVIEW SHAPE") {
-		t.Error("must not show legacy 'REVIEW SHAPE' string")
+	if strings.Contains(output, "Overview") {
+		t.Error("legacy synthetic 'Overview' card must not render")
 	}
-	if strings.Contains(output, "FOCUS HERE FIRST") {
-		t.Error("must not show legacy 'FOCUS HERE FIRST' string")
+	if !strings.Contains(output, "auth.go") || !strings.Contains(output, "auth_test.go") {
+		t.Error("must show one card per changed file")
+	}
+	if !strings.Contains(output, "manual review") {
+		t.Error("file-mode cards must show the 'manual review' badge (AI verdicts disabled)")
+	}
+}
+
+// TestRenderReviewPanel_NoChangesEmptyState verifies that an entry with no
+// cards at all (clean tree, no commits, no plan) renders the empty-state hint.
+func TestRenderReviewPanel_NoChangesEmptyState(t *testing.T) {
+	sess := agent.NewSessionForTest("sess-1", "fix-auth")
+	sess.SetOriginalPrompt("Fix the auth bug")
+	sess.MarkDone()
+
+	entry := &reviewDiffEntry{
+		mode:      reviewModeFiles,
+		aggregate: &git.DiffStats{},
+	}
+
+	output := renderReviewPanel(sess, entry, 120, 30, 0, false, nil, time.Now())
+
+	if !strings.Contains(output, "no changes to review yet") {
+		t.Error("empty entry must render the no-changes hint")
 	}
 }
 
@@ -891,9 +924,31 @@ func TestReviewTaskCount(t *testing.T) {
 			3,
 		},
 		{
-			"no tasks no groups with aggregate (no-plan session)",
+			"aggregate only, no cards (clean no-plan session)",
 			&reviewDiffEntry{
+				mode:      reviewModeFiles,
 				aggregate: &git.DiffStats{Files: 2, Insertions: 30, Deletions: 2},
+			},
+			0,
+		},
+		{
+			"commit mode counts one row per group",
+			&reviewDiffEntry{
+				mode: reviewModeCommits,
+				groups: []taskReviewGroup{
+					{taskIndex: 1, commits: []git.Commit{{Hash: "a1"}}},
+					{taskIndex: 2, commits: []git.Commit{{Hash: "b2"}}},
+				},
+			},
+			2,
+		},
+		{
+			"file mode counts one row per group",
+			&reviewDiffEntry{
+				mode: reviewModeFiles,
+				groups: []taskReviewGroup{
+					{taskIndex: 1, files: []git.FileStat{{Path: "a.go"}}},
+				},
 			},
 			1,
 		},
@@ -1434,21 +1489,21 @@ func (c *capturingReviewer) Review(_ context.Context, req agent.ReviewRequest) (
 }
 
 // TestReviewTaskCmd_PassesTaskDetail verifies that reviewTaskCmd populates
-// TaskDetail from PlanTask.Body and ChangedFiles from the group's file list.
+// TaskDetail from the card's detail (PlanTask.Body in plan mode) and
+// ChangedFiles from the group's file list.
 func TestReviewTaskCmd_PassesTaskDetail(t *testing.T) {
 	sess := agent.NewSessionForTest("sess-1", "add-widget")
 
-	app := NewApp()
 	const repoPath = "/test/repo"
 	const taskIndex = 2
 
-	// Pre-populate the cache with tasks that have Body set.
-	app.reviewDiffCache[cacheKey(repoPath, sess.ID)] = &reviewDiffEntry{
+	entry := &reviewDiffEntry{
 		tasks: []agent.PlanTask{
 			{Index: 1, Text: "First task", Body: "  - Files: internal/other.go"},
 			{Index: 2, Text: "Add widget", Body: "  - Files: internal/widget.go\n  - Implement: add NewWidget"},
 		},
 	}
+	card := entry.ledgerCards()[1]
 
 	group := taskReviewGroup{
 		taskIndex: taskIndex,
@@ -1460,7 +1515,7 @@ func TestReviewTaskCmd_PassesTaskDetail(t *testing.T) {
 	}
 
 	reviewer := &capturingReviewer{}
-	cmd := app.reviewTaskCmd(sess, repoPath, group, reviewer)
+	cmd := reviewTaskCmd(sess, repoPath, group, card, reviewer)
 	cmd() // execute synchronously; reviewer.Review is called inline
 
 	req := reviewer.captured

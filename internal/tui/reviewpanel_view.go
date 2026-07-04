@@ -53,6 +53,8 @@ func verdictBadge(rec *taskVerdictRecord, now time.Time) (icon, label string, st
 		return theme.GlyphError, "error", StyleError
 	case verdictNoDiff:
 		return theme.GlyphNoDiff, "no diff found", StyleSubtle
+	case verdictSkipped:
+		return theme.GlyphManual, "manual review", StyleSubtle
 	}
 	return theme.GlyphPending, "Pending", StyleSubtle
 }
@@ -420,10 +422,22 @@ func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLe
 	return cardIdx
 }
 
-// renderTaskListPane renders the task-card ledger.
-// Each card occupies 4 lines:
+// ledgerHeaderTitle returns the ledger pane heading for a review mode.
+func ledgerHeaderTitle(mode reviewLedgerMode) string {
+	switch mode {
+	case reviewModeCommits:
+		return "COMMITS"
+	case reviewModeFiles:
+		return "CHANGED FILES"
+	default:
+		return "PLAN TASKS"
+	}
+}
+
+// renderTaskListPane renders the card ledger for the entry's mode (plan tasks,
+// commits, or changed files — rollback design §4.6). Each card occupies 4 lines:
 //
-//	line 1: <icon> [N] <text>   +X -Y
+//	line 1: <icon> <label> <title>   +X -Y
 //	line 2:   <verdict_label> — <rationale>  (or  ⋯ Pending)
 //	line 3:   <top file> +X -Y  (or blank)
 //	line 4:   (blank separator)
@@ -432,36 +446,16 @@ func reviewListPaneRowAt(entry *reviewDiffEntry, mouseX, mouseY, paneTop, paneLe
 func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now time.Time) []string {
 	const headerLines = 2
 	const cardH = 4
-	planTasksStyle := StyleHeading.Foreground(ColorSecondary)
+	headerTitle := ledgerHeaderTitle(entry.mode)
+	headerStyle := StyleHeading.Foreground(ColorSecondary)
 	header := []string{
-		planTasksStyle.Render("PLAN TASKS"),
-		StyleSubtle.Render(strings.Repeat("─", ansi.StringWidth("PLAN TASKS"))),
+		headerStyle.Render(headerTitle),
+		StyleSubtle.Render(strings.Repeat("─", ansi.StringWidth(headerTitle))),
 	}
 
-	type row struct {
-		taskIndex int
-		taskText  string
-		group     *taskReviewGroup
-	}
-
-	groupByIdx := make(map[int]*taskReviewGroup, len(entry.groups))
-	for i := range entry.groups {
-		g := &entry.groups[i]
-		groupByIdx[g.taskIndex] = g
-	}
-
-	// Build rows: no-plan synthetic row, plan tasks, then "Other changes".
-	var rows []row
-	if len(entry.tasks) == 0 && len(entry.groups) == 0 {
-		rows = append(rows, row{taskIndex: -1, taskText: "Overview"})
-	} else {
-		for _, t := range entry.tasks {
-			g := groupByIdx[t.Index]
-			rows = append(rows, row{taskIndex: t.Index, taskText: t.Text, group: g})
-		}
-		if other, ok := groupByIdx[0]; ok {
-			rows = append(rows, row{taskIndex: 0, taskText: "Other changes", group: other})
-		}
+	rows := entry.ledgerCards()
+	if len(rows) == 0 {
+		return append(header, StyleSubtle.Render("(no changes to review yet)"))
 	}
 
 	// How many cards fit in the available body height.
@@ -492,53 +486,42 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 	lines = append(lines, header...)
 
 	for i := offset; i < end; i++ {
-		r := rows[i]
+		card := rows[i]
+		group := entry.groupByCardIndex(card.index)
 		selected := i == cursor
 
 		// Verdict record and icon.
 		var rec *taskVerdictRecord
 		if entry.verdicts != nil {
-			rec = entry.verdicts[r.taskIndex]
+			rec = entry.verdicts[card.index]
 		}
 		icon, verdictLabel, iconStyle := verdictBadge(rec, now)
-		if r.taskIndex == -1 {
-			icon = "·"
-			iconStyle = StyleSubtle
-		}
 		iconStr := iconStyle.Render(icon)
-
-		// Index label.
-		label := fmt.Sprintf("[%d]", r.taskIndex)
-		switch r.taskIndex {
-		case 0:
-			label = "[?]"
-		case -1:
-			label = "   "
-		}
+		label := card.label
 
 		// Stat string for line 1 (aggregate +X -Y).
 		statStr := ""
 		if rec != nil && rec.state == verdictNoDiff {
 			_, lbl, sty := verdictBadge(rec, now)
 			statStr = sty.Render(lbl)
-		} else if r.group != nil && r.group.stats != nil {
-			st := r.group.stats
+		} else if group != nil && group.stats != nil {
+			st := group.stats
 			if st.Insertions > 0 || st.Deletions > 0 {
 				statStr = subtleGreen.Render(fmt.Sprintf("+%d", st.Insertions)) +
 					" " + subtleRed.Render(fmt.Sprintf("-%d", st.Deletions))
 			}
 		}
 
-		// Line 1: icon + label + text + stat, right-aligned.
+		// Line 1: icon + label + title + stat, right-aligned.
 		iconW := ansi.StringWidth(iconStr)
-		labelW := len(label)
+		labelW := ansi.StringWidth(label)
 		statW := ansi.StringWidth(statStr)
 		overhead := 4 + iconW + 1 + labelW + 1 + 2 + statW
 		maxTextW := width - overhead
 		if maxTextW < 4 {
 			maxTextW = 4
 		}
-		textStr := truncateVisible(r.taskText, maxTextW)
+		textStr := truncateVisible(card.title, maxTextW)
 		rowText := iconStr + " " + StyleSubtle.Render(label) + " " + textStr
 		if statStr != "" {
 			usedW := iconW + 1 + labelW + 1 + ansi.StringWidth(textStr)
@@ -568,14 +551,15 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 			line2 = "  " + vStyle.Render(verdictLabel) + " — " + rationale
 		} else {
 			_, lbl, lstyle := verdictBadge(rec, now)
-			line2 = "  " + lstyle.Render("⋯ "+lbl)
+			line2 = "  " + lstyle.Render(theme.GlyphPending+" "+lbl)
 		}
 
-		// Line 3: top file +X -Y, or commit count, or blank.
+		// Line 3: top file +X -Y, or commit count, or blank. File-mode cards
+		// skip it — the title already is the file path.
 		var line3 string
-		if r.group != nil && len(r.group.files) > 0 {
-			sorted := make([]git.FileStat, len(r.group.files))
-			copy(sorted, r.group.files)
+		if entry.mode != reviewModeFiles && group != nil && len(group.files) > 0 {
+			sorted := make([]git.FileStat, len(group.files))
+			copy(sorted, group.files)
 			sortFileStatsByChurn(sorted)
 			top := sorted[0]
 			fileStat := subtleGreen.Render(fmt.Sprintf("+%d", top.Insertions)) +
@@ -591,8 +575,8 @@ func renderTaskListPane(entry *reviewDiffEntry, width, height, cursor int, now t
 				suffix = StyleSubtle.Render(fmt.Sprintf(" … %d more", len(sorted)-1))
 			}
 			line3 = "  " + StyleSubtle.Render(nameTrunc) + " " + fileStat + suffix
-		} else if r.group != nil && len(r.group.commits) > 0 {
-			line3 = "  " + StyleSubtle.Render(fmt.Sprintf("%d commit(s)", len(r.group.commits)))
+		} else if entry.mode != reviewModeFiles && group != nil && len(group.commits) > 0 {
+			line3 = "  " + StyleSubtle.Render(fmt.Sprintf("%d commit(s)", len(group.commits)))
 		}
 
 		lines = append(lines, line1, line2, line3, "")
