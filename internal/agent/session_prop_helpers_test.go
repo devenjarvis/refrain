@@ -12,6 +12,22 @@ type agentSpec struct {
 	Status  Status
 }
 
+// genStatus draws uniformly from all 6 agent statuses.
+func genStatus(t *rapid.T) Status {
+	v := rapid.IntRange(0, 5).Draw(t, "status")
+	return Status(v)
+}
+
+// genReviewableStatus draws from the 3 statuses that are considered reviewable.
+func genReviewableStatus(t *rapid.T) Status {
+	return rapid.SampledFrom([]Status{StatusIdle, StatusDone, StatusError}).Draw(t, "reviewable_status")
+}
+
+// genNonReviewableStatus draws from the 3 statuses that block reviewability.
+func genNonReviewableStatus(t *rapid.T) Status {
+	return rapid.SampledFrom([]Status{StatusStarting, StatusActive, StatusWaiting}).Draw(t, "non_reviewable_status")
+}
+
 // genAgentSpecs generates a slice of 0..8 agent specifications with random
 // shell/status combinations.
 func genAgentSpecs(t *rapid.T) []agentSpec {

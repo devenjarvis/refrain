@@ -173,7 +173,6 @@ type App struct {
 	pendingChecks []config.ValidationCheck
 
 	view         ViewMode
-	dashboard    dashboardModel
 	sessionList  sessionListModel // root screen: repo-grouped flat session list
 	launch       launchModel      // fullscreen agent terminal (focusLaunch)
 	diff         diffModel
@@ -188,18 +187,14 @@ type App struct {
 	lastKnownStatus map[string]agent.Status // keyed by agentCacheKey(repoPath, agentID)
 	audioPlayer     *audio.Player
 
-	// wellness owns the focus-block timer, break overlay, and counters
-	// flushed to the wellness log on quit. See wellness.go.
-	wellness wellnessState
-
-	cursor FocusedCursor // legacy pipeline cursor; unused by the session list (deleted in Phase 5)
 	// modals owns panel focus and the lifetime of every overlay model. The
 	// invariant "the model for panelFocus X is non-nil iff modals.Current() == X"
 	// is enforced by the Modals type; see internal/tui/modals.go. App callers
 	// must reach overlay models via modals.Review(), modals.PRPanel(), etc.,
 	// and must transition via app.openReview / openPRPanel / openPlanEditor /
-	// openConfig / openLaunch / closeModal helpers. The dashboard reads this
-	// state live each frame via dashboardProps(); there is no mirror to sync.
+	// openConfig / openLaunch / closeModal helpers. The session list reads
+	// this state live each frame via sessionListProps(); there is no mirror
+	// to sync.
 	modals          Modals
 	reviewDiffCache map[string]*reviewDiffEntry                // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
 	validationRuns  map[string]*validationRunState             // keyed by cacheKey(repoPath, sessionID); lifetime exceeds panel
@@ -235,7 +230,7 @@ type App struct {
 	prDraftSessionID string // ID of the session whose PR draft is in flight; "" when idle
 	prDraftRepoPath  string // repo path of the session whose PR draft is in flight; "" when idle
 
-	// keys holds the dashboard action→key bindings. Stored on App so tests
+	// keys holds the session-list action→key bindings. Stored on App so tests
 	// and future rebinding flows can swap a non-default map.
 	keys KeyMap
 
@@ -256,8 +251,8 @@ type App struct {
 // The modal helpers below are thin forwards to a.modals.*. They survive as
 // wrappers (rather than callers reaching a.modals directly) so the App-level
 // vocabulary stays stable and a future cross-cut (logging, guards) has one
-// seam. The dashboard reads modal state live each frame via dashboardProps(),
-// so there is no mirror to keep in sync here.
+// seam. The session list reads modal state live each frame via
+// sessionListProps(), so there is no mirror to keep in sync here.
 
 // openReview opens the review panel.
 func (a *App) openReview(rp *reviewPanelModel) {
@@ -328,11 +323,8 @@ func NewApp() App {
 	return App{
 		view:             ViewDashboard,
 		debugDumpPath:    os.Getenv("REFRAIN_E2E_DEBUG_DUMP"),
-		dashboard:        newDashboardModel(),
 		sessionList:      newSessionListModel(),
-		cursor:           NewFocusedCursor(),
 		keys:             DefaultKeyMap(),
-		wellness:         newWellnessState(),
 		managerFactory:   DefaultManagerFactory,
 		managers:         make(map[string]SessionManager),
 		repoSettings:     make(map[string]*config.RepoSettings),
@@ -1123,51 +1115,6 @@ func (a *App) cleanStaleCaches() {
 	}
 }
 
-// wellnessLogEntry is the JSON structure written on session end.
-type wellnessLogEntry struct {
-	Date            string `json:"date"`
-	DurationMin     int    `json:"duration_min"`
-	AgentsCreated   int    `json:"agents_created"`
-	SessionsCreated int    `json:"sessions_created"`
-	BlocksCompleted int    `json:"blocks_completed"`
-}
-
-// writeWellnessLog appends a single JSON line to <repoPath>/.refrain/logs/wellness.log.
-// Best-effort: any error is silently dropped so it never blocks shutdown.
-func (a *App) writeWellnessLog() {
-	repoPath := a.activeRepo
-	if repoPath == "" && a.cfg != nil && len(a.cfg.Repos) > 0 {
-		repoPath = a.cfg.Repos[0].Path
-	}
-	if repoPath == "" {
-		return
-	}
-
-	logPath := filepath.Join(repoPath, ".refrain", "logs", "wellness.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return
-	}
-
-	elapsed := time.Since(a.wellness.appStart)
-	entry := wellnessLogEntry{
-		Date:            time.Now().UTC().Format(time.RFC3339),
-		DurationMin:     int(elapsed.Minutes()),
-		AgentsCreated:   a.wellness.agentsCreatedCount,
-		SessionsCreated: a.wellness.sessionsCreatedCount,
-		BlocksCompleted: a.wellness.focusBlockCount,
-	}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return
-	}
-
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = f.WriteString(string(data) + "\n")
-}
 
 // plannerLogEntry is the JSON structure written on each planner question event.
 // PanelFocus is the human-readable name of the active panel at arrival time

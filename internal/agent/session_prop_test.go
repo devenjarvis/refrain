@@ -2,7 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/devenjarvis/refrain/internal/git"
@@ -171,18 +170,6 @@ func TestSession_IsReviewableTrueWhenAllSettled(t *testing.T) {
 	})
 }
 
-// SetLifecyclePhase/LifecyclePhase round-trips for any phase including Drafting.
-func TestSession_SetLifecycleRoundTrip(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		p := genLifecyclePhase(t)
-		s := newSession("id", "name", &git.WorktreeInfo{})
-		s.SetLifecyclePhase(p)
-		if got := s.LifecyclePhase(); got != p {
-			t.Fatalf("LifecyclePhase() = %v after Set(%v)", got, p)
-		}
-	})
-}
-
 // MarkDone is idempotent: the timestamp never changes after the first call.
 func TestSession_MarkDoneIdempotent(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
@@ -229,40 +216,6 @@ func TestSession_OriginalPromptSetOnce(t *testing.T) {
 		}
 		if got != want {
 			t.Fatalf("OriginalPrompt() = %q, want %q (first non-empty from %v)", got, want, prompts)
-		}
-	})
-}
-
-// Concurrent SetLifecyclePhase does not race; final value is one of the written phases.
-func TestSession_ConcurrentSetLifecyclePhase(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		n := rapid.IntRange(2, 8).Draw(t, "goroutine_count")
-		phases := make([]LifecyclePhase, n)
-		for i := range phases {
-			phases[i] = genLifecyclePhase(t)
-		}
-
-		s := newSession("id", "name", &git.WorktreeInfo{})
-		var wg sync.WaitGroup
-		wg.Add(n)
-		for _, p := range phases {
-			go func() {
-				defer wg.Done()
-				s.SetLifecyclePhase(p)
-			}()
-		}
-		wg.Wait()
-
-		got := s.LifecyclePhase()
-		found := false
-		for _, p := range phases {
-			if got == p {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("LifecyclePhase() = %v, not among written phases %v", got, phases)
 		}
 	})
 }

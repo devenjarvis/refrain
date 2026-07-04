@@ -113,36 +113,6 @@ func TestSessionRepoProp_PlanPathsUnderWorktree(t *testing.T) {
 	})
 }
 
-// Walking through any sequence of lifecycle phase transitions never changes
-// the session's worktree path.
-func TestSessionRepoProp_LifecycleTransitionsPreserveWorktreePath(t *testing.T) {
-	setRapidChecks(t, 20)
-	repo := setupTestRepoForProp()
-	t.Cleanup(func() { _ = os.RemoveAll(repo) })
-
-	rapid.Check(t, func(t *rapid.T) {
-		mgr := NewManager(repo, defaultTestSettings())
-		defer mgr.Shutdown()
-
-		sess := createTestSessionPlanOnly(t, mgr)
-		originalPath := sess.Worktree.Path
-		originalBranch := sess.Worktree.BaseBranch
-
-		phases := genForwardPhaseSequence(t)
-		for _, p := range phases {
-			sess.SetLifecyclePhase(p)
-			if sess.Worktree.Path != originalPath {
-				t.Fatalf("Worktree.Path changed from %q to %q after phase %v",
-					originalPath, sess.Worktree.Path, p)
-			}
-			if sess.Worktree.BaseBranch != originalBranch {
-				t.Fatalf("Worktree.BaseBranch changed after phase %v", p)
-			}
-			assertWorktreeUnderRepo(t, repo, sess)
-		}
-	})
-}
-
 // DraftRequest.Cwd always matches the session's worktree path.
 func TestSessionRepoProp_DraftCwdMatchesWorktreePath(t *testing.T) {
 	repo := setupTestRepo(t)

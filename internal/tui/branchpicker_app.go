@@ -44,10 +44,6 @@ func (a App) updateBranchPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				return createResultMsg{err: err}
 			}
-			// Branch-picker sessions spawn an agent immediately on the
-			// chosen branch; they belong in BUILDING. See the legacy n
-			// path for the same rationale.
-			sess.SetLifecyclePhase(agent.LifecycleInProgress)
 			return createResultMsg{sessionID: sess.ID, agentID: ag.ID, isNewSession: true}
 		}
 

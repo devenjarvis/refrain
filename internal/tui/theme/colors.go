@@ -82,30 +82,6 @@ var (
 	// blocks). Kept distinct from status colors so waiting reads unambiguously.
 	ColorWaiting = initColor("#D946EF")
 
-	// ── Pipeline-stage accents (lifecycle column) ──────────────────────────
-	// These encode WHICH stage a session is in and are intentionally kept
-	// separate from the status roles above: a SHIPPING section can contain a
-	// success badge, so the two axes must stay visually distinct. They are
-	// desaturated pastels versus the punchy status hues.
-
-	// ColorBuilding identifies the BUILDING stage.
-	ColorBuilding = initColor("#7ec8e3")
-	// ColorReviewing identifies the REVIEWING stage. Note it is a near-neighbor
-	// of ColorPrimaryLight (both light purple) but semantically distinct; do not
-	// "fix" one to match the other.
-	ColorReviewing = initColor("#9b7fdb")
-	// ColorShipping identifies the SHIPPING stage.
-	ColorShipping = initColor("#5ab58a")
-
-	// ── Wellness break overlay ─────────────────────────────────────────────
-
-	// ColorBreakTitle is the break-overlay title; also the first BreatheColors
-	// hue.
-	ColorBreakTitle = initColor("#38BDF8")
-	// ColorBreakAccent is the break-overlay resume cue; also the third
-	// BreatheColors hue.
-	ColorBreakAccent = initColor("#34D399")
-
 	// ── Diff backgrounds ───────────────────────────────────────────────────
 	// Diff add/del FOREGROUNDS reuse ColorSuccess/ColorError. The four
 	// backgrounds stay distinct: normal vs. word-diff emphasis is load-bearing.

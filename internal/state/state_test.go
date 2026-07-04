@@ -204,7 +204,7 @@ func TestSaveCreatesBatonDir(t *testing.T) {
 	}
 }
 
-func TestSessionState_LifecyclePersistence(t *testing.T) {
+func TestSessionState_PromptAndDoneAtPersistence(t *testing.T) {
 	dir := t.TempDir()
 
 	doneAt := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
@@ -216,7 +216,6 @@ func TestSessionState_LifecyclePersistence(t *testing.T) {
 				Name:           "test",
 				WorktreePath:   "/tmp/wt",
 				Branch:         "main",
-				LifecyclePhase: "ready_for_review",
 				OriginalPrompt: "fix the auth bug",
 				DoneAt:         &doneAt,
 			},
@@ -236,14 +235,36 @@ func TestSessionState_LifecyclePersistence(t *testing.T) {
 		t.Fatalf("expected 1 session, got %d", len(loaded.Sessions))
 	}
 	s := loaded.Sessions[0]
-	if s.LifecyclePhase != "ready_for_review" {
-		t.Errorf("LifecyclePhase = %q, want %q", s.LifecyclePhase, "ready_for_review")
-	}
 	if s.OriginalPrompt != "fix the auth bug" {
 		t.Errorf("OriginalPrompt = %q, want %q", s.OriginalPrompt, "fix the auth bug")
 	}
 	if s.DoneAt == nil || !s.DoneAt.Equal(time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)) {
 		t.Errorf("DoneAt = %v, want 2026-05-03T12:00:00Z", s.DoneAt)
+	}
+}
+
+func TestSessionState_LegacyLifecycleKeyIgnored(t *testing.T) {
+	// State files written before the lifecycle rollback carry a
+	// "lifecyclePhase" key. encoding/json must silently ignore it — same
+	// mechanics as the focus_mode_enabled precedent (rollback design §6).
+	dir := t.TempDir()
+	raw := `{"version":1,"savedAt":"2026-05-03T00:00:00Z","sessions":[{"id":"s1","name":"test","worktreePath":"/tmp","branch":"main","ownsBranch":true,"lifecyclePhase":"shipping","agents":[]}]}`
+	refrainDir := filepath.Join(dir, ".refrain")
+	if err := os.MkdirAll(refrainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refrainDir, "state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(loaded.Sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(loaded.Sessions))
+	}
+	if loaded.Sessions[0].ID != "s1" {
+		t.Errorf("ID = %q, want %q", loaded.Sessions[0].ID, "s1")
 	}
 }
 
@@ -332,7 +353,7 @@ func TestSaveDirCreateFailure(t *testing.T) {
 }
 
 func TestSessionState_BackwardsCompatibility(t *testing.T) {
-	// A state file without lifecycle fields should load with empty defaults.
+	// A minimal state file should load with empty defaults for newer fields.
 	dir := t.TempDir()
 	raw := `{"version":1,"savedAt":"2026-05-03T00:00:00Z","sessions":[{"id":"s1","name":"test","worktreePath":"/tmp","branch":"main","ownsBranch":true,"agents":[]}]}`
 	refrainDir := filepath.Join(dir, ".refrain")
@@ -348,10 +369,6 @@ func TestSessionState_BackwardsCompatibility(t *testing.T) {
 	}
 	if len(loaded.Sessions) != 1 {
 		t.Fatalf("expected 1 session, got %d", len(loaded.Sessions))
-	}
-	if loaded.Sessions[0].LifecyclePhase != "" {
-		// Empty string means InProgress when parsed — that's the zero value default.
-		t.Errorf("expected empty LifecyclePhase for backwards compat, got %q", loaded.Sessions[0].LifecyclePhase)
 	}
 	if loaded.Sessions[0].Kind != "" {
 		// Empty string means "worktree" when parsed — all legacy sessions

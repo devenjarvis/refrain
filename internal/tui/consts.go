@@ -63,7 +63,7 @@ const (
 // Dashboard UI cadence.
 const (
 	// DashboardTickInterval is the Bubble Tea tick cadence driving the
-	// dashboard ticker, PR poller, wellness timer, and error-overlay
+	// session-list render clock, PR poller, and error-overlay
 	// countdown. 100ms keeps the marquee and timer responsive without
 	// burning CPU on idle sessions.
 	DashboardTickInterval = 100 * time.Millisecond

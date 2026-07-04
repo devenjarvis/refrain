@@ -29,7 +29,7 @@ func renderPRPanel(sess *agent.Session, entry *prCacheEntry, width, height, curs
 	var lines []string
 
 	// ── Header ────────────────────────────────────────────────────────────────
-	headerLeft := StyleHeading.Foreground(ColorShipping).Render("PULL REQUEST") +
+	headerLeft := StyleHeading.Foreground(ColorSuccess).Render("PULL REQUEST") +
 		"  " + StyleSubtle.Render("›") +
 		"  " + lipgloss.NewStyle().Render(sess.GetDisplayName())
 	var headerRight string
@@ -375,12 +375,12 @@ func renderCheckRow(run github.CheckRun, width int) string {
 
 // prPanelHints returns the action hint line for the PR panel footer.
 func prPanelHints(mergeReady bool) string {
-	mKey := StyleAccent.Foreground(ColorShipping).Render("m")
+	mKey := StyleAccent.Foreground(ColorSuccess).Render("m")
 	mDesc := StyleSubtle.Render(" — merge")
 	if !mergeReady {
 		mKey = StyleSubtle.Render("m")
 	}
-	key := func(s string) string { return StyleAccent.Foreground(ColorBuilding).Render(s) }
+	key := func(s string) string { return StyleAccent.Foreground(ColorSecondary).Render(s) }
 	return "  " +
 		mKey + mDesc +
 		"   " + StyleSubtle.Render("M — force merge") +

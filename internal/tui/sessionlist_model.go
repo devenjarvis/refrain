@@ -67,8 +67,8 @@ const sessionCardLines = 2
 // buildSessionListLayout flattens the repo/session item list into the layout
 // the session list renders. Sessions keep the order App.listItems() produced
 // (repo-grouped, CreatedAt ascending) — attention never reorders the list.
-// Sessions whose lifecycle reached Complete are hidden, matching the previous
-// dashboard behavior of merged work leaving the screen.
+// No session is ever hidden: merged/done work shows a badge and stays until
+// the user removes it with X (rollback design §4.7).
 func buildSessionListLayout(items listItems) sessionListLayout {
 	var l sessionListLayout
 	line := 0
@@ -89,7 +89,7 @@ func buildSessionListLayout(items listItems) sessionListLayout {
 			})
 			line++
 		case listItemSession:
-			if item.session == nil || item.session.LifecyclePhase() == agent.LifecycleComplete {
+			if item.session == nil {
 				continue
 			}
 			if len(l.groups) == 0 {

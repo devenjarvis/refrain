@@ -585,8 +585,7 @@ func (m *Manager) PlannerQuestions() <-chan PlannerQuestion { return m.plannerQu
 // phase). The goroutine is tracked in m.watchers so Shutdown drains
 // cleanly; cancellation occurs when m.done closes (manager shutdown),
 // KillSession is called, or CancelDraft is called directly. Drafting
-// subprocesses are NOT counted against MaxConcurrentSessions — they are
-// transient text-generation calls, not long-lived agents.
+// subprocesses are transient text-generation calls, not long-lived agents.
 //
 // StartDraft also spawns a per-session planner.Server bound to a unix socket
 // under .refrain/ so the planner Sonnet subprocess can call ask_user back into
@@ -1771,20 +1770,13 @@ func (m *Manager) AgentCount() int {
 	return count
 }
 
-// ActiveSessionCount returns the number of sessions requiring human oversight.
-// Shipping and Complete sessions are excluded (parked on CI/reviews or done),
-// as are sessions with no live agents. This is the denominator for the soft
-// concurrency warning: the BCG "3-agent ceiling" is about concurrent tasks
-// requiring attention, not subprocess count.
-func (m *Manager) ActiveSessionCount() int {
+// SessionCount returns the number of sessions with at least one live agent.
+// Used by the repo pickers to show per-repo session counts.
+func (m *Manager) SessionCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	count := 0
 	for _, s := range m.sessions {
-		switch s.LifecyclePhase() {
-		case LifecycleShipping, LifecycleComplete:
-			continue
-		}
 		if s.LiveAgentCount() == 0 {
 			continue
 		}
@@ -1824,17 +1816,8 @@ func (m *Manager) Detach() *state.RefrainState {
 		}
 		m.mu.RUnlock()
 
-		// Partition: complete sessions are cleaned up; others are snapshotted.
-		var toSnapshot, toClean []*Session
-		for _, s := range sessions {
-			if s.LifecyclePhase() == LifecycleComplete {
-				toClean = append(toClean, s)
-			} else {
-				toSnapshot = append(toSnapshot, s)
-			}
-		}
-
 		// Snapshot state before killing agents.
+		toSnapshot := sessions
 		sessionStates := make([]state.SessionState, 0, len(toSnapshot))
 		for _, s := range toSnapshot {
 			var doneAt *time.Time
@@ -1851,7 +1834,6 @@ func (m *Manager) Detach() *state.RefrainState {
 				OwnsBranch:     s.ownsBranch,
 				Kind:           string(s.Kind()),
 				HasClaudeName:  s.HasClaudeName(),
-				LifecyclePhase: s.LifecyclePhase().String(),
 				OriginalPrompt: s.OriginalPrompt(),
 				DoneAt:         doneAt,
 			}
@@ -1867,18 +1849,6 @@ func (m *Manager) Detach() *state.RefrainState {
 			}
 			sessionStates = append(sessionStates, ss)
 		}
-
-		// Kill complete sessions and remove their worktrees.
-		var cleanWg sync.WaitGroup
-		cleanWg.Add(len(toClean))
-		for _, s := range toClean {
-			go func() {
-				defer cleanWg.Done()
-				s.KillAll()
-				_ = s.Cleanup(m.repoPath)
-			}()
-		}
-		cleanWg.Wait()
 
 		// Kill agents for snapshotted sessions but do NOT call Cleanup (preserve worktrees).
 		var wg sync.WaitGroup
@@ -1949,7 +1919,6 @@ func (m *Manager) ResumeSession(ss state.SessionState, cfg Config) error {
 	if ss.DisplayName != "" && ss.DisplayName != ss.Name {
 		sess.SetDisplayName(ss.DisplayName)
 	}
-	sess.SetLifecyclePhase(LifecyclePhaseFromString(ss.LifecyclePhase))
 	if ss.OriginalPrompt != "" {
 		sess.SetOriginalPrompt(ss.OriginalPrompt)
 	}

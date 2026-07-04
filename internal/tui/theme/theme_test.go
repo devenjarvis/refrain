@@ -55,7 +55,7 @@ func TestGlyphsNonEmpty(t *testing.T) {
 	glyphs := []string{
 		GlyphError, GlyphSuccess, GlyphWaiting, GlyphQuestion, GlyphActive,
 		GlyphIdle, GlyphCross, GlyphPending, GlyphFlagged, GlyphConcerns,
-		GlyphNoDiff, GlyphManual, GlyphBranch, GlyphStripe, GlyphCursor, GlyphCaret,
+		GlyphNoDiff, GlyphManual, GlyphStripe, GlyphCursor, GlyphCaret,
 		GlyphArrow, GlyphFolderOpen, GlyphFolderClosed, GlyphCheckboxDone,
 		GlyphCheckboxTodo, GlyphFenceBar, GlyphRuleThin, GlyphRuleHeavy,
 	}

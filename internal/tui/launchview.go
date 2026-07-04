@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	xvt "github.com/charmbracelet/x/vt"
 	"github.com/devenjarvis/refrain/internal/agent"
+	"github.com/devenjarvis/refrain/internal/tui/theme"
 	"github.com/devenjarvis/refrain/internal/vt"
 )
 
@@ -44,9 +45,25 @@ func (m *launchModel) clearSelection() {
 	m.selection = selection{}
 }
 
+// selection tracks an in-progress or completed mouse drag selection inside the
+// agent VT viewport. Coordinates are zero-based cell indices within the
+// agent's viewport.
+type selection struct {
+	anchorX, anchorY int
+	cursorX, cursorY int
+	active           bool   // a click has seeded an in-flight or completed selection
+	dragSeen         bool   // mouse moved away from the anchor; distinguishes drag from plain click
+	agentID          string // agent.Agent.ID() the selection is bound to
+}
+
 // selectionRect returns the active selection as a normalized rectangle in
-// VT-cell coordinates; see dashboardModel.selectionRect for the row-first
-// normalization rationale (shared with vt.SelectionRect.inSelection).
+// VT-cell coordinates. Normalization is by row first, so for a multi-row
+// reverse drag (anchor row > cursor row) the returned startX/endX may be
+// "out of order" relative to a Cartesian rect — that asymmetry is intentional
+// and matches the per-line membership rule in vt.SelectionRect.inSelection:
+// startX picks where the start row begins, endX picks where the end row ends,
+// and the X axis is independent on each row. ok is false when there is no
+// drag-confirmed selection to render or copy from.
 func (m launchModel) selectionRect() (startX, startY, endX, endY int, ok bool) {
 	if !m.selection.active || !m.selection.dragSeen {
 		return 0, 0, 0, 0, false
@@ -462,4 +479,82 @@ func (a App) handleLaunchMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) 
 		}
 	}
 	return a, nil
+}
+
+// focusLaunchTabDot returns the status indicator character for a tab.
+func focusLaunchTabDot(ag *agent.Agent) string {
+	switch ag.Status() {
+	case agent.StatusActive, agent.StatusWaiting:
+		return theme.GlyphActive
+	case agent.StatusError, agent.StatusDone:
+		return theme.GlyphCross
+	default:
+		return theme.GlyphIdle
+	}
+}
+
+// focusLaunchTabText returns the plain (unstyled) text for a tab label,
+// used by both rendering and click-hit detection so they stay in sync.
+func focusLaunchTabText(ag *agent.Agent) string {
+	name := truncateVisible(ag.GetDisplayName(), 18)
+	return "[" + focusLaunchTabDot(ag) + " " + name + "]"
+}
+
+// applySelectionHighlight re-renders lines with reverse-video over the cells
+// covered by rect. Styling from the underlying terminal content is stripped on
+// selected rows so the highlight is unambiguous.
+func applySelectionHighlight(lines []string, rect vt.SelectionRect) string {
+	inSel := func(x, y int) bool {
+		if !rect.Active || y < rect.StartY || y > rect.EndY {
+			return false
+		}
+		if y > rect.StartY && y < rect.EndY {
+			return true
+		}
+		if rect.StartY == rect.EndY {
+			return x >= rect.StartX && x <= rect.EndX
+		}
+		if y == rect.StartY {
+			return x >= rect.StartX
+		}
+		return x <= rect.EndX
+	}
+	result := make([]string, len(lines))
+	for y, line := range lines {
+		if !rect.Active || y < rect.StartY || y > rect.EndY {
+			result[y] = line
+			continue
+		}
+		stripped := ansi.Strip(line)
+		var b strings.Builder
+		col := 0
+		inRev := false
+		for _, r := range stripped {
+			rw := ansi.StringWidth(string(r))
+			if rw == 0 {
+				continue // combining marks / zero-width chars have no column position
+			}
+			sel := false
+			for c := col; c < col+rw; c++ {
+				if inSel(c, y) {
+					sel = true
+					break
+				}
+			}
+			if sel && !inRev {
+				b.WriteString("\x1b[7m")
+				inRev = true
+			} else if !sel && inRev {
+				b.WriteString("\x1b[27m")
+				inRev = false
+			}
+			b.WriteRune(r)
+			col += rw
+		}
+		if inRev {
+			b.WriteString("\x1b[27m")
+		}
+		result[y] = b.String()
+	}
+	return strings.Join(result, "\n")
 }

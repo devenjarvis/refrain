@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"pgregory.net/rapid"
 )
 
 // fataler is the intersection of *testing.T and *rapid.T used by property test
@@ -72,27 +70,6 @@ func assertAgentPathsMatch(t fataler, sess *Session) {
 			t.Fatalf("agent %s WorktreePath = %q, want %q (session worktree)", a.ID, a.WorktreePath, want)
 		}
 	}
-}
-
-// genForwardPhaseSequence generates a random-length ascending subsequence of
-// forward lifecycle phases (Planning through Complete). The sequence always
-// starts with Planning and includes 1–6 phases.
-func genForwardPhaseSequence(t *rapid.T) []LifecyclePhase {
-	allForward := []LifecyclePhase{
-		LifecyclePlanning,
-		LifecycleInProgress,
-		LifecycleReadyForReview,
-		LifecycleInReview,
-		LifecycleShipping,
-		LifecycleComplete,
-	}
-	seq := []LifecyclePhase{LifecyclePlanning}
-	for i := 1; i < len(allForward); i++ {
-		if rapid.Bool().Draw(t, allForward[i].String()) {
-			seq = append(seq, allForward[i])
-		}
-	}
-	return seq
 }
 
 // capturingDrafter implements PlanDrafter and records every DraftRequest.Cwd

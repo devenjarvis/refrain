@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/devenjarvis/refrain/internal/config"
 )
 
@@ -87,4 +90,28 @@ func splitColumns(total int, s columnStrategy, gap int) (left, right int) {
 		right = 0
 	}
 	return left, right
+}
+
+// truncateVisible returns s truncated to n display cells with an ellipsis.
+// ANSI-aware; avoids the naive byte-slice truncation that can cut multi-byte
+// runes in half or miscount ANSI escape sequences.
+func truncateVisible(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= n {
+		return s
+	}
+	return ansi.Truncate(s, n, "…")
+}
+
+// rightAlign joins left and right with enough padding that right ends at
+// width. At least one space always separates the two.
+func rightAlign(left, right string, width int) string {
+	total := lipgloss.Width(left) + lipgloss.Width(right)
+	pad := width - total
+	if pad < 1 {
+		pad = 1
+	}
+	return left + strings.Repeat(" ", pad) + right
 }

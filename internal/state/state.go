@@ -34,9 +34,10 @@ type SessionState struct {
 	// empty means "worktree" — all sessions persisted before the field
 	// existed are worktree sessions, and encoding/json silently tolerates
 	// its absence in old files.
-	Kind           string       `json:"kind,omitempty"`
+	Kind string `json:"kind,omitempty"`
+	// Legacy "lifecyclePhase" keys in old state files are silently ignored
+	// by encoding/json — same mechanics as the focus_mode_enabled precedent.
 	HasClaudeName  bool         `json:"hasClaudeName,omitempty"`
-	LifecyclePhase string       `json:"lifecyclePhase,omitempty"`
 	OriginalPrompt string       `json:"originalPrompt,omitempty"`
 	DoneAt         *time.Time   `json:"doneAt,omitempty"`
 	Agents         []AgentState `json:"agents"`

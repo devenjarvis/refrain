@@ -69,21 +69,6 @@ the palette can be retuned in one place. (`internal/tui/theme/colors.go`.)
 | `ColorError` | `#EF4444` | errors / failures / deletions |
 | `ColorWaiting` | `#D946EF` | an agent is blocked on input (permission prompt) |
 
-### Pipeline-stage accents (lifecycle column)
-
-| Role | Hex | Use when… |
-|---|---|---|
-| `ColorBuilding` | `#7ec8e3` | identifying the BUILDING stage |
-| `ColorReviewing` | `#9b7fdb` | identifying the REVIEWING stage |
-| `ColorShipping` | `#5ab58a` | identifying the SHIPPING stage |
-
-### Wellness break overlay
-
-| Role | Hex | Use when… |
-|---|---|---|
-| `ColorBreakTitle` | `#38BDF8` | the break-overlay title (also `BreatheColors[0]`) |
-| `ColorBreakAccent` | `#34D399` | the break-overlay resume cue (also `BreatheColors[2]`) |
-
 ### Diff backgrounds
 
 Diff add/del **foregrounds** reuse `ColorSuccess`/`ColorError`. The four
@@ -108,22 +93,6 @@ Markdown heading colors are not separate roles — they map through
 `theme.MarkdownHeadingColor(level)` onto the roles above (H1→Primary,
 H2→Secondary, H3→Success, H4→Warning, H5→PrimaryLight, H6→MutedLight).
 
-## Two parallel color systems: status vs. stage
-
-Refrain runs **two** color axes that must stay visually distinct:
-
-- **Status roles** (`ColorSuccess`/`ColorWarning`/`ColorError`/`ColorWaiting`)
-  encode an agent's *run-state* and appear as badges and glyphs. They are punchy,
-  saturated hues.
-- **Pipeline-stage accents** (`ColorBuilding`/`ColorReviewing`/`ColorShipping`)
-  encode *which lifecycle column* a session is in and appear as section
-  headings/chrome. They are deliberately desaturated pastels.
-
-They co-occur — a SHIPPING section can contain a success badge — so do **not**
-unify them. Note one near-adjacency: `ColorReviewing` (`#9b7fdb`) and
-`ColorPrimaryLight` (`#A78BFA`) are both light purple but semantically distinct
-(stage accent vs. markdown bullet). Don't "fix" one to match the other.
-
 ## Glyph & icon set
 
 Every single-rune marker the TUI emits is a token in
@@ -131,20 +100,19 @@ Every single-rune marker the TUI emits is a token in
 
 | Token | Glyph | Meaning | Emitted by |
 |---|---|---|---|
-| `GlyphError` | `✗` | error / fail | `sessionFocusStatus`, `sessionStatusGlyph`, `verdictBadge`, `checkBadge`, `checkSymbolFor` |
+| `GlyphError` | `✗` | error / fail | `sessionListStatus`, `verdictBadge`, `checkBadge`, `checkSymbolFor` |
 | `GlyphSuccess` | `✓` | success / pass | same set |
-| `GlyphWaiting` | `⏸` | waiting on input | `sessionFocusStatus`, `sessionStatusGlyph` |
-| `GlyphQuestion` | `?` | may need input | `sessionFocusStatus`, `sessionStatusGlyph`, `checkSymbolFor` |
-| `GlyphActive` | `●` | actively running | `sessionStatusGlyph`, `focusLaunchTabDot` |
-| `GlyphIdle` | `○` | idle / pending | `sessionStatusGlyph`, `focusLaunchTabDot`, `checkSymbolFor` |
+| `GlyphWaiting` | `⏸` | waiting on input | `sessionListStatus` |
+| `GlyphQuestion` | `?` | may need input | `checkSymbolFor` |
+| `GlyphActive` | `●` | actively running | `sessionListStatus`, `focusLaunchTabDot` |
+| `GlyphIdle` | `○` | idle / pending | `sessionListStatus`, `focusLaunchTabDot`, `checkSymbolFor` |
 | `GlyphCross` | `×` | closed / done tab | `focusLaunchTabDot` |
 | `GlyphPending` | `⋯` | pending verdict | `verdictBadge`, `checkBadge` |
 | `GlyphFlagged` | `⚑` | flagged for rework | `verdictBadge` |
 | `GlyphConcerns` | `!` | verdict: concerns | `verdictBadge` |
 | `GlyphNoDiff` | `⊘` | verdict: no diff | `verdictBadge` |
 | `GlyphManual` | `·` | AI verdict skipped — manual review | `verdictBadge` |
-| `GlyphBranch` | `⎇` | git branch label | `renderBranchLabel` |
-| `GlyphStripe` | `▎` | card status stripe | `renderFocusSessionCard` |
+| `GlyphStripe` | `▎` | card attention stripe | `renderSessionCard` |
 | `GlyphCursor` | `▍` | selected-row cursor | diff tree |
 | `GlyphCaret` | `›` | inline list cursor | checks list |
 | `GlyphArrow` | `→` | stacked-PR chain sep | `prIndicator` |
@@ -158,13 +126,6 @@ Every single-rune marker the TUI emits is a token in
 - `SpinnerBraille` — the braille spinner frame set; `theme.SpinnerFrame(now)`
   derives the current frame from the model's tick timestamp (no clock read at
   render time, per `CONVENTIONS.md` §5), keeping every running row in sync.
-- `BreatheColors` — the four-hue calm cycle for the wellness break overlay's
-  breathing animation. Entries 0 and 2 are `ColorBreakTitle`/`ColorBreakAccent`;
-  the indigo/rose hues exist only for this cycle.
-- `CompleteColors` — warm pulse tones shown once the focus timer is up.
-
-Animation palettes are ordered sequences a renderer cycles through frame by
-frame; they are not single-role tokens.
 
 ## Borders & chrome
 
@@ -191,7 +152,6 @@ match `lipgloss.Padding(v, h)`.
 |---|---|---|
 | `PadModal` | `{1, 2}` | modal box inner padding |
 | `PadStatusBar` | `{0, 1}` | status bar inner padding |
-| `PadCell` | `{0, 1}` | dashboard pipeline-cell inner padding |
 | `IndentTree` | `2` | per-depth indent of the diff file tree |
 | `LabelWidth` | `22` | fixed width of a form field label |
 

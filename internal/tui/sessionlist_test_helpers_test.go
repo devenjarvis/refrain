@@ -5,19 +5,19 @@ import (
 	"github.com/devenjarvis/refrain/internal/config"
 )
 
-// seedDashboardItems wires app.managers / app.cfg / app.activeRepo so that
+// seedSessionListItems wires app.managers / app.cfg / app.activeRepo so that
 // app.listItems() reproduces the hierarchical item list the caller passes.
 //
-// Before Phase 3 these tests injected the list straight onto the dashboard
-// model (app.dashboard.items = []listItem{…}); that mirror field is gone, so
-// the list is now derived live from the managers each frame. This helper keeps
-// the call sites nearly identical — wrap the old literal in seedDashboardItems
-// — while routing the data through the real derivation path.
+// Tests used to inject the list straight onto a dashboard model mirror field;
+// that mirror is gone, so the list is now derived live from the managers each
+// frame. This helper keeps the call sites nearly identical — wrap the old
+// literal in seedSessionListItems — while routing the data through the real
+// derivation path.
 //
 // Agent rows in the input are ignored: each session already carries its agents
 // (added via Session.AddTestAgent), and listItems() regenerates the agent rows
 // from sess.Agents(). Repo headers define the cfg repo order and display name.
-func seedDashboardItems(app *App, items []listItem) {
+func seedSessionListItems(app *App, items []listItem) {
 	var order []string
 	seen := map[string]bool{}
 	sessByRepo := map[string][]*agent.Session{}
@@ -41,7 +41,7 @@ func seedDashboardItems(app *App, items []listItem) {
 		app.managers[rp] = newFakeManager(rp, sessByRepo[rp]...)
 	}
 	// Build cfg so listItems() emits repo headers in the same order as the
-	// injected list (matching the legacy hierarchical layout the tests expect).
+	// injected list (matching the hierarchical layout the tests expect).
 	app.cfg = &config.Config{}
 	for _, rp := range order {
 		app.cfg.Repos = append(app.cfg.Repos, config.Repo{Path: rp, Alias: repoName[rp]})

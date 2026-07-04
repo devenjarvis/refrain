@@ -8,13 +8,6 @@ import (
 	"github.com/devenjarvis/refrain/internal/config"
 )
 
-const (
-	fieldFocusSession = "Focus Session (min)"
-	fieldFocusBreak   = "Break (min)"
-	fieldMaxSessions  = "Max Concurrent Sessions"
-	fieldMaxReview    = "Max Review Backlog"
-)
-
 // globalConfigSaveMsg is emitted when the global config form is saved.
 type globalConfigSaveMsg struct {
 	settings *config.GlobalSettings
@@ -73,23 +66,6 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 		sidebarWidth = strconv.Itoa(*gs.SidebarWidth)
 	}
 
-	focusSessionMinutes := ""
-	if gs.FocusSessionMinutes != nil {
-		focusSessionMinutes = strconv.Itoa(*gs.FocusSessionMinutes)
-	}
-	focusBreakMinutes := ""
-	if gs.FocusBreakMinutes != nil {
-		focusBreakMinutes = strconv.Itoa(*gs.FocusBreakMinutes)
-	}
-	maxConcurrentSessions := ""
-	if gs.MaxConcurrentSessions != nil {
-		maxConcurrentSessions = strconv.Itoa(*gs.MaxConcurrentSessions)
-	}
-	maxReviewBacklog := ""
-	if gs.MaxReviewBacklog != nil {
-		maxReviewBacklog = strconv.Itoa(*gs.MaxReviewBacklog)
-	}
-
 	inputWidth := 30
 
 	var fields []formField
@@ -102,10 +78,6 @@ func newGlobalConfigModel(gs *config.GlobalSettings, width, height int) globalCo
 	fields = addSelect(fields, "Agent Model", config.KnownAgentModels, optionIndex(config.KnownAgentModels, agentModel))
 	fields = addEditorFields(fields, ideCommand)
 	fields = addTextInput(fields, "Sidebar Width", sidebarWidth, strconv.Itoa(config.DefaultSidebarWidth), inputWidth)
-	fields = addTextInput(fields, fieldFocusSession, focusSessionMinutes, strconv.Itoa(config.DefaultFocusSessionMinutes), inputWidth)
-	fields = addTextInput(fields, fieldFocusBreak, focusBreakMinutes, strconv.Itoa(config.DefaultFocusBreakMinutes), inputWidth)
-	fields = addTextInput(fields, fieldMaxSessions, maxConcurrentSessions, strconv.Itoa(config.DefaultMaxConcurrentSessions), inputWidth)
-	fields = addTextInput(fields, fieldMaxReview, maxReviewBacklog, strconv.Itoa(config.DefaultMaxReviewBacklog), inputWidth)
 
 	return globalConfigModel{
 		form:   newConfigForm(fields, width),
@@ -185,27 +157,6 @@ func (m globalConfigModel) extractSettings() *config.GlobalSettings {
 		if n, err := strconv.Atoi(v); err == nil {
 			clamped := config.ClampSidebarWidth(n)
 			s.SidebarWidth = &clamped
-		}
-	}
-
-	if v := m.form.textValue(fieldFocusSession); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			s.FocusSessionMinutes = &n
-		}
-	}
-	if v := m.form.textValue(fieldFocusBreak); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			s.FocusBreakMinutes = &n
-		}
-	}
-	if v := m.form.textValue(fieldMaxSessions); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			s.MaxConcurrentSessions = &n
-		}
-	}
-	if v := m.form.textValue(fieldMaxReview); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 { // 0 means "off"
-			s.MaxReviewBacklog = &n
 		}
 	}
 

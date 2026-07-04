@@ -17,9 +17,6 @@ func TestLegacyFocusModeEnabledIsSilentlyIgnored(t *testing.T) {
 	if s.AudioEnabled == nil || *s.AudioEnabled {
 		t.Error("AudioEnabled should be set to false")
 	}
-	if s.FocusSessionMinutes == nil || *s.FocusSessionMinutes != 60 {
-		t.Error("FocusSessionMinutes should be set to 60")
-	}
 }
 
 func TestLegacyMaxConcurrentAgentsIsSilentlyIgnored(t *testing.T) {
@@ -28,10 +25,29 @@ func TestLegacyMaxConcurrentAgentsIsSilentlyIgnored(t *testing.T) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if s.MaxConcurrentSessions != nil {
-		t.Error("MaxConcurrentSessions should be nil when only legacy key is present")
-	}
 	if s.AudioEnabled == nil || !*s.AudioEnabled {
 		t.Error("AudioEnabled should be set to true")
+	}
+}
+
+// TestLegacyWellnessKeysAreSilentlyIgnored covers the five keys removed in the
+// rollback's Phase 5 (wellness timers, session caps, review backlog, and
+// plan-first gating): a config file carrying all of them must still load, and
+// live keys in the same file must survive.
+func TestLegacyWellnessKeysAreSilentlyIgnored(t *testing.T) {
+	data := []byte(`{
+		"focus_session_minutes": 90,
+		"focus_break_minutes": 15,
+		"max_concurrent_sessions": 3,
+		"max_review_backlog": 5,
+		"plan_first_enabled": true,
+		"branch_prefix": "me/"
+	}`)
+	var s GlobalSettings
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if s.BranchPrefix == nil || *s.BranchPrefix != "me/" {
+		t.Error("BranchPrefix should survive alongside legacy wellness keys")
 	}
 }

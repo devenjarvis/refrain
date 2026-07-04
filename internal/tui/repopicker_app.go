@@ -77,7 +77,7 @@ func (a App) updateRepoPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 		counts := make(map[string]int, len(a.cfg.Repos))
 		for _, repo := range a.cfg.Repos {
 			if m := a.managers[repo.Path]; m != nil {
-				counts[repo.Path] = m.ActiveSessionCount()
+				counts[repo.Path] = m.SessionCount()
 			}
 		}
 		a.repoPicker.setRepos(a.cfg.Repos, counts, a.activeRepo)

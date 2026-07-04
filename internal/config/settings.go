@@ -33,12 +33,6 @@ const (
 	MinSidebarWidth      = 20
 	MaxSidebarWidth      = 60
 
-	// Wellness defaults.
-	DefaultFocusSessionMinutes   = 90
-	DefaultFocusBreakMinutes     = 15
-	DefaultMaxConcurrentSessions = 3
-	DefaultMaxReviewBacklog      = 5
-
 	// DefaultBranchNamePrompt is the instruction sent to Haiku to summarize
 	// the user's first prompt into a branch slug. Users can override via the
 	// branch_name_prompt key in global or per-repo config; the {prompt} token
@@ -53,14 +47,6 @@ const (
 	// DefaultAutoOpenPRInBrowser controls whether the browser opens
 	// automatically after a PR is created. Defaults to true.
 	DefaultAutoOpenPRInBrowser = true
-
-	// DefaultPlanFirstEnabled gates the plan-first planning flow. When true
-	// (the default) the n keybind opens a prompt modal, drafts a plan via
-	// claude -p, and only spawns the agent after the user approves the plan.
-	// Users who prefer today's behaviour (immediate spawn) can set
-	// "plan_first_enabled": false in global or per-repo config, or use
-	// ctrl+enter on the modal to skip the planning step on a per-session basis.
-	DefaultPlanFirstEnabled = true
 
 	// DefaultBuildFromPlanPrompt is the initial prompt refrain sends to the
 	// real agent when an approved plan is handed off. The agent is expected
@@ -131,17 +117,13 @@ type GlobalSettings struct {
 	IDECommand        *string `json:"ide_command,omitempty"`
 	SidebarWidth      *int    `json:"sidebar_width,omitempty"`
 
-	// Wellness settings — global preferences, not per-repo.
-	FocusSessionMinutes   *int `json:"focus_session_minutes,omitempty"`
-	FocusBreakMinutes     *int `json:"focus_break_minutes,omitempty"`
-	MaxConcurrentSessions *int `json:"max_concurrent_sessions,omitempty"`
-	MaxReviewBacklog      *int `json:"max_review_backlog,omitempty"`
-
 	// ReviewerModel overrides the model used for per-task review subprocesses.
 	ReviewerModel *string `json:"reviewer_model,omitempty"`
 
-	// Plan-first planning. Both fields are also overridable per-repo.
-	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
+	// Build prompts. Both fields are also overridable per-repo. Legacy keys
+	// from removed features ("plan_first_enabled", "focus_session_minutes",
+	// "focus_break_minutes", "max_concurrent_sessions", "max_review_backlog",
+	// "focus_mode_enabled") are silently ignored by encoding/json.
 	BuildFromPlanPrompt *string `json:"build_from_plan_prompt,omitempty"`
 	BuildSystemPrompt   *string `json:"build_system_prompt,omitempty"`
 
@@ -174,7 +156,6 @@ type RepoSettings struct {
 	ReviewerModel       *string `json:"reviewer_model,omitempty"`
 	IDECommand          *string `json:"ide_command,omitempty"`
 	WorktreeDir         *string `json:"worktree_dir,omitempty"`
-	PlanFirstEnabled    *bool   `json:"plan_first_enabled,omitempty"`
 	BuildFromPlanPrompt *string `json:"build_from_plan_prompt,omitempty"`
 	BuildSystemPrompt   *string `json:"build_system_prompt,omitempty"`
 
@@ -210,14 +191,7 @@ type ResolvedSettings struct {
 	WorktreeDir   string
 	SidebarWidth  int
 
-	// Wellness settings.
-	FocusSessionMinutes   int
-	FocusBreakMinutes     int
-	MaxConcurrentSessions int
-	MaxReviewBacklog      int
-
-	// Plan-first planning.
-	PlanFirstEnabled    bool
+	// Build prompts.
 	BuildFromPlanPrompt string
 	// BuildSystemPrompt is forwarded as `--append-system-prompt <text>` to
 	// the spawned `claude` agent at every Building-phase spawn site (and
@@ -241,25 +215,20 @@ type ResolvedSettings struct {
 // Global overrides defaults; repo overrides global.
 func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 	r := ResolvedSettings{
-		AudioEnabled:          DefaultAudioEnabled,
-		BypassPermissions:     DefaultBypassPermissions,
-		BranchPrefix:          DefaultBranchPrefix,
-		BranchNamePrompt:      DefaultBranchNamePrompt,
-		AgentProgram:          DefaultAgentProgram,
-		PlanModel:             DefaultPlanModel,
-		ReviewerModel:         DefaultReviewerModel,
-		WorktreeDir:           DefaultWorktreeDir,
-		SidebarWidth:          DefaultSidebarWidth,
-		FocusSessionMinutes:   DefaultFocusSessionMinutes,
-		FocusBreakMinutes:     DefaultFocusBreakMinutes,
-		MaxConcurrentSessions: DefaultMaxConcurrentSessions,
-		MaxReviewBacklog:      DefaultMaxReviewBacklog,
-		PlanFirstEnabled:      DefaultPlanFirstEnabled,
-		BuildFromPlanPrompt:   DefaultBuildFromPlanPrompt,
-		BuildSystemPrompt:     DefaultBuildSystemPrompt,
-		PRDraftByDefault:      DefaultPRDraftByDefault,
-		AutoOpenPRInBrowser:   DefaultAutoOpenPRInBrowser,
-		MergeMethod:           DefaultMergeMethod,
+		AudioEnabled:        DefaultAudioEnabled,
+		BypassPermissions:   DefaultBypassPermissions,
+		BranchPrefix:        DefaultBranchPrefix,
+		BranchNamePrompt:    DefaultBranchNamePrompt,
+		AgentProgram:        DefaultAgentProgram,
+		PlanModel:           DefaultPlanModel,
+		ReviewerModel:       DefaultReviewerModel,
+		WorktreeDir:         DefaultWorktreeDir,
+		SidebarWidth:        DefaultSidebarWidth,
+		BuildFromPlanPrompt: DefaultBuildFromPlanPrompt,
+		BuildSystemPrompt:   DefaultBuildSystemPrompt,
+		PRDraftByDefault:    DefaultPRDraftByDefault,
+		AutoOpenPRInBrowser: DefaultAutoOpenPRInBrowser,
+		MergeMethod:         DefaultMergeMethod,
 	}
 
 	if global != nil {
@@ -295,21 +264,6 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if global.SidebarWidth != nil {
 			r.SidebarWidth = ClampSidebarWidth(*global.SidebarWidth)
-		}
-		if global.FocusSessionMinutes != nil {
-			r.FocusSessionMinutes = *global.FocusSessionMinutes
-		}
-		if global.FocusBreakMinutes != nil {
-			r.FocusBreakMinutes = *global.FocusBreakMinutes
-		}
-		if global.MaxConcurrentSessions != nil {
-			r.MaxConcurrentSessions = *global.MaxConcurrentSessions
-		}
-		if global.MaxReviewBacklog != nil {
-			r.MaxReviewBacklog = *global.MaxReviewBacklog
-		}
-		if global.PlanFirstEnabled != nil {
-			r.PlanFirstEnabled = *global.PlanFirstEnabled
 		}
 		if global.BuildFromPlanPrompt != nil {
 			r.BuildFromPlanPrompt = *global.BuildFromPlanPrompt
@@ -358,9 +312,6 @@ func Resolve(global *GlobalSettings, repo *RepoSettings) ResolvedSettings {
 		}
 		if repo.WorktreeDir != nil {
 			r.WorktreeDir = *repo.WorktreeDir
-		}
-		if repo.PlanFirstEnabled != nil {
-			r.PlanFirstEnabled = *repo.PlanFirstEnabled
 		}
 		if repo.BuildFromPlanPrompt != nil {
 			r.BuildFromPlanPrompt = *repo.BuildFromPlanPrompt

@@ -210,7 +210,7 @@ func (a App) handleSessionKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 			counts := make(map[string]int, len(a.cfg.Repos))
 			for _, repo := range a.cfg.Repos {
 				if mgr := a.managers[repo.Path]; mgr != nil {
-					counts[repo.Path] = mgr.ActiveSessionCount()
+					counts[repo.Path] = mgr.SessionCount()
 				}
 			}
 			a.repoPicker = newRepoPickerModel()
@@ -353,7 +353,7 @@ func (a App) handleSessionKeys(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 		counts := make(map[string]int, len(a.cfg.Repos))
 		for _, repo := range a.cfg.Repos {
 			if mgr := a.managers[repo.Path]; mgr != nil {
-				counts[repo.Path] = mgr.ActiveSessionCount()
+				counts[repo.Path] = mgr.SessionCount()
 			}
 		}
 		a.repoPicker = newRepoPickerModel()

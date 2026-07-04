@@ -655,21 +655,6 @@ func TestAddAgentDefaultAssignsUniqueName(t *testing.T) {
 	}
 }
 
-func TestSession_LifecyclePhase_DefaultIsPlanning(t *testing.T) {
-	s := newSession("id", "name", &git.WorktreeInfo{})
-	if got := s.LifecyclePhase(); got != LifecyclePlanning {
-		t.Errorf("default LifecyclePhase = %v, want LifecyclePlanning", got)
-	}
-}
-
-func TestSession_SetLifecyclePhase(t *testing.T) {
-	s := newSession("id", "name", &git.WorktreeInfo{})
-	s.SetLifecyclePhase(LifecycleReadyForReview)
-	if got := s.LifecyclePhase(); got != LifecycleReadyForReview {
-		t.Errorf("LifecyclePhase() = %v, want LifecycleReadyForReview", got)
-	}
-}
-
 func TestSession_OriginalPrompt_SetOnlyOnce(t *testing.T) {
 	s := newSession("id", "name", &git.WorktreeInfo{})
 	if s.OriginalPrompt() != "" {

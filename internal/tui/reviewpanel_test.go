@@ -472,7 +472,6 @@ func TestRenderReviewPanel_UsesThemeColors(t *testing.T) {
 // task-ledger area move the cursor.
 func TestReviewPanel_ClickHitsLeftPaneOnly(t *testing.T) {
 	sess := agent.NewSessionForTest("s1", "fix-auth")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 	// renderReviewHeader for this session returns 3 lines (title+prompt+divider).
 	// No tab bar → paneTop = dashboardTopY(0) + headerH(3) = 3.
 	// listHeaderLines=2 → first card at Y=5.

@@ -521,10 +521,10 @@ func (c *Client) GetReviewThreads(ctx context.Context, owner, repo string, numbe
 // (always populated by the singular PR endpoint, unlike List/Create). Used in
 // two contexts: (1) re-validating a PR is still mergeable immediately before
 // MergePR — the pr-poller's cached state can be seconds stale; (2) the
-// pr-poller's merged-fallback path for Shipping sessions — when GetPRBySHA and
-// GetPR both return nil (open-only filters), RefreshPR is called with the
-// cached PR number to detect external merge or close so the session can
-// transition to LifecycleComplete. Returns (nil, nil) if the PR no longer exists.
+// pr-poller's merged-fallback path — when GetPRBySHA and GetPR both return
+// nil (open-only filters), RefreshPR is called with the cached PR number to
+// detect external merge or close so the row's PR badge can flip to "merged".
+// Returns (nil, nil) if the PR no longer exists.
 func (c *Client) RefreshPR(ctx context.Context, owner, repo string, number int) (*PRState, error) {
 	pr, err := c.getPRDetail(ctx, owner, repo, number)
 	if err != nil {

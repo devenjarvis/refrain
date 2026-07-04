@@ -56,7 +56,6 @@ type Session struct {
 	nextAgentNum   int
 	displayName    string
 	hasClaudeName  bool // true once the session's branch has been renamed from its random placeholder
-	lifecyclePhase LifecyclePhase
 	originalPrompt string
 	doneAt         time.Time
 	ownsBranch     bool   // true if this session created the branch (cleanup should delete it)
@@ -89,9 +88,9 @@ type Session struct {
 	planCacheMTime   time.Time
 	planCacheSize    int64
 
-	// Commit-task progress cache. Refreshed on KindStop events for
-	// LifecycleInProgress sessions via RefreshCommitTaskCount; read on the
-	// render path via CommitTaskCount without any shell-out.
+	// Commit-task progress cache. Refreshed on KindStop events via
+	// RefreshCommitTaskCount; read on the render path via CommitTaskCount
+	// without any shell-out.
 	commitTaskDone   int
 	commitTaskMaxIdx int
 
@@ -105,18 +104,14 @@ type Session struct {
 	cleanupErr  error
 }
 
-// newSession creates a session with the given worktree. New sessions land in
-// LifecyclePlanning; the user advances to LifecycleInProgress (Building) with
-// the 'b' key once they're done scoping the work. Restored sessions overwrite
-// this default via SetLifecyclePhase from the persisted state.
+// newSession creates a session with the given worktree.
 func newSession(id, name string, wt *git.WorktreeInfo) *Session {
 	return &Session{
-		ID:             id,
-		Name:           name,
-		Worktree:       wt,
-		CreatedAt:      time.Now(),
-		agents:         make(map[string]*Agent),
-		lifecyclePhase: LifecyclePlanning,
+		ID:        id,
+		Name:      name,
+		Worktree:  wt,
+		CreatedAt: time.Now(),
+		agents:    make(map[string]*Agent),
 	}
 }
 
@@ -653,20 +648,6 @@ func lastBranchSegment(branch string) string {
 // Elapsed returns how long the session has been running.
 func (s *Session) Elapsed() time.Duration {
 	return time.Since(s.CreatedAt)
-}
-
-// LifecyclePhase returns the current lifecycle phase of the session.
-func (s *Session) LifecyclePhase() LifecyclePhase {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.lifecyclePhase
-}
-
-// SetLifecyclePhase sets the lifecycle phase of the session.
-func (s *Session) SetLifecyclePhase(p LifecyclePhase) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lifecyclePhase = p
 }
 
 // OriginalPrompt returns the user's original prompt for this session.
