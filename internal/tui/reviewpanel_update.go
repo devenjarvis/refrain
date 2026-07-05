@@ -120,7 +120,8 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 	case "esc":
 		return m, closeReviewPanel()
 	case "d":
-		m.session.SetLifecyclePhase(agent.LifecycleReadyForReview)
+		// Defer: close the panel and come back later. Nothing to record —
+		// the session simply stays in the list.
 		return m, closeReviewPanel()
 	case "p":
 		// Ship: open the PR when one exists, otherwise push + draft one.
@@ -157,8 +158,9 @@ func (m *reviewPanelModel) handleKey(msg tea.KeyPressMsg) (PanelModel, tea.Cmd) 
 		)
 	case "m", "c":
 		// m is the advertised key ("m approve"); c kept for backwards compatibility.
+		// Approving records completion and tears the session down.
 		sess := m.session
-		sess.SetLifecyclePhase(agent.LifecycleComplete)
+		sess.MarkDone()
 		mgr := m.deps.Manager(m.repoPath)
 		if mgr == nil {
 			return m, closeReviewPanel()

@@ -2371,11 +2371,12 @@ func TestManager_StopHookRefreshesCommitTaskCount(t *testing.T) {
 	}
 }
 
-// TestManager_StopHookSkipsRefreshAfterMarkDone verifies that a KindStop event
-// for a session that has already advanced past LifecycleInProgress does NOT
-// overwrite a previously-seeded commit-task cache. This pins the
-// LifecyclePhase guard introduced in dispatchHookEvents against regression.
-func TestManager_StopHookSkipsRefreshAfterMarkDone(t *testing.T) {
+// TestManager_StopHookSkipsRefreshWithoutPlan verifies that a KindStop event
+// for a session with no plan.md does NOT overwrite a previously-seeded
+// commit-task cache. This pins the HasPlan guard in dispatchHookEvents
+// (rollback design §4.1: the refresh is gated on plan presence, not phase)
+// against regression.
+func TestManager_StopHookSkipsRefreshWithoutPlan(t *testing.T) {
 	repo := setupTestRepo(t)
 	mgr := NewManager(repo, defaultTestSettings())
 	defer mgr.Shutdown()
@@ -2390,9 +2391,6 @@ func TestManager_StopHookSkipsRefreshAfterMarkDone(t *testing.T) {
 
 	// Seed the cache so we can detect if it gets overwritten.
 	sess.SetCommitTaskCountForTest(7, 7)
-
-	// Advance to ReadyForReview (past Building) — Stop events must now be no-ops.
-	sess.SetLifecyclePhase(LifecycleReadyForReview)
 
 	// Make commits that would produce a smaller count if incorrectly refreshed.
 	makeTestCommitWithTaskTrailer(t, sess.Worktree.Path, "feat: should not be counted", 1)
@@ -2409,40 +2407,6 @@ func TestManager_StopHookSkipsRefreshAfterMarkDone(t *testing.T) {
 
 	done, maxIdx := sess.CommitTaskCount()
 	if done != 7 || maxIdx != 7 {
-		t.Errorf("CommitTaskCount() = (%d, %d) after ReadyForReview Stop, want (7, 7) — cache must not be overwritten", done, maxIdx)
-	}
-}
-
-// TestManager_StopHookSkipsRefreshOutsideBuilding verifies that a KindStop
-// event for a non-Building session is a no-op for the commit-task cache.
-func TestManager_StopHookSkipsRefreshOutsideBuilding(t *testing.T) {
-	repo := setupTestRepo(t)
-	mgr := NewManager(repo, defaultTestSettings())
-	defer mgr.Shutdown()
-
-	cfg := Config{Task: "test", Rows: 24, Cols: 80}
-	sess, ag, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
-		return exec.Command("bash", "-c", "sleep 5")
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Leave lifecycle as LifecyclePlanning (default).
-	makeTestCommitWithTaskTrailer(t, sess.Worktree.Path, "feat: should not be counted", 1)
-
-	if err := hook.SendEvent(mgr.HookSocketPath(), hook.Event{
-		Kind:    hook.KindStop,
-		AgentID: ag.ID,
-	}); err != nil {
-		t.Fatalf("SendEvent Stop: %v", err)
-	}
-
-	// Wait long enough for any goroutine to have run if incorrectly spawned.
-	time.Sleep(200 * time.Millisecond)
-
-	done, maxIdx := sess.CommitTaskCount()
-	if done != 0 || maxIdx != 0 {
-		t.Errorf("CommitTaskCount() = (%d, %d) after Planning Stop, want (0, 0)", done, maxIdx)
+		t.Errorf("CommitTaskCount() = (%d, %d) after plan-less Stop, want (7, 7) — cache must not be overwritten", done, maxIdx)
 	}
 }

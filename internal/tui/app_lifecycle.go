@@ -20,8 +20,6 @@ import (
 func (a App) handleWindowSize(msg tea.WindowSizeMsg) App {
 	a.width = msg.Width
 	a.height = msg.Height
-	a.dashboard.width = msg.Width
-	a.dashboard.height = msg.Height - 1 // room for statusbar
 	a.sessionList.SetSize(msg.Width, msg.Height-1)
 	a.launch.SetSize(msg.Width, msg.Height-1)
 	a.diff, _ = a.diff.Update(tea.WindowSizeMsg{Width: msg.Width, Height: msg.Height - 1})
@@ -71,10 +69,6 @@ func (a App) handleInit(msg initAppMsg) (tea.Model, tea.Cmd) {
 	if a.initWarning != "" {
 		a.setError(a.initWarning)
 	}
-	now := time.Now()
-	a.wellness.appStart = now
-	a.wellness.sessionStart = now
-	a.wellness.lastInputAt = now
 
 	// Default activeRepo to the first registered repo so workflow keys
 	// ('n', 'a', 'o') target a known repo on a fresh session list.
@@ -202,9 +196,8 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 		rp.SetNow(renderNow)
 	}
 	// Snapshot the live item list for this tick's per-agent status bookkeeping
-	// and alt-screen resize. (advanceTickers and the debug dump below build
-	// their own props, which re-derive the list — cheap, and managers don't
-	// mutate mid-Update.)
+	// and alt-screen resize. (The debug dump below re-derives the list —
+	// cheap, and managers don't mutate mid-Update.)
 	items := a.listItems()
 	// Track per-agent status so cross-status logic (e.g. session-close cleanup)
 	// has a prior value to compare against.
@@ -260,27 +253,7 @@ func (a App) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 	return a, tea.Batch(allCmds...)
 }
 
-// shouldAutoPromote reports whether a BUILDING session is complete enough to
-// auto-advance to ReadyForReview when its agent goes idle/done. A session with
-// no cached plan is promotable; one with a plan is promotable only once every
-// task is accounted for (by the plan's own checkbox count or the per-commit
-// Plan-Task trailer count, whichever is larger). Outstanding tasks keep the
-// session in BUILDING so its progress bar stays visible. Pure: no App or
-// manager state.
-func shouldAutoPromote(sess *agent.Session) bool {
-	plan, present := sess.CachedPlan()
-	if !present {
-		return true
-	}
-	pTotal, pDone := planTaskCounts(plan)
-	cDone, cMax := sess.CommitTaskCount()
-	effectiveTotal := max(pTotal, cMax)
-	effectiveDone := max(pDone, cDone)
-	return effectiveTotal == 0 || effectiveDone >= effectiveTotal
-}
-
 func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
-	var autoPromoteCmd tea.Cmd
 	// Clean up stale lastKnownStatus entries when a session auto-closes.
 	// lastKnownStatus is keyed by agentCacheKey(repoPath, agentID), so the
 	// stale prefix has to include the repoPath to avoid wiping a colliding
@@ -307,7 +280,7 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 		// silently skipped. The flag resets on Enter or UserPromptSubmit.
 		// StatusIdle chimes are suppressed — only StatusWaiting
 		// (permission prompts) still fires. Suppressing the idle chime
-		// is the wellness-first default: every block ends in idle, and
+		// protects the signal budget: every turn ends in idle, and
 		// chiming on every turn trains the user to ignore it.
 		if msg.event.Status == agent.StatusIdle || msg.event.Status == agent.StatusWaiting {
 			if mgr := a.managers[msg.repoPath]; mgr != nil {
@@ -324,39 +297,19 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		a.lastKnownStatus[agentCacheKey(msg.repoPath, msg.event.AgentID)] = msg.event.Status
-		// Auto-promote and MarkDone share a single FindAgentAndSession
-		// call, gated on the statuses that can trigger either transition.
-		if msg.event.Status == agent.StatusIdle ||
-			msg.event.Status == agent.StatusDone ||
-			msg.event.Status == agent.StatusError {
+		// Mark session done when all non-shell agents have exited.
+		if msg.event.Status == agent.StatusDone || msg.event.Status == agent.StatusError {
 			if mgr := a.managers[msg.repoPath]; mgr != nil {
 				if _, sess := mgr.FindAgentAndSession(msg.event.AgentID); sess != nil {
-					// Auto-promote InProgress → ReadyForReview on first
-					// idle/done signal. Only fires once per session (the
-					// phase gate makes it idempotent on subsequent events).
-					// Suppressed when the plan has uncompleted tasks so the
-					// session stays in BUILDING with a visible progress bar.
-					if sess.LifecyclePhase() == agent.LifecycleInProgress && sess.IsReviewable() {
-						if shouldAutoPromote(sess) {
-							sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
-							autoPromoteCmd = tea.Batch(
-								a.fetchReviewDiffCmd(sess, msg.repoPath),
-								a.startValidationChecksCmd(sess, msg.repoPath),
-							)
+					allDone := true
+					for _, ag := range sess.Agents() {
+						if !ag.IsShell && ag.Status() != agent.StatusDone && ag.Status() != agent.StatusError {
+							allDone = false
+							break
 						}
 					}
-					// Mark session done when all non-shell agents have exited.
-					if msg.event.Status == agent.StatusDone || msg.event.Status == agent.StatusError {
-						allDone := true
-						for _, ag := range sess.Agents() {
-							if !ag.IsShell && ag.Status() != agent.StatusDone && ag.Status() != agent.StatusError {
-								allDone = false
-								break
-							}
-						}
-						if allDone {
-							sess.MarkDone()
-						}
+					if allDone {
+						sess.MarkDone()
 					}
 				}
 			}
@@ -407,16 +360,10 @@ func (a App) handleAgentEvent(msg agentEventMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Keep the cursor in range — an event may have advanced a session's phase.
+	// Keep the cursor in range — an event may have removed a session.
 	a.clampCursor()
 	if mgr := a.managers[msg.repoPath]; mgr != nil {
-		if autoPromoteCmd != nil {
-			return a, tea.Batch(autoPromoteCmd, listenEvents(mgr))
-		}
 		return a, listenEvents(mgr)
-	}
-	if autoPromoteCmd != nil {
-		return a, autoPromoteCmd
 	}
 	return a, nil
 }
@@ -425,10 +372,6 @@ func (a App) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		a.setError(msg.err.Error())
 		return a, nil
-	}
-	a.wellness.agentsCreatedCount++
-	if msg.isNewSession {
-		a.wellness.sessionsCreatedCount++
 	}
 	a.clampCursor()
 	// Find the new agent by ID. Cursor always moves to the new session's
@@ -485,7 +428,7 @@ func (a App) handleKillResult(msg killResultMsg) (tea.Model, tea.Cmd) {
 			delete(a.lastKnownStatus, agentKey)
 			if ag := a.modals.LaunchAgent(); ag != nil && ag.ID == id {
 				a.closeModal()
-				a.dashboard.scrollOffset = 0
+				a.launch.scrollOffset = 0
 			}
 		}
 	}

@@ -13,7 +13,7 @@ func (a App) returnFromConfigForm() (tea.Model, tea.Cmd) {
 		counts := make(map[string]int, len(a.cfg.Repos))
 		for _, repo := range a.cfg.Repos {
 			if mgr := a.managers[repo.Path]; mgr != nil {
-				counts[repo.Path] = mgr.ActiveSessionCount()
+				counts[repo.Path] = mgr.SessionCount()
 			}
 		}
 		a.repoPicker.setRepos(a.cfg.Repos, counts, a.modals.ConfigRepoPath())

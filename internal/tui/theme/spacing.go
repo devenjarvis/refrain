@@ -11,8 +11,6 @@ var (
 	PadModal = [2]int{1, 2}
 	// PadStatusBar is the status bar's inner padding.
 	PadStatusBar = [2]int{0, 1}
-	// PadCell is the dashboard checks-cell inner padding.
-	PadCell = [2]int{0, 1}
 )
 
 const (

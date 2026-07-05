@@ -306,3 +306,25 @@ func shortDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dm", mins)
 }
+
+// planTaskCounts scans the plan's ## Tasks section and counts `- [ ]` /
+// `- [x]` checkbox lines. Returns (total, done). Used for the plan-progress
+// badge on session rows.
+func planTaskCounts(plan string) (total, done int) {
+	for _, raw := range agent.ScanTaskLines(plan) {
+		line := strings.TrimLeft(raw, " \t")
+		if !strings.HasPrefix(line, "- [") {
+			continue
+		}
+		// Need at least "- [x] " to be a task line.
+		if len(line) < 6 || line[4] != ']' {
+			continue
+		}
+		total++
+		marker := line[3]
+		if marker == 'x' || marker == 'X' {
+			done++
+		}
+	}
+	return total, done
+}

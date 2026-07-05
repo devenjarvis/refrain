@@ -83,12 +83,15 @@ func TestDetachEmptyReturnsNil(t *testing.T) {
 	}
 }
 
-func TestDetachSkipsCompleteSessionsAndCleansWorktree(t *testing.T) {
+func TestDetachSnapshotsDoneSessionsToo(t *testing.T) {
+	// Sessions never leave the list on their own (rollback design §4.7):
+	// a session marked done is snapshotted like any other, and its worktree
+	// is preserved for the reattach.
 	repo := setupTestRepo(t)
 	mgr := NewManager(repo, defaultTestSettings())
 
 	cfg := Config{Task: "test", Rows: 24, Cols: 80}
-	sessComplete, _, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
+	sessDone, _, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
 		return exec.Command("bash", "-c", "sleep 60")
 	})
 	if err != nil {
@@ -101,50 +104,25 @@ func TestDetachSkipsCompleteSessionsAndCleansWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	completePath := sessComplete.Worktree.Path
+	donePath := sessDone.Worktree.Path
 	keepPath := sessKeep.Worktree.Path
-	keepID := sessKeep.ID
 
-	sessComplete.SetLifecyclePhase(LifecycleComplete)
+	sessDone.MarkDone()
 
 	bs := mgr.Detach()
 	if bs == nil {
-		t.Fatal("expected non-nil RefrainState when one non-complete session remains")
+		t.Fatal("expected non-nil RefrainState")
 	}
-	if len(bs.Sessions) != 1 {
-		t.Fatalf("expected 1 session in snapshot, got %d", len(bs.Sessions))
-	}
-	if bs.Sessions[0].ID != keepID {
-		t.Errorf("expected snapshotted session ID %s, got %s", keepID, bs.Sessions[0].ID)
+	if len(bs.Sessions) != 2 {
+		t.Fatalf("expected 2 sessions in snapshot, got %d", len(bs.Sessions))
 	}
 
-	// Complete session's worktree must be removed.
-	if _, err := os.Stat(completePath); !os.IsNotExist(err) {
-		t.Errorf("complete session worktree should have been removed, but Stat returned: %v", err)
+	// Both worktrees must be preserved.
+	if _, err := os.Stat(donePath); os.IsNotExist(err) {
+		t.Error("done session worktree should still exist after detach")
 	}
-
-	// Non-complete session's worktree must be preserved.
 	if _, err := os.Stat(keepPath); os.IsNotExist(err) {
-		t.Error("non-complete session worktree should still exist after detach")
-	}
-}
-
-func TestDetachAllCompleteReturnsNil(t *testing.T) {
-	repo := setupTestRepo(t)
-	mgr := NewManager(repo, defaultTestSettings())
-
-	cfg := Config{Task: "test", Rows: 24, Cols: 80}
-	sess, _, err := mgr.CreateSessionWithCommand(cfg, func(name string) *exec.Cmd {
-		return exec.Command("bash", "-c", "sleep 60")
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sess.SetLifecyclePhase(LifecycleComplete)
-
-	bs := mgr.Detach()
-	if bs != nil {
-		t.Errorf("expected nil RefrainState when all sessions are complete, got %+v", bs)
+		t.Error("running session worktree should still exist after detach")
 	}
 }
 

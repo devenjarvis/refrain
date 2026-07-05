@@ -20,7 +20,7 @@ import (
 )
 
 // blockingDrafter is a test PlanDrafter that blocks until its channel is
-// closed. Used to hold a session in LifecycleDrafting during assertions.
+// closed. Used to hold a session in its drafting state during assertions.
 type blockingDrafter struct{ block chan struct{} }
 
 func (b *blockingDrafter) Draft(_ context.Context, _ agent.DraftRequest) (string, error) {
@@ -168,8 +168,7 @@ func TestCreateAgentViaN(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 
@@ -228,8 +227,7 @@ func TestCreateMultipleAgentsViaTUI(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 
@@ -313,8 +311,7 @@ func TestAddAgentToSessionViaC(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 
@@ -382,8 +379,7 @@ func TestPanelFocusSwitching(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 
@@ -403,12 +399,6 @@ func TestPanelFocusSwitching(t *testing.T) {
 	if app.modals.Current() != focusList {
 		t.Fatalf("Expected focusList after esc, got %v", app.modals.Current())
 	}
-
-	// Sessions created by the legacy `n` path land in LifecyclePlanning by
-	// default. Planning rows now open the plan editor (PR3 wiring), so
-	// advance to Building with `b` before testing the focusLaunch entry.
-	model, _ = app.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
-	app = model.(App)
 
 	// Enter on the cursor-selected session re-opens focusLaunch.
 	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -448,8 +438,7 @@ func TestActionKeysBlockedInFocusLaunch(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 
@@ -498,8 +487,7 @@ func TestShiftEscForwardsEscapeToAgent(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 
@@ -585,24 +573,23 @@ func TestMouseWheelForwardsInAltScreen(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.openLaunchPanel(sess, ag, dir)
 
 	// Set a non-zero offset so we can tell the wheel branch didn't mutate it.
-	app.dashboard.scrollOffset = 5
+	app.launch.scrollOffset = 5
 	model, _ := app.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp, X: 40, Y: 10})
 	app = model.(App)
-	if app.dashboard.scrollOffset != 5 {
-		t.Fatalf("expected scrollOffset untouched (=5) when agent is in alt-screen, got %d", app.dashboard.scrollOffset)
+	if app.launch.scrollOffset != 5 {
+		t.Fatalf("expected scrollOffset untouched (=5) when agent is in alt-screen, got %d", app.launch.scrollOffset)
 	}
 
 	model, _ = app.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 40, Y: 10})
 	app = model.(App)
-	if app.dashboard.scrollOffset != 5 {
-		t.Fatalf("expected scrollOffset untouched on WheelDown in alt-screen, got %d", app.dashboard.scrollOffset)
+	if app.launch.scrollOffset != 5 {
+		t.Fatalf("expected scrollOffset untouched on WheelDown in alt-screen, got %d", app.launch.scrollOffset)
 	}
 }
 
@@ -638,8 +625,7 @@ func TestScrollOffsetResetsOnAltScreenEntry(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	// Open the launch panel on this agent so modals.LaunchAgent() targets it;
@@ -733,28 +719,14 @@ func TestKillAgentAsyncMarksClosing(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 	app.clampCursor()
 
-	// Position the pipeline cursor on the session so 'x' targets it. The session
-	// was created via CreateSessionWithCommand, so it lands in the Planning
-	// section by default.
-	planning := app.listItems().sectionItems(focusSectionPlanning)
-	idx := -1
-	for i, it := range planning {
-		if it.session != nil && it.session.ID == sess.ID {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		t.Fatalf("session %s not found in planning section", sess.ID)
-	}
-	app.cursor.JumpTo(focusSectionPlanning, idx)
+	// Position the list cursor on the session so 'x' targets it.
+	app.selectSessionRow(dir, sess.ID)
 
 	// Press 'x' — should mark closing and return a non-nil cmd. The agent
 	// must still be present in the manager because the kill is now async.
@@ -811,8 +783,7 @@ func TestKillResultMsgClearsClosingSet(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 
 	const repo = "/repo"
 	sessKey := cacheKey(repo, "sess-1")
@@ -852,8 +823,7 @@ func TestKillResultMsgClearsClosingSetOnError(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 
 	const repo = "/repo"
 	agentKey := agentCacheKey(repo, "agent-x")
@@ -924,8 +894,7 @@ func TestChimeSuppressionByStatus(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = resolved
@@ -1007,12 +976,6 @@ func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 	if app.modals.Review() == nil || app.modals.Review().Session() != sessR {
 		t.Fatalf("expected reviewSession=sessR, got %v", app.modals.Review())
 	}
-	// Opening the review panel is an action, not a transition — the phase
-	// must be untouched (rollback design §4.5).
-	if sessR.LifecyclePhase() != agent.LifecycleReadyForReview {
-		t.Errorf("expected sessR phase unchanged (ReadyForReview), got %v", sessR.LifecyclePhase())
-	}
-
 	view := app.View()
 	if !view.AltScreen {
 		t.Error("review panel View must keep AltScreen=true; otherwise focus mode flickers out of alt-screen and r looks like a no-op")
@@ -1025,18 +988,14 @@ func TestFocusMode_RKey_OpensReviewWithItems(t *testing.T) {
 func makeFocusModeApp(t *testing.T) (App, *agent.Session) {
 	t.Helper()
 	sessA := &agent.Session{Name: "active-a"}
-	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
 	sessB := &agent.Session{Name: "active-b"}
-	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
 	sessR := &agent.Session{Name: "review-r"}
-	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
+	app.sessionList.SetSize(120, 39)
+	seedSessionListItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessB},
@@ -1078,22 +1037,16 @@ func TestFocusModeEnterOnActiveOpensFocusLaunch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// New sessions land in Planning by default; this test wants the row in the
-	// Building section so the focusSectionBuilding cursor lands on it.
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
-
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir, Alias: "repo"}}}
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 0)
+	app.selectSessionRow(dir, sess.ID)
 
-	// Press enter on the active section: should jump into focusLaunch on ag.
+	// Press enter on the selected session: should jump into focusLaunch on ag.
 	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Text: ""})
 	app = model.(App)
 	if app.modals.Current() != focusLaunch {
@@ -1138,19 +1091,16 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	sess.MarkDone() // would qualify the session for "m" if it were intercepted
 
-	// Also queue a ReadyForReview session — would be picked up by "r" if intercepted.
+	// Also seed a second session — would be picked up by "r" if intercepted.
 	sessR := agent.NewSessionForTest("ready", "ready")
-	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
 	mgr.AddSessionForTest(sessR)
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir, Alias: "repo"}}}
@@ -1169,12 +1119,6 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 		if app.modals.LaunchSession() == nil || app.modals.LaunchSession().ID != sess.ID {
 			t.Fatalf("press %q: expected focusLaunchSession unchanged, got %v", ch, app.modals.LaunchSession())
 		}
-		if sess.LifecyclePhase() != agent.LifecycleInProgress {
-			t.Fatalf("press %q: expected sess phase unchanged=InProgress, got %v", ch, sess.LifecyclePhase())
-		}
-		if sessR.LifecyclePhase() != agent.LifecycleReadyForReview {
-			t.Fatalf("press %q: expected sessR phase unchanged=ReadyForReview, got %v", ch, sessR.LifecyclePhase())
-		}
 		if app.modals.Review() != nil {
 			t.Fatalf("press %q: expected reviewSession=nil, got %v", ch, app.modals.Review())
 		}
@@ -1187,16 +1131,13 @@ func TestFocusLaunch_FocusModeKeysForwardToAgent(t *testing.T) {
 func makeFocusModeMRApp(t *testing.T) (App, *agent.Session, *agent.Session) {
 	t.Helper()
 	sessA := agent.NewSessionForTest("a", "active-a")
-	sessA.SetLifecyclePhase(agent.LifecycleInProgress)
 	sessR := agent.NewSessionForTest("r", "review-r")
-	sessR.SetLifecyclePhase(agent.LifecycleReadyForReview)
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
+	app.sessionList.SetSize(120, 39)
+	seedSessionListItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sessA},
 		{kind: listItemSession, repoPath: "/r", session: sessR},
@@ -1209,7 +1150,6 @@ func makeFocusModeMRApp(t *testing.T) (App, *agent.Session, *agent.Session) {
 // (makeFocusModeMRApp), cleanup is a no-op but the panel still closes.
 func TestReviewPanel_CKey_MarksComplete(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
-	sessR.SetLifecyclePhase(agent.LifecycleInReview)
 	app.openReview(newReviewPanel(sessR, "", app.width, app.height, app.buildReviewDeps()))
 
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
@@ -1231,7 +1171,6 @@ func TestReviewPanel_CKey_MarksComplete(t *testing.T) {
 func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTest("sess-review", "review")
-	sess.SetLifecyclePhase(agent.LifecycleInReview)
 
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 	defer mgr.Shutdown()
@@ -1274,7 +1213,6 @@ func TestReviewPanel_CMarkCompleteClosesSession(t *testing.T) {
 // since the underlying helper (openSessionInFocusLaunch) is shared.
 func TestReviewPanel_TKey_NoAgents_ShowsError(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
-	sessR.SetLifecyclePhase(agent.LifecycleInReview)
 	app.openReview(newReviewPanel(sessR, "", app.width, app.height, app.buildReviewDeps()))
 
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
@@ -1292,10 +1230,6 @@ func TestReviewPanel_TKey_NoAgents_ShowsError(t *testing.T) {
 	if app.modals.Review() != nil {
 		t.Errorf("expected reviewSession cleared after t, got %v", app.modals.Review())
 	}
-	// Phase preserved so the session is still in REVIEW QUEUE.
-	if sessR.LifecyclePhase() != agent.LifecycleInReview {
-		t.Errorf("expected sessR phase preserved=InReview, got %v", sessR.LifecyclePhase())
-	}
 }
 
 // TestReviewPanel_ComposeModalRendersOverPanel verifies that when the
@@ -1303,13 +1237,11 @@ func TestReviewPanel_TKey_NoAgents_ShowsError(t *testing.T) {
 // modal centered over the panel instead of the bare review panel.
 func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
 	sessR := agent.NewSessionForTest("s", "ship-it")
-	sessR.SetLifecyclePhase(agent.LifecycleInReview)
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.openReview(newReviewPanel(sessR, "", app.width, app.height, app.buildReviewDeps()))
 	app.prComposeModal.SetSize(120, 39)
 	_ = app.prComposeModal.Open("My PR Title", "My PR Body", false, "ship-it")
@@ -1325,11 +1257,9 @@ func TestReviewPanel_ComposeModalRendersOverPanel(t *testing.T) {
 
 // TestReviewPanel_PKey_NoPR_DoesNotOrphan verifies that pressing "p" with no
 // PR cached starts the draft flow (shows progress text) and does NOT make the
-// session unreachable. The session must still be in LifecycleInReview so
-// reviewQueueSessions() can surface it.
+// session unreachable: it must still appear in the session list afterwards.
 func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	app, _, sessR := makeFocusModeMRApp(t)
-	sessR.SetLifecyclePhase(agent.LifecycleInReview)
 	// ghClient must be non-nil to pass the auth guard before startPRDraftCmd.
 	// Set it BEFORE building the review panel's deps: the panel binds its
 	// GHClient handle at construction (post-§3 fold), so a later assignment
@@ -1350,7 +1280,7 @@ func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 			sessR.ID, app.prDraftInFlight, app.prDraftSessionID)
 	}
 
-	// Press ESC to close the panel — session stays InReview.
+	// Press ESC to close the panel — the session stays in the list.
 	model, cmd = app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	app = model.(App)
 	app = pumpPanelCmd(t, app, cmd)
@@ -1358,21 +1288,18 @@ func TestReviewPanel_PKey_NoPR_DoesNotOrphan(t *testing.T) {
 	if app.modals.Current() != focusList {
 		t.Errorf("expected panelFocus=focusList after esc, got %v", app.modals.Current())
 	}
-	if sessR.LifecyclePhase() != agent.LifecycleInReview {
-		t.Errorf("expected sessR phase=InReview after esc, got %v", sessR.LifecyclePhase())
-	}
 
-	// Regression: the InReview session must still appear in the review queue.
-	queue := app.listItems().reviewQueueSessions()
+	// Regression: the session must still appear in the session list.
+	layout := buildSessionListLayout(app.listItems())
 	found := false
-	for _, item := range queue {
-		if item.session == sessR {
+	for _, row := range layout.rows {
+		if row.session == sessR {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatal("InReview session orphaned: not present in reviewQueueSessions() after p+esc with no PR")
+		t.Fatal("session orphaned: not present in the session list after p+esc with no PR")
 	}
 }
 
@@ -1406,18 +1333,15 @@ func TestPipeline_DKey_OpensDiffViewer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir, Alias: "repo"}}}
-	app.cursor.SetSection(focusSectionBuilding)
-	app.cursor.SetIndex(focusSectionBuilding, 0)
+	app.selectSessionRow(dir, sess.ID)
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	app = model.(App)
@@ -1431,8 +1355,7 @@ func TestPipeline_SKey_OpensSettings(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	app = model.(App)
@@ -1446,8 +1369,7 @@ func TestPipeline_AKey_OpensFileBrowser(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	app = model.(App)
@@ -1470,8 +1392,7 @@ func TestPipeline_RKey_OpensRepoPickerInManageMode(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir1] = mgr1
 	app.managers[dir2] = mgr2
 	app.activeRepo = dir1
@@ -1506,8 +1427,7 @@ func TestRepoPicker_ManageMode_SwitchActiveUpdatesActiveRepo(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir1] = mgr1
 	app.managers[dir2] = mgr2
 	app.activeRepo = dir1
@@ -1540,8 +1460,7 @@ func TestRepoPicker_ManageMode_EditSettingsOpensConfigFormAndReturns(t *testing.
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir1] = mgr1
 	app.activeRepo = dir1
 	app.cfg = &config.Config{
@@ -1626,8 +1545,7 @@ func TestRepoPicker_ManageMode_Remove_BlockedWhenSessionsExist(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir1] = mgr1
 	app.managers[dir2] = mgr2
 	app.activeRepo = dir1
@@ -1667,8 +1585,7 @@ func TestRepoPicker_ManageMode_Remove_DeletesAndReassignsActive(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir1] = mgr1
 	app.managers[dir2] = mgr2
 	app.activeRepo = dir1
@@ -1717,8 +1634,7 @@ func TestRepoPicker_ManageMode_RemoveMsg_UnknownPathSetsError(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir1] = mgr1
 	app.activeRepo = dir1
 	app.cfg = &config.Config{
@@ -1750,8 +1666,7 @@ func TestPipeline_XKey_NoSession(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	app = model.(App)
@@ -1764,23 +1679,19 @@ func TestPipeline_XKey_NoSession(t *testing.T) {
 }
 
 // TestPipeline_PKey_NoPRStartsDraft verifies that pressing 'p' with no cached
-// PR on a ReadyForReview session starts the push+draft pipeline (shows progress text).
-// Building-phase sessions are excluded: p only fires for ReadyForReview/InReview.
+// PR on an idle session starts the push+draft pipeline (shows progress text).
 func TestPipeline_PKey_NoPRStartsDraft(t *testing.T) {
 	sess := agent.NewSessionForTest("s", "ready-a")
-	sess.SetLifecyclePhase(agent.LifecycleReadyForReview)
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	seedDashboardItems(&app, []listItem{
+	app.sessionList.SetSize(120, 39)
+	seedSessionListItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/r", session: sess},
 	})
-	app.cursor.SetSection(focusSectionReview)
-	app.cursor.SetIndex(focusSectionReview, 0)
+	app.selectSessionRow("/r", sess.ID)
 	// ghClient must be non-nil to pass the auth guard before startPRDraftCmd.
 	app.ghClient = &github.Client{}
 
@@ -2095,7 +2006,6 @@ func TestMergePRMsg_MarksDoneAndClosesPanel(t *testing.T) {
 func TestPRPollMsg_ExternalMergeMarksDone(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTest("sess-ext", "ship")
-	phaseBefore := sess.LifecyclePhase()
 
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 	defer mgr.Shutdown()
@@ -2116,9 +2026,6 @@ func TestPRPollMsg_ExternalMergeMarksDone(t *testing.T) {
 
 	if sess.DoneAt().IsZero() {
 		t.Error("session should be marked done when the poller sees a merged PR")
-	}
-	if sess.LifecyclePhase() != phaseBefore {
-		t.Errorf("poller must not mutate lifecycle: got %v, want %v", sess.LifecyclePhase(), phaseBefore)
 	}
 	if cmd != nil {
 		t.Error("external merge must not trigger session cleanup")
@@ -2170,49 +2077,38 @@ func TestPRPollMsg_ExternalCloseLeavesSession(t *testing.T) {
 }
 
 // TestPRPollMsg_OpenPRNeverMutatesSession verifies that discovering an open PR
-// — externally opened or otherwise — never changes a session's lifecycle and
-// never closes an open review panel. The poller only writes the badge cache
+// — externally opened or otherwise — never mutates the session and never
+// closes an open review panel. The poller only writes the badge cache
 // (rollback design §4.7).
 func TestPRPollMsg_OpenPRNeverMutatesSession(t *testing.T) {
-	phases := []agent.LifecyclePhase{
-		agent.LifecyclePlanning,
-		agent.LifecycleInProgress,
-		agent.LifecycleReadyForReview,
-		agent.LifecycleInReview,
+	dir := t.TempDir()
+	sess := agent.NewSessionForTest("sess-x", "branch")
+
+	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
+	defer mgr.Shutdown()
+	mgr.AddSessionForTest(sess)
+
+	app := NewApp()
+	app.openReview(newReviewPanel(sess, dir, app.width, app.height, app.buildReviewDeps()))
+	app.managers[dir] = mgr
+	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
+
+	msg := prPollMsg{
+		sessionID: "sess-x",
+		repoPath:  dir,
+		pr:        &github.PRState{State: "open", Number: 7},
 	}
-	for _, phase := range phases {
-		t.Run(phase.String(), func(t *testing.T) {
-			dir := t.TempDir()
-			sess := agent.NewSessionForTest("sess-x", "branch")
-			sess.SetLifecyclePhase(phase)
+	model, _ := app.Update(msg)
+	got := model.(App)
 
-			mgr := agent.NewManager(dir, config.Resolve(nil, nil))
-			defer mgr.Shutdown()
-			mgr.AddSessionForTest(sess)
-
-			app := NewApp()
-			app.openReview(newReviewPanel(sess, dir, app.width, app.height, app.buildReviewDeps()))
-			app.managers[dir] = mgr
-			app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
-
-			msg := prPollMsg{
-				sessionID: "sess-x",
-				repoPath:  dir,
-				pr:        &github.PRState{State: "open", Number: 7},
-			}
-			model, _ := app.Update(msg)
-			got := model.(App)
-
-			if sess.LifecyclePhase() != phase {
-				t.Errorf("lifecycle = %v, want %v (poller must not mutate sessions)", sess.LifecyclePhase(), phase)
-			}
-			if got.modals.Review() == nil {
-				t.Error("review panel should stay open when an open PR is discovered")
-			}
-			if entry := got.prCache[cacheKey(dir, "sess-x")]; entry == nil || entry.pr == nil || entry.pr.Number != 7 {
-				t.Error("badge cache should be updated with the discovered PR")
-			}
-		})
+	if !sess.DoneAt().IsZero() {
+		t.Error("an open PR must not mark the session done (poller must not mutate sessions)")
+	}
+	if got.modals.Review() == nil {
+		t.Error("review panel should stay open when an open PR is discovered")
+	}
+	if entry := got.prCache[cacheKey(dir, "sess-x")]; entry == nil || entry.pr == nil || entry.pr.Number != 7 {
+		t.Error("badge cache should be updated with the discovered PR")
 	}
 }
 
@@ -2273,7 +2169,6 @@ func TestHandlePRCreated_UsesMsgRepoPath_ForAutoOpen(t *testing.T) {
 
 	sessA := agent.NewSessionForTest("session-1", "branch-a")
 	sessB := agent.NewSessionForTest("session-1", "branch-b")
-	sessB.SetLifecyclePhase(agent.LifecycleInProgress)
 
 	mgrA := agent.NewManager(repoA, config.Resolve(nil, nil))
 	defer mgrA.Shutdown()
@@ -2335,7 +2230,6 @@ func TestMergePRMsg_ErrorSetsError(t *testing.T) {
 // is not merge-ready, and 'M' bypasses the gate.
 func TestShippingPanel_MKeyGatedOnReady(t *testing.T) {
 	sess := agent.NewSessionForTest("s", "ship")
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
 
 	app := NewApp()
 	// Seed the cache BEFORE building deps: the PR panel binds its PRCache
@@ -2780,12 +2674,10 @@ func TestBuildReviewReworkPrompt_FlaggedNoCommits(t *testing.T) {
 	}
 }
 
-// TestNKeyOpensPromptModal_WhenPlanFirstEnabled verifies the new plan-first
-// gate: with PlanFirstEnabled=true, pressing `n` opens the prompt modal
-// instead of immediately creating a session. With the flag off (today's
-// default), `n` continues the legacy spawn path covered by
-// TestCreateAgentViaN.
-func TestNKeyOpensPromptModal_WhenPlanFirstEnabled(t *testing.T) {
+// TestNKeyOpensNewSessionScreen verifies that pressing `n` opens the
+// new-session composition screen without spawning anything, and that esc
+// dismisses it without side effects.
+func TestNKeyOpensNewSessionScreen(t *testing.T) {
 	dir, err := os.MkdirTemp("", "refrain-tui-planfirst-*")
 	if err != nil {
 		t.Fatal(err)
@@ -2805,16 +2697,14 @@ func TestNKeyOpensPromptModal_WhenPlanFirstEnabled(t *testing.T) {
 		}
 	}
 
-	enabled := true
-	resolved := config.Resolve(&config.GlobalSettings{PlanFirstEnabled: &enabled}, nil)
+	resolved := config.Resolve(nil, nil)
 	mgr := agent.NewManager(dir, resolved)
 	defer mgr.Shutdown()
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = resolved
@@ -2823,7 +2713,7 @@ func TestNKeyOpensPromptModal_WhenPlanFirstEnabled(t *testing.T) {
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
 	if app.view != ViewNewSession {
-		t.Fatal("PlanFirstEnabled n press should open ViewNewSession")
+		t.Fatal("n press should open ViewNewSession")
 	}
 	if mgr.AgentCount() != 0 {
 		t.Errorf("no agent should spawn when new-session screen is open, got %d", mgr.AgentCount())
@@ -2872,16 +2762,14 @@ func TestNewSessionFlow_NKeyEntersView(t *testing.T) {
 		}
 	}
 
-	enabled := true
-	resolved := config.Resolve(&config.GlobalSettings{PlanFirstEnabled: &enabled}, nil)
+	resolved := config.Resolve(nil, nil)
 	mgr := agent.NewManager(dir, resolved)
 	defer mgr.Shutdown()
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = resolved
@@ -2890,7 +2778,7 @@ func TestNewSessionFlow_NKeyEntersView(t *testing.T) {
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	app = model.(App)
 	if app.view != ViewNewSession {
-		t.Fatalf("PlanFirstEnabled n press should open ViewNewSession, got %v", app.view)
+		t.Fatalf("n press should open ViewNewSession, got %v", app.view)
 	}
 	if mgr.AgentCount() != 0 {
 		t.Errorf("no agent should spawn when entering ViewNewSession, got %d", mgr.AgentCount())
@@ -2941,8 +2829,7 @@ func TestNewSessionFlow_SubmitReturnsToDashboard(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = resolved
@@ -2958,46 +2845,6 @@ func TestNewSessionFlow_SubmitReturnsToDashboard(t *testing.T) {
 	}
 	if app.view != ViewDashboard {
 		t.Errorf("after planning-path submit, view = %v, want ViewDashboard", app.view)
-	}
-}
-
-// TestCreateResult_SessionsCreatedCount_OnlyIncrementsForNewSession asserts
-// the wellness counter increments exactly once per new session, regardless
-// of whether the session was born via the legacy `n` path, the skip path,
-// or the plan-first approve path. Specifically: a createResultMsg without
-// isNewSession (an AddAgent or AddShell into an existing session) must not
-// increment the counter.
-func TestCreateResult_SessionsCreatedCount_OnlyIncrementsForNewSession(t *testing.T) {
-	app := NewApp()
-	app.activeRepo = "/repo"
-	if app.wellness.sessionsCreatedCount != 0 {
-		t.Fatalf("initial sessionsCreatedCount = %d, want 0", app.wellness.sessionsCreatedCount)
-	}
-
-	// New session: counter ticks.
-	model, _ := app.Update(createResultMsg{sessionID: "s1", agentID: "a1", isNewSession: true})
-	app = model.(App)
-	if app.wellness.sessionsCreatedCount != 1 {
-		t.Errorf("after isNewSession=true, sessionsCreatedCount = %d, want 1", app.wellness.sessionsCreatedCount)
-	}
-
-	// AddAgent into existing session: counter must NOT tick.
-	model, _ = app.Update(createResultMsg{sessionID: "s1", agentID: "a2"})
-	app = model.(App)
-	if app.wellness.sessionsCreatedCount != 1 {
-		t.Errorf("after AddAgent (isNewSession=false), sessionsCreatedCount = %d, want 1", app.wellness.sessionsCreatedCount)
-	}
-
-	// Another fresh session: counter ticks again.
-	model, _ = app.Update(createResultMsg{sessionID: "s2", agentID: "a3", isNewSession: true})
-	app = model.(App)
-	if app.wellness.sessionsCreatedCount != 2 {
-		t.Errorf("after second new session, sessionsCreatedCount = %d, want 2", app.wellness.sessionsCreatedCount)
-	}
-
-	// agentsCreatedCount sanity: every successful createResultMsg increments.
-	if app.wellness.agentsCreatedCount != 3 {
-		t.Errorf("agentsCreatedCount = %d, want 3", app.wellness.agentsCreatedCount)
 	}
 }
 
@@ -3033,9 +2880,9 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 		}
 	}
 
-	// Block the drafter so the session stays in LifecycleDrafting during
-	// assertions — otherwise the goroutine may complete and transition back
-	// to LifecyclePlanning before the checks run. Register Shutdown first
+	// Block the drafter so the session stays in its drafting state during
+	// assertions — otherwise the goroutine may complete and clear the
+	// drafting flag before the checks run. Register Shutdown first
 	// so that LIFO defer ordering runs close(block) before Shutdown waits
 	// for the drafter goroutine (prevents deadlock).
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
@@ -3047,14 +2894,12 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	resolved := config.ResolvedSettings{
 		BypassPermissions: true,
 		AgentProgram:      "bash",
-		PlanFirstEnabled:  true,
 	}
 	app.resolvedCache[dir] = resolved
 
@@ -3081,18 +2926,12 @@ func TestSubmitPromptModal_PlanningPath_StaysDashboard(t *testing.T) {
 	if !sessions[0].IsDrafting() && !sessions[0].HasPlan() && sessions[0].DraftError() == nil {
 		t.Error("expected an in-flight or completed draft after planning-path submit")
 	}
-	if app.cursor.Section() != focusSectionPlanning {
-		t.Errorf("cursor section: got %v, want focusSectionPlanning", app.cursor.Section())
+	row, ok := app.selectedSessionRow()
+	if !ok {
+		t.Fatal("session list is empty after submitPromptModal planning path")
 	}
-	planning := app.listItems().planningSessions()
-	if len(planning) == 0 {
-		t.Fatal("planning section is empty after submitPromptModal planning path")
-	}
-	if app.cursor.Index(focusSectionPlanning) >= len(planning) {
-		t.Fatalf("focusPlanningIdx %d out of range (len=%d)", app.cursor.Index(focusSectionPlanning), len(planning))
-	}
-	if got := planning[app.cursor.Index(focusSectionPlanning)].session; got == nil || got.ID != sessions[0].ID {
-		t.Errorf("cursor does not point at new session: got %v", got)
+	if row.session == nil || row.session.ID != sessions[0].ID {
+		t.Errorf("cursor does not point at new session: got %v", row.session)
 	}
 }
 
@@ -3126,13 +2965,11 @@ func TestPlannerQuestionMsg_AutoOpensPlanEditor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSessionNoAgent: %v", err)
 	}
-	sess.SetLifecyclePhase(agent.LifecycleDrafting)
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = config.ResolvedSettings{AgentProgram: "bash"}
@@ -3182,8 +3019,7 @@ func TestPlannerQuestionMsg_DoesNotReplaceOpenEditor(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 
 	editorA := newPlanEditor(sessA, "", 120, 39)
 	app.openPlanEditorPanel(&editorA)
@@ -3258,8 +3094,7 @@ func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir1] = mgr1
 	app.managers[dir2] = mgr2
 	app.activeRepo = dir1 // matches initAppMsg's "default to first repo" behavior
@@ -3272,7 +3107,6 @@ func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 	resolved := config.ResolvedSettings{
 		BypassPermissions: true,
 		AgentProgram:      "bash",
-		PlanFirstEnabled:  true,
 	}
 	app.resolvedCache[dir1] = resolved
 	app.resolvedCache[dir2] = resolved
@@ -3298,7 +3132,7 @@ func TestSubmitPromptModalRoutesToActiveRepo(t *testing.T) {
 		t.Fatalf("after picking repo2: activeRepo = %q, want %q", app.activeRepo, dir2)
 	}
 	if app.view != ViewNewSession {
-		t.Fatal("expected ViewNewSession after picker select with PlanFirstEnabled=true")
+		t.Fatal("expected ViewNewSession after picker select")
 	}
 
 	// Submit through the planning path (planFirst=true uses
@@ -3344,8 +3178,7 @@ func TestPlannerQuestionMsg_SkippedSessionMissing(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	// Dashboard visible, no editor open. modals zero value = focusList.
@@ -3439,7 +3272,6 @@ func TestRefreshPRStatus_WrongRepoReturnsError(t *testing.T) {
 
 func TestShippingPanel_CursorAndScrollKeys(t *testing.T) {
 	sess := agent.NewSessionForTest("ship-cs", "ship")
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
 	const repo = "/repo"
 	app.openPRPanel(newPRPanel(sess, repo, app.width, app.height, app.buildPRPanelDeps()))
@@ -3503,7 +3335,6 @@ func TestShippingPanel_CursorAndScrollKeys(t *testing.T) {
 
 func TestShippingPanel_VerdictKeys(t *testing.T) {
 	sess := agent.NewSessionForTest("ship-v", "ship")
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	app := NewApp()
 	const repo = "/repo"
 	app.openPRPanel(newPRPanel(sess, repo, app.width, app.height, app.buildPRPanelDeps()))
@@ -3550,7 +3381,6 @@ func TestShippingPanel_VerdictKeys(t *testing.T) {
 func TestAddressFeedback_ClearsTriage(t *testing.T) {
 	dir := t.TempDir()
 	sess := agent.NewSessionForTest("addr-t", "ship")
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
 
 	mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 	defer mgr.Shutdown()
@@ -3562,8 +3392,7 @@ func TestAddressFeedback_ClearsTriage(t *testing.T) {
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	sessKey := cacheKey(dir, sess.ID)
 	app.prCache[sessKey] = &prCacheEntry{
 		pr: &github.PRState{Number: 5, MergeableState: "clean"},
@@ -3610,7 +3439,6 @@ func TestAddressFeedback_RefusesOnMergedPR(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			sess := agent.NewSessionForTest("addr-merged", "ship")
-			sess.SetLifecyclePhase(agent.LifecycleShipping)
 
 			mgr := agent.NewManager(dir, config.Resolve(nil, nil))
 			defer mgr.Shutdown()
@@ -3622,8 +3450,7 @@ func TestAddressFeedback_RefusesOnMergedPR(t *testing.T) {
 			app.cfg = &config.Config{Repos: []config.Repo{{Path: dir}}}
 			app.width = 120
 			app.height = 40
-			app.dashboard.width = 120
-			app.dashboard.height = 39
+			app.sessionList.SetSize(120, 39)
 			app.prCache[cacheKey(dir, sess.ID)] = &prCacheEntry{
 				pr: &github.PRState{Number: 5, State: tc.state},
 				threads: []github.ReviewThread{
@@ -3631,7 +3458,6 @@ func TestAddressFeedback_RefusesOnMergedPR(t *testing.T) {
 				},
 			}
 
-			before := sess.LifecyclePhase()
 			model, cmd := app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 			gotApp := model.(App)
 			if cmd != nil {
@@ -3644,8 +3470,8 @@ func TestAddressFeedback_RefusesOnMergedPR(t *testing.T) {
 			if gotApp.err == "" {
 				t.Errorf("expected an error to be surfaced for %s PR, got empty", tc.state)
 			}
-			if sess.LifecyclePhase() != before {
-				t.Errorf("session phase changed (%v → %v) — addressFeedback should refuse, not transition", before, sess.LifecyclePhase())
+			if n := len(sess.Agents()); n != 0 {
+				t.Errorf("addressFeedback should refuse — no feedback agent must spawn, got %d agents", n)
 			}
 		})
 	}
@@ -3668,8 +3494,7 @@ func setupSubmitModalApp(t *testing.T, resolved config.ResolvedSettings) (App, *
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = resolved
@@ -3775,8 +3600,7 @@ func TestApprovePlanAndSpawn_AppliesAgentModelOverride(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = resolved
@@ -3803,8 +3627,7 @@ func TestApprovePlanAndSpawn_NoOverride_UsesResolvedDefault(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = resolved
@@ -3961,7 +3784,6 @@ func TestOpenNewSession_SeedsOverrideDefaultsFromResolved(t *testing.T) {
 // with a non-empty rawDiff transitions to ViewDiff with the review modal preserved.
 func TestReviewPanel_EnterOpensDiffViewer(t *testing.T) {
 	sessR := agent.NewSessionForTest("r", "review-r")
-	sessR.SetLifecyclePhase(agent.LifecycleInReview)
 	sessR.SetOriginalPrompt("Fix auth")
 	sessR.MarkDone()
 
@@ -4014,7 +3836,6 @@ func TestReviewPanel_EnterOpensDiffViewer(t *testing.T) {
 // TestReviewPanel_SpaceIsNoOp verifies that space does not open the diff viewer.
 func TestReviewPanel_SpaceIsNoOp(t *testing.T) {
 	sessR := agent.NewSessionForTest("r", "review-r")
-	sessR.SetLifecyclePhase(agent.LifecycleInReview)
 	sessR.SetOriginalPrompt("Fix auth")
 	sessR.MarkDone()
 
@@ -4049,17 +3870,15 @@ func TestReviewPanel_SpaceIsNoOp(t *testing.T) {
 // focusLaunch, but still moves the pipeline cursor to the new session's row.
 func TestCreateResult_SkipFocusLaunch_StaysOnDashboard(t *testing.T) {
 	sess := agent.NewSessionForTest("sess-skip", "skip-session")
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("agent-skip", false, agent.StatusIdle)
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	// Seed the session into a fake manager so app.listItems() reproduces the
 	// Building row the createResultMsg handler moves the cursor to.
-	seedDashboardItems(&app, []listItem{
+	seedSessionListItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: "/repo", repoName: "repo"},
 		{kind: listItemSession, repoPath: "/repo", session: sess},
 		{kind: listItemAgent, repoPath: "/repo", session: sess, agent: ag},
@@ -4121,8 +3940,7 @@ func TestApprovePlanAndSpawn_StaysOnDashboard(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = config.ResolvedSettings{
@@ -4169,8 +3987,8 @@ func TestApprovePlanAndSpawn_StaysOnDashboard(t *testing.T) {
 	}
 }
 
-// setupAutoPromoteRepo creates a temp git repo and a manager for auto-promote tests.
-func setupAutoPromoteRepo(t *testing.T) (dir string, mgr *agent.Manager) {
+// setupTempRepoManager creates a temp git repo and a manager for App tests.
+func setupTempRepoManager(t *testing.T) (dir string, mgr *agent.Manager) {
 	t.Helper()
 	var err error
 	dir, err = os.MkdirTemp("", "refrain-auto-promote-*")
@@ -4192,117 +4010,6 @@ func setupAutoPromoteRepo(t *testing.T) (dir string, mgr *agent.Manager) {
 	mgr = agent.NewManager(dir, config.Resolve(nil, nil))
 	t.Cleanup(mgr.Shutdown)
 	return dir, mgr
-}
-
-// TestAgentEvent_IdleAutoPromotesInProgressToReadyForReview verifies that
-// receiving a StatusIdle event for a session in LifecycleInProgress whose
-// agents are all reviewable advances the session to LifecycleReadyForReview.
-func TestAgentEvent_IdleAutoPromotesInProgressToReadyForReview(t *testing.T) {
-	dir, mgr := setupAutoPromoteRepo(t)
-
-	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
-	if err != nil {
-		t.Fatalf("CreateSessionNoAgent: %v", err)
-	}
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
-	ag := sess.AddTestAgent("ag-idle-1", false, agent.StatusIdle)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	app.managers[dir] = mgr
-	app.activeRepo = dir
-	app.resolvedCache[dir] = config.Resolve(nil, nil)
-
-	model, cmd := app.Update(agentEventMsg{
-		event: agent.Event{
-			Type:      agent.EventStatusChanged,
-			AgentID:   ag.ID,
-			SessionID: sess.ID,
-			Status:    agent.StatusIdle,
-		},
-		repoPath: dir,
-	})
-	if m, ok := model.(*App); ok {
-		_ = m
-	} else {
-		_ = model.(App)
-	}
-
-	if sess.LifecyclePhase() != agent.LifecycleReadyForReview {
-		t.Errorf("phase: got %v, want LifecycleReadyForReview", sess.LifecyclePhase())
-	}
-	if cmd == nil {
-		t.Error("returned Cmd is nil; expected tea.Batch(fetchReviewDiffCmd, listenEvents)")
-	}
-}
-
-// TestAgentEvent_ActiveDoesNotAutoPromote verifies that an Active-status event
-// does not advance a session from LifecycleInProgress to ReadyForReview.
-func TestAgentEvent_ActiveDoesNotAutoPromote(t *testing.T) {
-	dir, mgr := setupAutoPromoteRepo(t)
-
-	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
-	if err != nil {
-		t.Fatalf("CreateSessionNoAgent: %v", err)
-	}
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
-	ag := sess.AddTestAgent("ag-active-1", false, agent.StatusActive)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.managers[dir] = mgr
-	app.activeRepo = dir
-
-	app.Update(agentEventMsg{ //nolint:errcheck
-		event: agent.Event{
-			Type:      agent.EventStatusChanged,
-			AgentID:   ag.ID,
-			SessionID: sess.ID,
-			Status:    agent.StatusActive,
-		},
-		repoPath: dir,
-	})
-
-	if sess.LifecyclePhase() != agent.LifecycleInProgress {
-		t.Errorf("phase: got %v, want LifecycleInProgress (Active event must not promote)", sess.LifecyclePhase())
-	}
-}
-
-// TestAgentEvent_IdleLeavesShippingPhaseAlone verifies that a Shipping-phase
-// session is not demoted to ReadyForReview when its agents go idle.
-func TestAgentEvent_IdleLeavesShippingPhaseAlone(t *testing.T) {
-	dir, mgr := setupAutoPromoteRepo(t)
-
-	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
-	if err != nil {
-		t.Fatalf("CreateSessionNoAgent: %v", err)
-	}
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
-	ag := sess.AddTestAgent("ag-ship-1", false, agent.StatusIdle)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.managers[dir] = mgr
-	app.activeRepo = dir
-
-	app.Update(agentEventMsg{ //nolint:errcheck
-		event: agent.Event{
-			Type:      agent.EventStatusChanged,
-			AgentID:   ag.ID,
-			SessionID: sess.ID,
-			Status:    agent.StatusIdle,
-		},
-		repoPath: dir,
-	})
-
-	if sess.LifecyclePhase() != agent.LifecycleShipping {
-		t.Errorf("phase: got %v, want LifecycleShipping (idle event must not demote Shipping session)", sess.LifecyclePhase())
-	}
 }
 
 // TestPollAllSessions_PassesCachedPRNumberForAnySession verifies that
@@ -4404,14 +4111,12 @@ func (r *recordingDrafter) Calls() []string {
 
 // TestApp_PlanEditorRetryMsg_CallsStartDraftWithOriginalPrompt verifies that
 // dispatching a planEditorRetryMsg causes the App to call Manager.StartDraft
-// with the session's OriginalPrompt, transitioning the session to
-// LifecycleDrafting.
+// with the session's OriginalPrompt.
 func TestApp_PlanEditorRetryMsg_CallsStartDraftWithOriginalPrompt(t *testing.T) {
 	dir := t.TempDir()
 	worktreeDir := t.TempDir()
 
 	sess := agent.NewSessionForTestWithPath("retry-sess", "retry", worktreeDir)
-	sess.SetLifecyclePhase(agent.LifecyclePlanning)
 	sess.SetDraftError(errors.New("overloaded"))
 	sess.SetOriginalPrompt("add dark mode")
 
@@ -4488,9 +4193,7 @@ func TestPRCache_PerRepo_NoCollision(t *testing.T) {
 func TestHandlePRPoll_DoesNotClobberAcrossRepos(t *testing.T) {
 	const repoA, repoB = "/repo/a", "/repo/b"
 	sessA := agent.NewSessionForTest("session-1", "branch-a")
-	sessA.SetLifecyclePhase(agent.LifecycleShipping)
 	sessB := agent.NewSessionForTest("session-1", "branch-b")
-	sessB.SetLifecyclePhase(agent.LifecycleShipping)
 
 	mgrA := agent.NewManager(repoA, config.Resolve(nil, nil))
 	defer mgrA.Shutdown()
@@ -4615,68 +4318,16 @@ func TestCleanStaleCaches_ScopesByRepo(t *testing.T) {
 	}
 }
 
-// TestAutoPromoteToReview_TriggersValidation verifies that auto-promoting a
-// session to LifecycleReadyForReview initialises a validationRunState when the
-// repo has ValidationChecks configured.
-func TestAutoPromoteToReview_TriggersValidation(t *testing.T) {
-	dir, mgr := setupAutoPromoteRepo(t)
-
-	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
-	if err != nil {
-		t.Fatalf("CreateSessionNoAgent: %v", err)
-	}
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
-	ag := sess.AddTestAgent("ag-idle-val-1", false, agent.StatusIdle)
-
-	app := NewApp()
-	app.width = 120
-	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
-	app.managers[dir] = mgr
-	app.activeRepo = dir
-	app.resolvedCache[dir] = config.ResolvedSettings{
-		ValidationChecks: []config.ValidationCheck{
-			{Name: "Tests", Command: "echo test"},
-			{Name: "Vet", Command: "echo vet"},
-		},
-	}
-
-	app.Update(agentEventMsg{ //nolint:errcheck
-		event: agent.Event{
-			Type:      agent.EventStatusChanged,
-			AgentID:   ag.ID,
-			SessionID: sess.ID,
-			Status:    agent.StatusIdle,
-		},
-		repoPath: dir,
-	})
-
-	run := app.validationRuns[cacheKey(dir, sess.ID)]
-	if run == nil {
-		t.Fatal("validationRuns[cacheKey(dir, sess.ID)] is nil — validation was not triggered")
-	}
-	if len(run.results) != 2 {
-		t.Errorf("len(results) = %d, want 2", len(run.results))
-	}
-	for i, r := range run.results {
-		if r.state != checkRunning {
-			t.Errorf("results[%d].state = %v, want checkRunning", i, r.state)
-		}
-	}
-}
-
 // TestOpenReview_TriggersValidation verifies that opening the review panel
 // with 'r' on a finished session with configured checks starts a validation
 // run (the replacement for the retired mark-ready 'm' key).
 func TestOpenReview_TriggersValidation(t *testing.T) {
-	dir, mgr := setupAutoPromoteRepo(t)
+	dir, mgr := setupTempRepoManager(t)
 
 	sess, err := mgr.CreateSessionNoAgent(agent.Config{Rows: 24, Cols: 80, AgentProgram: "bash"})
 	if err != nil {
 		t.Fatalf("CreateSessionNoAgent: %v", err)
 	}
-	sess.SetLifecyclePhase(agent.LifecycleInProgress)
 	ag := sess.AddTestAgent("ag-idle-m-1", false, agent.StatusIdle)
 	_ = ag
 	sess.MarkDone()
@@ -4684,8 +4335,7 @@ func TestOpenReview_TriggersValidation(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.managers[dir] = mgr
 	app.activeRepo = dir
 	app.resolvedCache[dir] = config.ResolvedSettings{
@@ -4767,23 +4417,5 @@ func TestValidationRuns_RepoKeyedNoCollision(t *testing.T) {
 	}
 	if _, ok := app.validationRuns[cacheKey(repoB, sessB.ID)]; ok {
 		t.Error("cleanStaleCaches leaked the stale repoB entry")
-	}
-}
-
-// TestInit_SeedsLastInputAt verifies that handleInit populates lastInputAt so
-// the idle-decay path starts from a known reference rather than the zero value.
-func TestInit_SeedsLastInputAt(t *testing.T) {
-	app := NewApp()
-	app.cfg = &config.Config{}
-	before := time.Now()
-	model, _ := app.Update(initAppMsg{})
-	after := time.Now()
-	app = model.(App)
-
-	if app.wellness.lastInputAt.IsZero() {
-		t.Fatal("handleInit must set lastInputAt to a non-zero time")
-	}
-	if app.wellness.lastInputAt.Before(before) || app.wellness.lastInputAt.After(after) {
-		t.Errorf("lastInputAt %v is not within [%v, %v]", app.wellness.lastInputAt, before, after)
 	}
 }

@@ -61,24 +61,6 @@ func TestBuildSessionListLayout_EmptyRepoGetsHintLine(t *testing.T) {
 	}
 }
 
-func TestBuildSessionListLayout_HidesCompleteSessions(t *testing.T) {
-	done := agent.NewSessionForTest("done", "merged-work")
-	done.SetLifecyclePhase(agent.LifecycleComplete)
-	live := agent.NewSessionForTest("live", "active-work")
-	items := listItems{
-		{kind: listItemRepo, repoPath: "/r", repoName: "repo"},
-		{kind: listItemSession, repoPath: "/r", session: done},
-		{kind: listItemSession, repoPath: "/r", session: live},
-	}
-	l := buildSessionListLayout(items)
-	if len(l.rows) != 1 {
-		t.Fatalf("rows = %d, want 1 (Complete session hidden)", len(l.rows))
-	}
-	if l.rows[0].session != live {
-		t.Error("surviving row should be the live session")
-	}
-}
-
 // --- cursor & scroll ----------------------------------------------------------
 
 func TestSessionListCursor_MoveAndClamp(t *testing.T) {
@@ -350,7 +332,7 @@ func newListApp(t *testing.T, sessions ...*agent.Session) App {
 	for _, s := range sessions {
 		items = append(items, listItem{kind: listItemSession, repoPath: "/r", session: s})
 	}
-	seedDashboardItems(&app, items)
+	seedSessionListItems(&app, items)
 	return app
 }
 
@@ -376,10 +358,9 @@ func TestSessionList_JKMovesFlatCursor(t *testing.T) {
 }
 
 func TestSessionList_EnterOpensTerminalForAnySession(t *testing.T) {
-	// Even a Shipping-phase session opens the terminal — the old per-phase
-	// dispatch (review panel / PR panel) is gone (§4.2).
+	// Every session opens the terminal — the old per-phase dispatch
+	// (review panel / PR panel) is gone (§4.2).
 	sess := agent.NewSessionForTest("s", "shipping-s")
-	sess.SetLifecyclePhase(agent.LifecycleShipping)
 	ag := sess.AddTestAgent("ag-1", false, agent.StatusIdle)
 	app := newListApp(t, sess)
 

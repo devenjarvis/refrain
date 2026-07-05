@@ -17,9 +17,9 @@ import (
 // compile-time assertion at the bottom of this file guarantees *agent.Manager
 // still satisfies the interface, so this seam never silently drifts.
 type SessionManager interface {
-	// Lifecycle / lookup
+	// Counters / lookup
 	AgentCount() int
-	ActiveSessionCount() int
+	SessionCount() int
 	RepoPath() string
 	ListSessions() []*agent.Session
 	GetSession(id string) *agent.Session

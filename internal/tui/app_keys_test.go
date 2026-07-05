@@ -14,13 +14,13 @@ import (
 // existing app_test.go suite did not yet cover.
 //
 // Most tests build the App synthetically (no claude subprocess) by seeding
-// pre-built sessions into a fakeManager via seedDashboardItems for the temp
+// pre-built sessions into a fakeManager via seedSessionListItems for the temp
 // repo dir. This keeps the suite fast and deterministic.
 
-// appWithSeededSession returns an App with a single test session at the given
-// lifecycle phase, plus the dir where the manager lives so the caller can
-// clean up via t.TempDir's automatic cleanup.
-func appWithSeededSession(t *testing.T, phase agent.LifecyclePhase) (App, *agent.Session, string) {
+// appWithSeededSession returns an App with a single test session, plus the
+// dir where the manager lives so the caller can clean up via t.TempDir's
+// automatic cleanup.
+func appWithSeededSession(t *testing.T) (App, *agent.Session, string) {
 	t.Helper()
 	dir := t.TempDir()
 	for _, args := range [][]string{
@@ -37,40 +37,25 @@ func appWithSeededSession(t *testing.T, phase agent.LifecyclePhase) (App, *agent
 		}
 	}
 	sess := agent.NewSessionForTest("s1", "session-1")
-	sess.SetLifecyclePhase(phase)
 
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.activeRepo = dir
-	seedDashboardItems(&app, []listItem{
+	seedSessionListItems(&app, []listItem{
 		{kind: listItemRepo, repoPath: dir, repoName: "repo"},
 		{kind: listItemSession, repoPath: dir, session: sess},
 	})
-	// Position cursor on the seeded session's section.
-	switch phase {
-	case agent.LifecyclePlanning, agent.LifecycleDrafting:
-		app.cursor.SetSection(focusSectionPlanning)
-		app.cursor.SetIndex(focusSectionPlanning, 0)
-	case agent.LifecycleInProgress:
-		app.cursor.SetSection(focusSectionBuilding)
-		app.cursor.SetIndex(focusSectionBuilding, 0)
-	case agent.LifecycleReadyForReview, agent.LifecycleInReview:
-		app.cursor.SetSection(focusSectionReview)
-		app.cursor.SetIndex(focusSectionReview, 0)
-	case agent.LifecycleShipping:
-		app.cursor.SetSection(focusSectionShipping)
-		app.cursor.SetIndex(focusSectionShipping, 0)
-	}
+	// Position the list cursor on the seeded session's row.
+	app.selectSessionRow(dir, sess.ID)
 	return app, sess, dir
 }
 
 // --- Pipeline keys -----------------------------------------------------------
 
 func TestPipeline_EKey_NoIDECommand_SetsError(t *testing.T) {
-	app, _, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	app, _, _ := appWithSeededSession(t)
 	// Resolved settings have empty IDECommand by default.
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
 	app = model.(App)
@@ -80,7 +65,7 @@ func TestPipeline_EKey_NoIDECommand_SetsError(t *testing.T) {
 }
 
 func TestPipeline_OKey_OpensBranchPicker(t *testing.T) {
-	app, _, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	app, _, _ := appWithSeededSession(t)
 	model, _ := app.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	app = model.(App)
 	if app.view != ViewBranchPicker {
@@ -95,8 +80,7 @@ func TestPipeline_ShiftX_NoSession_IsSilentNoOp(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 
 	model, cmd := app.Update(tea.KeyPressMsg{Code: 'X', Text: "X"})
 	app = model.(App)
@@ -112,8 +96,7 @@ func TestPipeline_QKey_NoAgents_QuitsImmediately(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 
 	_, cmd := app.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if cmd == nil {
@@ -126,7 +109,7 @@ func TestPipeline_QKey_NoAgents_QuitsImmediately(t *testing.T) {
 }
 
 func TestPipeline_QKey_WithRunningAgents_FirstPressArmsConfirm(t *testing.T) {
-	app, sess, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	app, sess, _ := appWithSeededSession(t)
 	// Seed an active test agent so AgentCount > 0.
 	sess.AddTestAgent("a1", false, agent.StatusActive)
 	mgr := app.managers[app.activeRepo]
@@ -152,8 +135,7 @@ func TestPipeline_CtrlC_SameAsQ(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 
 	_, cmd := app.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
@@ -165,7 +147,7 @@ func TestPipeline_CtrlC_SameAsQ(t *testing.T) {
 }
 
 func TestPipeline_UnknownKey_NoOp(t *testing.T) {
-	app, _, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	app, _, _ := appWithSeededSession(t)
 	before := struct {
 		view     ViewMode
 		panel    panelFocus
@@ -205,7 +187,7 @@ func TestPipeline_UnknownKey_NoOp(t *testing.T) {
 // Tests using this fixture do not spawn a real claude subprocess.
 func appInFocusLaunch(t *testing.T) (App, *agent.Session, *agent.Agent) {
 	t.Helper()
-	app, sess, repoPath := appWithSeededSession(t, agent.LifecycleInProgress)
+	app, sess, repoPath := appWithSeededSession(t)
 	ag := sess.AddTestAgent("primary", false, agent.StatusIdle)
 	app.openLaunchPanel(sess, ag, repoPath)
 	return app, sess, ag
@@ -215,7 +197,7 @@ func TestFocusLaunch_NilAgent_RoutesBackToList(t *testing.T) {
 	// Pinned: updateFocusLaunchKeys returns to focusList when LaunchAgent() is
 	// nil. Guards against an accidental nil-check removal that would crash
 	// on any subsequent key.
-	app, _, _ := appWithSeededSession(t, agent.LifecycleInProgress)
+	app, _, _ := appWithSeededSession(t)
 	// Force panelFocus into focusLaunch with no agent by reaching into Modals
 	// directly — production code can't construct this state, but the guard at
 	// the top of updateFocusLaunchKeys must still handle it.

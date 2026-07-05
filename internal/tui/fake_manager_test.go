@@ -65,13 +65,9 @@ func (f *fakeManager) AgentCount() int {
 	return n
 }
 
-func (f *fakeManager) ActiveSessionCount() int {
+func (f *fakeManager) SessionCount() int {
 	count := 0
 	for _, s := range f.sessions {
-		switch s.LifecyclePhase() {
-		case agent.LifecycleShipping, agent.LifecycleComplete:
-			continue
-		}
 		if s.LiveAgentCount() == 0 {
 			continue
 		}

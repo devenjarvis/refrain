@@ -157,7 +157,7 @@ go func() { a.session.merged = client.MergePR(id) == nil }()
 - **One domain-state struct is the source of truth** for sessions, config, and caches. Components read from it; transient UI state (cursor, focus, scroll position, in-progress form input) lives on the component.
 - **No duplicated/mirror fields** (see §5). The owner is whoever's lifecycle the data follows. If you're tempted to copy a field "so the renderer can see it," expose a method instead.
 - **Derive, don't store**, when the derivation is cheap and the inputs are already in the model. Store a derived value only when (a) it's expensive and (b) you update it in the same `Update` that changes its inputs.
-- Cursor/focus state has **one** owner (the component that navigates) and a single enum/index — don't track the same cursor in two places (the `focusCursorSection` + per-section index pattern is the model: one section enum, helpers for clamp/hit-test, no parallel bookkeeping).
+- Cursor/focus state has **one** owner (the component that navigates) and a single enum/index — don't track the same cursor in two places (the session list's single flat row index is the model: one cursor int on `sessionListModel`, layout helpers for clamp/hit-test, no parallel bookkeeping).
 
 ---
 

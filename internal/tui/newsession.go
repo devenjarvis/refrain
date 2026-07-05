@@ -97,7 +97,6 @@ const (
 )
 
 // newSessionModel is the full-viewport new-session composition screen.
-// It replaces the old centered overlay modal when PlanFirstEnabled is on.
 type newSessionModel struct {
 	active         bool
 	textarea       textarea.Model

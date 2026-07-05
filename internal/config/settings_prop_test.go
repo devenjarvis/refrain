@@ -23,11 +23,6 @@ func TestResolve_DefaultsProperty(t *testing.T) {
 		{"WorktreeDir", r.WorktreeDir, config.DefaultWorktreeDir},
 		{"SidebarWidth", r.SidebarWidth, config.DefaultSidebarWidth},
 		{"MergeMethod", r.MergeMethod, config.DefaultMergeMethod},
-		{"FocusSessionMinutes", r.FocusSessionMinutes, config.DefaultFocusSessionMinutes},
-		{"FocusBreakMinutes", r.FocusBreakMinutes, config.DefaultFocusBreakMinutes},
-		{"MaxConcurrentSessions", r.MaxConcurrentSessions, config.DefaultMaxConcurrentSessions},
-		{"MaxReviewBacklog", r.MaxReviewBacklog, config.DefaultMaxReviewBacklog},
-		{"PlanFirstEnabled", r.PlanFirstEnabled, config.DefaultPlanFirstEnabled},
 		{"PRDraftByDefault", r.PRDraftByDefault, config.DefaultPRDraftByDefault},
 		{"AutoOpenPRInBrowser", r.AutoOpenPRInBrowser, config.DefaultAutoOpenPRInBrowser},
 	}
@@ -77,9 +72,6 @@ func TestResolve_RepoOverridesGlobal_Property(t *testing.T) {
 		}
 		if repo.WorktreeDir != nil && r.WorktreeDir != *repo.WorktreeDir {
 			t.Fatalf("WorktreeDir: repo=%q resolved=%q", *repo.WorktreeDir, r.WorktreeDir)
-		}
-		if repo.PlanFirstEnabled != nil && r.PlanFirstEnabled != *repo.PlanFirstEnabled {
-			t.Fatalf("PlanFirstEnabled: repo=%v resolved=%v", *repo.PlanFirstEnabled, r.PlanFirstEnabled)
 		}
 		if repo.BuildFromPlanPrompt != nil && r.BuildFromPlanPrompt != *repo.BuildFromPlanPrompt {
 			t.Fatalf("BuildFromPlanPrompt: repo=%q resolved=%q", *repo.BuildFromPlanPrompt, r.BuildFromPlanPrompt)

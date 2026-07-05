@@ -463,10 +463,7 @@ func (a *App) approvePlanAndSpawn(msg planEditorApproveMsg) (tea.Model, tea.Cmd)
 		if err != nil {
 			return createResultMsg{err: err}
 		}
-		// isNewSession=true: from the wellness counter's perspective, an
-		// approved plan is when a session "starts" — submitPromptModal
-		// deliberately doesn't increment on plan creation, since the user
-		// could still abandon it before approving.
+		// isNewSession=true: an approved plan is when a session "starts".
 		return createResultMsg{sessionID: sessID, agentID: ag.ID, isNewSession: true, skipFocusLaunch: true}
 	}
 }

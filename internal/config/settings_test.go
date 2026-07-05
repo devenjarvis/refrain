@@ -464,83 +464,52 @@ func TestClampSidebarWidth(t *testing.T) {
 	}
 }
 
-// ---- Wellness defaults ----
+// ---- Legacy removed keys ----
 
-func TestResolve_WellnessDefaults(t *testing.T) {
+func TestResolve_LegacyRemovedKeysSilentlyIgnored(t *testing.T) {
+	// Settings files written before the rollback carry keys for removed
+	// features (wellness timers, session caps, plan-first gating). They must
+	// deserialize cleanly, leaving live fields intact (rollback design §6).
+	data := []byte(`{
+		"audio_enabled": false,
+		"focus_session_minutes": 60,
+		"focus_break_minutes": 10,
+		"max_concurrent_sessions": 5,
+		"max_review_backlog": 2,
+		"plan_first_enabled": false
+	}`)
+	var s config.GlobalSettings
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if s.AudioEnabled == nil || *s.AudioEnabled {
+		t.Error("AudioEnabled should be set to false")
+	}
+}
+
+func TestRepoSettings_LegacyPlanFirstKeyIgnored(t *testing.T) {
+	data := []byte(`{"plan_first_enabled": true, "agent_program": "claude"}`)
+	var s config.RepoSettings
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if s.AgentProgram == nil || *s.AgentProgram != "claude" {
+		t.Error("AgentProgram should survive alongside a legacy key")
+	}
+}
+
+func TestResolve_BuildFromPlanPrompt_Default(t *testing.T) {
 	r := config.Resolve(nil, nil)
-
-	if r.FocusSessionMinutes != config.DefaultFocusSessionMinutes {
-		t.Errorf("FocusSessionMinutes = %d, want %d", r.FocusSessionMinutes, config.DefaultFocusSessionMinutes)
-	}
-	if r.MaxConcurrentSessions != config.DefaultMaxConcurrentSessions {
-		t.Errorf("MaxConcurrentSessions = %d, want %d", r.MaxConcurrentSessions, config.DefaultMaxConcurrentSessions)
-	}
-}
-
-func TestResolve_WellnessGlobalOverride(t *testing.T) {
-	minutes := 60
-	maxSessions := 5
-	g := &config.GlobalSettings{
-		FocusSessionMinutes:   &minutes,
-		MaxConcurrentSessions: &maxSessions,
-	}
-	r := config.Resolve(g, nil)
-
-	if r.FocusSessionMinutes != 60 {
-		t.Errorf("FocusSessionMinutes = %d, want 60", r.FocusSessionMinutes)
-	}
-	if r.MaxConcurrentSessions != 5 {
-		t.Errorf("MaxConcurrentSessions = %d, want 5", r.MaxConcurrentSessions)
-	}
-}
-
-func TestResolve_WellnessNotInRepoSettings(t *testing.T) {
-	// Wellness fields are global-only; repo settings should not override them.
-	g := &config.GlobalSettings{
-		FocusSessionMinutes: intPtr(45),
-	}
-	// RepoSettings has no wellness fields by design.
-	r := config.Resolve(g, &config.RepoSettings{})
-	if r.FocusSessionMinutes != 45 {
-		t.Errorf("FocusSessionMinutes = %d, want 45 (from global)", r.FocusSessionMinutes)
-	}
-}
-
-func TestMaxReviewBacklog_Default(t *testing.T) {
-	resolved := config.Resolve(nil, nil)
-	if resolved.MaxReviewBacklog != config.DefaultMaxReviewBacklog {
-		t.Errorf("MaxReviewBacklog default = %d, want %d", resolved.MaxReviewBacklog, config.DefaultMaxReviewBacklog)
-	}
-}
-
-func TestMaxReviewBacklog_GlobalOverride(t *testing.T) {
-	two := 2
-	global := &config.GlobalSettings{MaxReviewBacklog: &two}
-	resolved := config.Resolve(global, nil)
-	if resolved.MaxReviewBacklog != 2 {
-		t.Errorf("MaxReviewBacklog = %d, want 2", resolved.MaxReviewBacklog)
-	}
-}
-
-func TestResolve_PlanFirst_Defaults(t *testing.T) {
-	r := config.Resolve(nil, nil)
-	if r.PlanFirstEnabled != config.DefaultPlanFirstEnabled {
-		t.Errorf("PlanFirstEnabled = %v, want %v", r.PlanFirstEnabled, config.DefaultPlanFirstEnabled)
-	}
 	if r.BuildFromPlanPrompt != config.DefaultBuildFromPlanPrompt {
 		t.Errorf("BuildFromPlanPrompt = %q, want default", r.BuildFromPlanPrompt)
 	}
 }
 
-func TestResolve_PlanFirst_GlobalOverride(t *testing.T) {
+func TestResolve_BuildFromPlanPrompt_GlobalOverride(t *testing.T) {
 	g := &config.GlobalSettings{
-		PlanFirstEnabled:    boolPtr(true),
 		BuildFromPlanPrompt: strPtr("custom plan prompt"),
 	}
 	r := config.Resolve(g, nil)
-	if !r.PlanFirstEnabled {
-		t.Error("PlanFirstEnabled should be true")
-	}
 	if r.BuildFromPlanPrompt != "custom plan prompt" {
 		t.Errorf("BuildFromPlanPrompt = %q, want %q", r.BuildFromPlanPrompt, "custom plan prompt")
 	}
@@ -604,19 +573,14 @@ func TestGlobalSettings_Models_OmitsNilFields(t *testing.T) {
 	}
 }
 
-func TestResolve_PlanFirst_RepoOverridesGlobal(t *testing.T) {
+func TestResolve_BuildFromPlanPrompt_RepoOverridesGlobal(t *testing.T) {
 	g := &config.GlobalSettings{
-		PlanFirstEnabled:    boolPtr(true),
 		BuildFromPlanPrompt: strPtr("global"),
 	}
 	repo := &config.RepoSettings{
-		PlanFirstEnabled:    boolPtr(false),
 		BuildFromPlanPrompt: strPtr("repo"),
 	}
 	r := config.Resolve(g, repo)
-	if r.PlanFirstEnabled {
-		t.Error("PlanFirstEnabled should be false (repo override)")
-	}
 	if r.BuildFromPlanPrompt != "repo" {
 		t.Errorf("BuildFromPlanPrompt = %q, want repo", r.BuildFromPlanPrompt)
 	}

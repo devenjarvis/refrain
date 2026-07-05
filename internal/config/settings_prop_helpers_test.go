@@ -55,26 +55,6 @@ func genGlobalSettings(t *rapid.T) *config.GlobalSettings {
 		v := rapid.IntRange(-100, 200).Draw(t, "g_sidebar_width_val")
 		g.SidebarWidth = &v
 	}
-	if rapid.Bool().Draw(t, "g_focus_session") {
-		v := rapid.IntRange(-5, 200).Draw(t, "g_focus_session_val")
-		g.FocusSessionMinutes = &v
-	}
-	if rapid.Bool().Draw(t, "g_focus_break") {
-		v := rapid.IntRange(-5, 60).Draw(t, "g_focus_break_val")
-		g.FocusBreakMinutes = &v
-	}
-	if rapid.Bool().Draw(t, "g_max_sessions") {
-		v := rapid.IntRange(-5, 20).Draw(t, "g_max_sessions_val")
-		g.MaxConcurrentSessions = &v
-	}
-	if rapid.Bool().Draw(t, "g_max_review") {
-		v := rapid.IntRange(-5, 20).Draw(t, "g_max_review_val")
-		g.MaxReviewBacklog = &v
-	}
-	if rapid.Bool().Draw(t, "g_plan_first") {
-		v := rapid.Bool().Draw(t, "g_plan_first_val")
-		g.PlanFirstEnabled = &v
-	}
 	if rapid.Bool().Draw(t, "g_build_prompt") {
 		v := rapid.String().Draw(t, "g_build_prompt_val")
 		g.BuildFromPlanPrompt = &v
@@ -141,10 +121,6 @@ func genRepoSettings(t *rapid.T) *config.RepoSettings {
 	if rapid.Bool().Draw(t, "r_worktree_dir") {
 		v := rapid.String().Draw(t, "r_worktree_dir_val")
 		r.WorktreeDir = &v
-	}
-	if rapid.Bool().Draw(t, "r_plan_first") {
-		v := rapid.Bool().Draw(t, "r_plan_first_val")
-		r.PlanFirstEnabled = &v
 	}
 	if rapid.Bool().Draw(t, "r_build_prompt") {
 		v := rapid.String().Draw(t, "r_build_prompt_val")

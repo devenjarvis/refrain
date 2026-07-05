@@ -19,8 +19,7 @@ func TestRepoChecks_RoundTrip_FormToEditorToDisk(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir, Name: "myrepo"}}}
 	app.activeRepo = dir
 	app.repoSettings[dir] = &config.RepoSettings{}
@@ -113,8 +112,7 @@ func TestRepoChecks_CancelDiscardsPending(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir, Name: "r"}}}
 	app.activeRepo = dir
 	app.repoSettings[dir] = &config.RepoSettings{
@@ -156,8 +154,7 @@ func TestRepoChecks_BlankEntryFilteredOnFormSave(t *testing.T) {
 	app := NewApp()
 	app.width = 120
 	app.height = 40
-	app.dashboard.width = 120
-	app.dashboard.height = 39
+	app.sessionList.SetSize(120, 39)
 	app.cfg = &config.Config{Repos: []config.Repo{{Path: dir, Name: "r"}}}
 	app.activeRepo = dir
 	app.repoSettings[dir] = &config.RepoSettings{}

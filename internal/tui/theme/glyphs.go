@@ -25,7 +25,6 @@ const (
 
 	// ── Navigation / chrome ────────────────────────────────────────────────
 
-	GlyphBranch       = "⎇" // git branch label
 	GlyphStripe       = "▎" // session-card status stripe
 	GlyphCursor       = "▍" // selected-row cursor bar
 	GlyphCaret        = "›" // inline list cursor

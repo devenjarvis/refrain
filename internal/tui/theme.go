@@ -30,11 +30,6 @@ var (
 	ColorBg            = theme.ColorBg
 	ColorSurfaceRaised = theme.ColorSurfaceRaised
 	ColorHairline      = theme.ColorHairline
-	ColorBuilding      = theme.ColorBuilding
-	ColorReviewing     = theme.ColorReviewing
-	ColorShipping      = theme.ColorShipping
-	ColorBreakTitle    = theme.ColorBreakTitle
-	ColorBreakAccent   = theme.ColorBreakAccent
 )
 
 // Composed styles. These are tui-presentation compositions built from the
@@ -69,7 +64,7 @@ var (
 
 	// Section headings: bold accent text titling a panel/section (REVIEW,
 	// CHECKS, SHIPPING…). Override the foreground inline for non-primary
-	// sections, e.g. StyleHeading.Foreground(ColorShipping).
+	// sections, e.g. StyleHeading.Foreground(ColorSuccess).
 	StyleHeading = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorPrimary)

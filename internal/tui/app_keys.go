@@ -162,6 +162,5 @@ func (a App) handleQuitKey(msg tea.KeyPressMsg) (App, tea.Cmd, bool) {
 	if a.audioPlayer != nil {
 		a.audioPlayer.Close()
 	}
-	a.writeWellnessLog()
 	return a, tea.Quit, true
 }

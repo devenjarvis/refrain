@@ -1,8 +1,8 @@
 # Refrain
 
-A terminal-native dashboard for running [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agents in parallel — designed around how many agents a human can actually oversee, not how many you can launch.
+A terminal-native agent development environment (ADE) for [Claude Code](https://docs.anthropic.com/en/docs/claude-code): a raw Claude experience at the center, with parallel worktree sessions, plan drafting, code review, and PR shipping available as actions you invoke — not phases you are marched through.
 
-> **Alpha software — v0.1.0 shipped.** The core loop is working and stabilizing, but rough edges remain. APIs, config schema, and keybindings may change between versions. Git operations are conservative — Refrain only writes to `refrain/*` branches inside `.refrain/worktrees/` and uses `git merge --no-ff` with explicit confirmation — but keep your work committed and file issues when things break.
+> **Alpha software — v0.1.0 shipped.** The core loop is working and stabilizing, but rough edges remain. APIs, config schema, and keybindings may change between versions. Git operations are conservative — worktree sessions only write to `refrain/*` branches inside `.refrain/worktrees/` — but keep your work committed and file issues when things break.
 
 ## Install
 
@@ -47,18 +47,12 @@ refrain doctor
 
 ## Why Refrain?
 
-Most parallel-agent tools optimize for throughput — how many agents you can run at once. Refrain optimizes for the human running them. The whole product is built around a single, opinionated workflow: **one primary goal, up to three agents, a defined review point, and a 90-minute block.**
+A developer's day with Claude is more than shipping feature branches: debugging in a half-broken checkout, exploring an unfamiliar codebase, drafting a ticket, reviewing someone else's PR, or just talking through a problem. Refrain gives all of that one calm home — a session list — and keeps the two things that make parallel agent work sustainable:
 
-That opinion is grounded in evidence. BCG's 2026 study (n=1,488) found developers managing more than ~3 concurrent agents made 39% more errors and reported 33% more decision fatigue. METR's 2025 RCT measured a 19% productivity *slowdown* among experienced developers using AI tools, driven almost entirely by verification overhead. And every unnecessary context switch costs ~9.5 minutes of recovery time. The instinct to spawn another agent is almost always right; the instinct to monitor all of them simultaneously is what drains the day.
+- **Isolated worktrees by default.** Coding sessions get their own git worktree on a `refrain/*` branch, so agents never collide with each other or with your checkout. When you *want* Claude in your real working tree — debugging your half-broken state — a **checkout session** runs there instead, clearly tagged so you always know an agent is loose in your tree.
+- **Attention by signal, not by streaming.** The unix-socket hook pipeline classifies every agent as idle / active / waiting / done / error, and the list surfaces persistent state changes (waiting for input, errored, done) rather than a firehose of output. Batch review — check in when something needs you — is the workflow, and the signal budget is deliberately spent sparingly: rows never reorder themselves, chimes fire only for blocked agents, and running-normally is silent.
 
-Refrain turns that into a workflow:
-
-- **One pipeline, one cursor.** A four-section dashboard — PLANNING → BUILDING → REVIEWING → SHIPPING — replaces tmux pane-juggling and tab-switching. `j`/`k` walk every section; everything else acts on whatever the cursor is on.
-- **Isolated git worktrees per session.** Each agent works on `refrain/<name>` under `.refrain/worktrees/`. Branches are conservative, merges are explicit (`git merge --no-ff` with confirmation), and your main checkout is never touched.
-- **Batch review, not continuous monitoring.** Hook-driven status (idle / active / waiting / done / error) means Refrain tells you when an agent needs you. You don't watch streams — you check in when there's something to check.
-- **Wellness baked in, not bolted on.** A soft 3-agent cap, an automatic break overlay at 90 minutes, suppressed chimes for routine state changes, and a `.refrain/logs/wellness.log` of every block. These aren't toggles — they're the product.
-
-If you want to run 8 agents for 4 hours straight, Refrain is the wrong tool. If you want to actually finish three things in a focused block and ship them, keep reading.
+On top of that substrate, the heavier machinery is à-la-carte: `P` drafts an eight-section implementation plan with a read-only planning subprocess, `r` opens a task-card review ledger with per-task diffs and AI verdicts, `p` composes and tracks a PR through CI, review threads, and merge. Use all of it, some of it, or none of it — a blank REPL session is one keypress.
 
 ## Quick Start
 
@@ -68,43 +62,70 @@ refrain                         # inside any git repo
 
 The first run registers the repo and adds `.refrain/` to `.gitignore`. From there:
 
-1. `n` — create a session. It lands in PLANNING; the cursor jumps to it and opens its terminal so you can scope the work with Claude.
-2. `b` — promote the planning session to BUILDING when you've nailed down what to do.
-3. `esc` — return to the pipeline. Claude keeps running.
-4. `m` — mark a building session ready when Claude finishes its turn (it moves to REVIEWING).
-5. `r` — open the review panel; press `p` there to ship a PR (the session moves to SHIPPING).
-6. `⏎` on a SHIPPING row — open the shipping panel: see CI check results and review threads, then `m` to merge (squash by default), `r` to address feedback with a new agent, or `p` to open the PR in the browser. Worktree is cleaned up automatically on merge.
-
-No tmux. No tab-switching. One cursor.
+1. `n` — open the new-session screen. Type a task (or nothing, for a blank Claude REPL) and press `⏎`. The session spawns in a fresh worktree and opens its terminal.
+   - Choose **Context: Current checkout** in the form to run in your real working tree instead (one checkout session per repo).
+   - Press `ctrl+p` instead of `⏎` to draft a plan first — a read-only Sonnet subprocess writes `.claude/plan.md`, you review/edit it in the plan editor, and approving spawns the build agent.
+2. `esc` — return to the session list. Claude keeps running; the row's status glyph tells you when it needs you.
+3. `r` — review any session with commits or uncommitted changes: task cards (from the plan, per-commit, or per-file), per-card diffs, AI verdicts, and a rework loop that spawns a feedback agent.
+4. `p` — push and compose a PR, or open the PR panel once one exists: CI checks, review threads, merge (`m`), or spawn an agent to address feedback (`r`).
+5. When a PR merges, the row shows a `merged` badge — press `X` to clean the session up. Nothing disappears on its own.
 
 ## Keybindings
 
-**Pipeline view** (the dashboard — the only top-level view):
+**Session list** (the home screen):
 
-| Key              | Action                                                                   |
-|------------------|--------------------------------------------------------------------------|
-| `j` / `k`        | Move the cursor across all four pipeline sections                        |
-| `⏎` / `space`    | Open the cursor-selected row (terminal, review panel, or shipping panel) |
-| `n`              | Create a new session (lands in PLANNING)                                 |
-| `N`              | Cycle to the next registered repo                                        |
-| `b`              | On a PLANNING row: advance to BUILDING. Anywhere else: take a break      |
-| `m`              | Mark the cursor-selected BUILDING row ready for review                   |
-| `r`              | Open the review panel for the cursor-selected REVIEWING row              |
-| `c`              | Add another agent to the cursor-selected session                         |
-| `t`              | Open or focus a shell in the cursor-selected session                     |
-| `d`              | Diff the cursor-selected session's worktree                              |
-| `e`              | Open the worktree in the configured IDE                                  |
-| `p`              | Open the session's PR in the browser                                     |
-| `o`              | Create a session on an existing branch or PR                             |
-| `a`              | Add a repo (file browser)                                                |
-| `s`              | Global settings                                                          |
-| `x`              | Kill the cursor-selected session's primary agent                         |
-| `X`              | Kill the entire cursor-selected session                                  |
-| `q`              | Detach and exit (prompts if agents are running)                          |
+| Key              | Action                                                          |
+|------------------|-----------------------------------------------------------------|
+| `j` / `k`        | Move the cursor through the list                                |
+| `⏎` / `space`    | Open the session's fullscreen agent terminal                    |
+| `n`              | New session (worktree or checkout; raw, blank, or plan-first)   |
+| `N`              | Cycle to the next registered repo                               |
+| `P`              | Plan: draft one if none exists, else open the plan editor       |
+| `r`              | Open the review panel                                           |
+| `p`              | PR: compose one if none exists, else open the PR panel          |
+| `c`              | Add another agent to the cursor-selected session                |
+| `t`              | Open or focus a shell in the cursor-selected session            |
+| `d`              | Diff the cursor-selected session's worktree                     |
+| `e`              | Open the worktree in the configured IDE                         |
+| `o`              | Create a session on an existing branch or PR                    |
+| `R`              | Manage registered repos                                         |
+| `a`              | Add a repo (file browser)                                       |
+| `s`              | Global settings                                                 |
+| `x`              | Kill the cursor-selected session's primary agent                |
+| `X`              | Kill the entire cursor-selected session                         |
+| `q`              | Detach and exit (prompts if agents are running)                 |
 
-Mouse: single-click on a session card moves the cursor; double-click activates (agent terminal for PLANNING / BUILDING, review panel for REVIEWING, shipping panel for SHIPPING). Clicking the PR indicator on a REVIEWING or SHIPPING row opens the PR in the browser.
+Mouse: single-click on a session card moves the cursor; double-click opens the terminal. Clicking a row's PR indicator opens the PR in the browser.
 
-**Shipping panel** (opened by pressing `⏎` on a SHIPPING row, `esc` returns):
+**New-session screen** (`n`):
+
+| Key        | Action                                                        |
+|------------|---------------------------------------------------------------|
+| `⏎`        | Start the session (empty prompt = blank Claude REPL)          |
+| `ctrl+p`   | Draft a plan first, then review it before building            |
+| `tab`      | Move to the Context / overrides form (worktree vs. checkout)  |
+| `ctrl+j`   | Insert a newline in the prompt                                |
+| `esc`      | Cancel                                                        |
+
+**Review panel** (`r`):
+
+| Key             | Action                                                    |
+|-----------------|-----------------------------------------------------------|
+| `j` / `k`       | Move the task-card cursor                                 |
+| `⏎`             | Maximize the selected card's diff                         |
+| `s`             | Toggle side-by-side diff                                  |
+| `[` / `]`       | Cycle files within a multi-file card                      |
+| `f`             | Flag the card for rework                                  |
+| `b`             | Rework: spawn a feedback agent from flagged cards         |
+| `m`             | Approve: mark the session done and tear it down           |
+| `d`             | Defer: close the panel, come back later                   |
+| `p`             | Ship: open the PR, or push + compose one                  |
+| `r`             | Rerun validation checks                                   |
+| `?`             | Spec overlay (plan-backed sessions only)                  |
+| `e` / `t`       | Open IDE / agent terminal                                 |
+| `esc`           | Back to the list                                          |
+
+**PR panel** (`p` on a session with a PR, `esc` returns):
 
 | Key  | Action                                                                             |
 |------|------------------------------------------------------------------------------------|
@@ -113,13 +134,13 @@ Mouse: single-click on a session card moves the cursor; double-click activates (
 | `r`  | Address feedback: synthesize prompt from failing checks + review comments, spawn agent |
 | `p`  | Open the PR in the browser                                                         |
 | `t`  | Open the session's agent terminal                                                  |
-| `esc`| Return to the pipeline                                                             |
+| `esc`| Return to the session list                                                         |
 
 **Agent terminal** (opened by pressing `⏎` on a session, `esc` returns):
 
 | Key              | Action                                          |
 |------------------|-------------------------------------------------|
-| `esc`            | Return to the pipeline                          |
+| `esc`            | Return to the session list                      |
 | `shift+esc`      | Send ESC to the agent (e.g. Claude interrupt)   |
 | `alt+[` / `alt+]`| Switch between agents in the same session       |
 | `ctrl+t`         | Add a shell to this session                     |
@@ -137,7 +158,7 @@ Mouse: single-click on a session card moves the cursor; double-click activates (
 | `j` / `k` | Navigate files    |
 | `⏎`       | Open file detail  |
 | `g` / `G` | Top / bottom      |
-| `q`       | Back to dashboard |
+| `q`       | Back to the list  |
 
 **Diff detail:**
 
@@ -146,11 +167,16 @@ Mouse: single-click on a session card moves the cursor; double-click activates (
 | `j` / `k` | Scroll            |
 | `d` / `u` | Page down / up    |
 | `esc`     | Back to summary   |
-| `q`       | Back to dashboard |
+| `q`       | Back to the list  |
+
+## Session kinds
+
+- **Worktree sessions (default)** get an isolated git worktree at `.refrain/worktrees/<name>` on a `refrain/*` branch. This is what makes running several coding agents in parallel safe.
+- **Checkout sessions** run in the repo's main working tree, on your current branch — for debugging, exploration, and everyday tasks that need to see your real state. One per repo; the row carries a distinct `checkout @ <branch>` tag and accent so it's always obvious an agent is working in your tree. Killing a checkout session kills its agents only — the tree is never cleaned up.
 
 ## Branch naming
 
-New sessions start on a random adjective-noun branch (e.g. `refrain/warm-ibis`) so Claude can launch immediately. On the first real `user-prompt-submit`, the branch is renamed in place — `git branch -m` atomically updates the worktree's HEAD symref — to a slug of the prompt, e.g. `refrain/add-dark-mode-to-dashboard`. Slash commands (`/clear`, `/help`) are skipped, so the next real prompt still triggers the rename. Sessions started on an existing branch (`o`) keep that branch as-is.
+New worktree sessions start on a random adjective-noun branch (e.g. `refrain/warm-ibis`) so Claude can launch immediately. On the first real `user-prompt-submit`, the branch is renamed in place — `git branch -m` atomically updates the worktree's HEAD symref — to a slug of the prompt, e.g. `refrain/add-dark-mode-to-dashboard`. Slash commands (`/clear`, `/help`) are skipped, so the next real prompt still triggers the rename. Sessions started on an existing branch (`o`) and checkout sessions keep their branch as-is.
 
 The prefix is configurable via `BranchPrefix` in global or per-repo settings, and supports two template variables:
 
@@ -159,27 +185,17 @@ The prefix is configurable via `BranchPrefix` in global or per-repo settings, an
 
 Unknown `{tokens}` are left literal. Example: `BranchPrefix: "{user}/"` produces `dj/add-dark-mode` after the first-prompt rename.
 
-## Wellness controls
-
-The dashboard surfaces three wellness affordances tuned to keep parallel-agent work sustainable:
-
-- **Session timer** (`focus_session_minutes`, default `90`) — when the configured block elapses, Refrain automatically opens a centered break overlay with a coherent-breathing animation.
-- **Soft session limit** (`max_concurrent_sessions`, default `3`) — pressing `n` past the cap shows a one-key warning; pressing `n` a second time overrides and spawns anyway. Only active sessions (excluding Shipping and Complete phases) count toward the limit.
-- **Soft review backlog** (`max_review_backlog`, default `5`) — same two-press override pattern when the REVIEWING section has too many sessions waiting.
-
-Every block (work + break) is appended to `.refrain/logs/wellness.log` so you can audit your own pacing later.
-
 ## How It Works
 
-When you create a session, Refrain:
+When you create a worktree session, Refrain:
 
-1. Creates an isolated git worktree at `.refrain/worktrees/<name>` on branch `refrain/<name>`.
+1. Creates an isolated git worktree at `.refrain/worktrees/<name>` on branch `refrain/<name>` (checkout sessions skip this and run in the repo itself).
 2. Writes a settings file wiring Claude Code's hooks (`session-start`, `stop`, `notification`, `user-prompt-submit`, `session-end`) to `refrain hook <event>` and points Claude at it with `claude --settings`.
 3. Spawns `claude "<task>"` in a PTY inside the worktree.
-4. Feeds PTY output through a virtual terminal emulator ([charmbracelet/x/vt](https://github.com/charmbracelet/x/vt)) and renders it in the dashboard via [Bubble Tea v2](https://github.com/charmbracelet/bubbletea).
+4. Feeds PTY output through a virtual terminal emulator ([charmbracelet/x/vt](https://github.com/charmbracelet/x/vt)) and renders it via [Bubble Tea v2](https://github.com/charmbracelet/bubbletea).
 5. Listens on a per-process unix socket for hook events so the TUI can distinguish idle / active / waiting / done states without screen-scraping.
 
-When you merge, Refrain runs `git merge --no-ff` from the worktree branch into the session's base branch and cleans up the worktree.
+`q` detaches — sessions and worktrees persist, and the next `refrain` invocation reattaches to them via `claude --resume`.
 
 ## What's Coming
 
@@ -208,11 +224,11 @@ go test -tags e2e -timeout 300s -v ./internal/e2e/
 
 Every PR should drop a fragment under `changelog.d/` (e.g. `changelog.d/fix-login-redirect.md`) using `### Added` / `### Fixed` / `### Changed` / `### Removed` headers — the release script assembles `CHANGELOG.md` from those when a version is cut.
 
-For architecture, internal package layout, and the design philosophy behind the dashboard, see [`CLAUDE.md`](./CLAUDE.md).
+For architecture, internal package layout, and the design philosophy behind the session list, see [`CLAUDE.md`](./CLAUDE.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). Bug reports and focused PRs are welcome; because Refrain is a single-maintainer alpha, larger feature proposals should start as an issue. Proposals that increase raw parallel-agent throughput at the cost of monitoring burden are unlikely to land — see the design philosophy in [CLAUDE.md](./CLAUDE.md).
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Bug reports and focused PRs are welcome; because Refrain is a single-maintainer alpha, larger feature proposals should start as an issue. Proposals that flood the session list with continuously-firing status indicators are unlikely to land — see the design philosophy in [CLAUDE.md](./CLAUDE.md).
 
 ## Security
 
