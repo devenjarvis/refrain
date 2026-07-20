@@ -54,7 +54,7 @@ jobs:
         run: git fetch origin ${{ github.base_ref }}
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -169,7 +169,7 @@ jobs:
         run: git fetch origin ${{ github.base_ref }}
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
